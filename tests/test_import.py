@@ -348,3 +348,28 @@ def test_read_checks_origin_and_input(client):
 def test_the_slow_way_still_works_without_javascript(client):
     page = client.get("/onedrive/import/1?sync=1").data.decode()
     assert page.count('name="include_') == 3 and "<progress" not in page
+
+
+# ---- invoices that offer several amounts (6 or 12 months): the Settings choice ----------
+
+OPTIONS = "Total Due          $301.00                  $590.00\n"
+
+
+def test_the_options_choice_applies_to_the_import_preview(client, admin, monkeypatch):
+    monkeypatch.setitem(TEXT, b"%PDF-scan", OPTIONS)
+    pick = lambda: client.get("/onedrive/import/1?sync=1").data.decode()
+    assert 'value="590.00"' in pick()                                      # default: the largest
+    admin.execute("UPDATE expenses.setting SET multi_amount = 'min'")
+    assert 'value="301.00"' in pick() and 'value="590.00"' not in pick()
+    admin.execute("UPDATE expenses.setting SET multi_amount = 'blank'")
+    assert 'value="590.00"' not in pick() and 'value="301.00"' not in pick()
+
+
+def test_the_options_choice_applies_to_the_add_page_prefill(client, admin, monkeypatch):
+    import io
+    monkeypatch.setitem(TEXT, b"%PDF-scan", OPTIONS)
+    send = lambda: client.post("/api/prefill", headers=ORIGIN, data={
+        "invoice_file": (io.BytesIO(b"%PDF-scan"), "x.pdf", "application/pdf")}).get_json()["amount"]
+    assert send() == "590.00"
+    admin.execute("UPDATE expenses.setting SET multi_amount = 'min'")
+    assert send() == "301.00"
