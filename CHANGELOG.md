@@ -5,7 +5,7 @@ steps are in [RELEASING.md](RELEASING.md). Newest first.
 
 Each entry says what an installer must do to upgrade. Where nothing is said, pull the new image.
 
-## Unreleased
+## 0.4.0-rc1 - 2026-11-15
 
 **The project is now called GarageBooks** (it was teslamate-expenses). TeslaMate's trademark policy reserves
 the TeslaMate name for tools that use only its MQTT interface, and this app reads the database, so it takes its
