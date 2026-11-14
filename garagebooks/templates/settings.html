@@ -11,7 +11,7 @@
     <small>Adds a Dashboards link to the header. Leave blank to hide it.</small></label>
   <label>This app's URL
     <input type="url" name="expenses_url" maxlength="2048" value="{{ values.expenses_url or '' }}"
-           placeholder="https://teslamate.example.com/expenses/">
+           placeholder="https://teslamate.example.com/garagebooks/">
     {% if errors.expenses_url %}<span class="error">{{ errors.expenses_url }}</span>{% endif %}
     <small>Where you open this app. The Grafana dashboard's “Add / edit expenses” link goes here.</small></label>
   <label>Invoice file name date

@@ -23,7 +23,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 from . import compat, dashboard, db, docinfo, icons, invoices, logs, onedrive, storage, updates, validation
 
-log = logging.getLogger("tmexpenses.app")
+log = logging.getLogger("garagebooks.app")
 
 MESSAGES = {
     "saved": "Expense saved.",
@@ -73,7 +73,7 @@ STORES = {
 
 
 class PrefixMiddleware:
-    """Serve under BASE_PATH (e.g. /expenses) without the proxy stripping it.
+    """Serve under BASE_PATH (e.g. /garagebooks) without the proxy stripping it.
     /healthz stays reachable unprefixed for the container healthcheck."""
 
     def __init__(self, wsgi, prefix):

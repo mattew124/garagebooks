@@ -1,9 +1,36 @@
 # Changelog
 
-All notable changes to teslamate-expenses. Version numbers and the candidate-to-stable
+All notable changes to garagebooks. Version numbers and the candidate-to-stable
 steps are in [RELEASING.md](RELEASING.md). Newest first.
 
 Each entry says what an installer must do to upgrade. Where nothing is said, pull the new image.
+
+## Unreleased
+
+**The project is now called GarageBooks** (it was teslamate-expenses). TeslaMate's trademark policy reserves
+the TeslaMate name for tools that use only its MQTT interface, and this app reads the database, so it takes its
+own name and says plainly that it is not affiliated with TeslaMate. Nothing about how it works has changed.
+
+**To upgrade**, if you started from this repository's compose files:
+
+- **Image:** now `ghcr.io/<owner>/garagebooks`. The old `teslamate-expenses` image gets no more releases, so
+  change the `image:` line.
+- **Address:** the default path is now `/garagebooks` (was `/expenses`). To keep the old address, set
+  `BASE_PATH=/expenses` in `.env`. If you move to the new one, update **This app's URL** on the Settings page,
+  or the dashboard's link back to the app goes to the old address.
+- **Grafana:** the dashboards volume is now `garagebooks-dashboards`, mounted at `/dashboards-garagebooks`, and
+  `grafana/provider.yml` puts the dashboard in a **GarageBooks** folder. Change both lines in Grafana's
+  `volumes:` as [Setup](https://mattew124.github.io/garagebooks/setup/) shows, or the dashboard stops updating.
+  The old, empty **Expenses** folder can be deleted.
+- **Compose service:** `expenses` is now `garagebooks` (so `docker compose logs garagebooks`), and the Traefik
+  router `tm-expenses` is now `garagebooks`.
+
+Unchanged: the `expenses` schema and your data, the `EXPENSES_*` settings, the dashboard's address
+(`/d/tm-expenses-tco`) and invoice folders. A folder marked with `.teslamate-expenses` keeps working.
+
+Also in this release: a new logo and icon (app header, browser tab, home-screen icon, README and documentation
+site), and the repository no longer holds a copy of TeslaMate's table definitions (they are AGPL-3.0, this
+project MIT): tests and the dev stack get them by running the real TeslaMate image.
 
 ## 0.3.0-rc1 - 2026-11-13
 

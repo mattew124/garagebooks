@@ -18,10 +18,10 @@
     nothing else, but take a backup first, as for any upgrade that touches the database.
 
 3. **Run it.** Set `EXPENSES_IMAGE` to a released image, or leave it unset to build locally. Follow
-    a release channel with `:rc` or `:latest`, or pin one version (see [RELEASING.md](https://github.com/mattew124/teslamate-expenses/blob/main/RELEASING.md)).
+    a release channel with `:rc` or `:latest`, or pin one version (see [RELEASING.md](https://github.com/mattew124/garagebooks/blob/main/RELEASING.md)).
 
     ```bash
-    docker compose up -d                                                     # localhost:8088/expenses/
+    docker compose up -d                                                     # localhost:8088/garagebooks/
     docker compose -f docker-compose.yml -f docker-compose.traefik.yml up -d # behind Traefik and forward-auth
     ```
 
@@ -33,7 +33,7 @@
     a mounted invoice folder):
 
     ```bash
-    docker compose logs expenses | grep -E 'schema|started'
+    docker compose logs garagebooks | grep -E 'schema|started'
     ```
 
     Behind forward-auth, open the address in a private window: it must send you to the login page.
@@ -43,7 +43,7 @@
     link you paste.
 
 6. **Grafana.** Each time it starts, the app writes its own dashboard to the
-    `teslamate-expenses-dashboards` volume, so the dashboard always matches the version you run. Its
+    `garagebooks-dashboards` volume, so the dashboard always matches the version you run. Its
     timezone is your `APP_TZ` (there's no timezone box on the dashboard; it's set in the compose file,
     as in TeslaMate). Give TeslaMate's Grafana that volume and `grafana/provider.yml`, in TeslaMate's
     compose file:
@@ -52,10 +52,10 @@
     services:
       grafana:
         volumes:
-          - teslamate-expenses-dashboards:/dashboards-expenses:ro
-          - /path/to/teslamate-expenses/grafana/provider.yml:/etc/grafana/provisioning/dashboards/expenses.yml:ro
+          - garagebooks-dashboards:/dashboards-garagebooks:ro
+          - /path/to/garagebooks/grafana/provider.yml:/etc/grafana/provisioning/dashboards/garagebooks.yml:ro
     volumes:
-      teslamate-expenses-dashboards:
+      garagebooks-dashboards:
         external: true      # created when you start this app's compose file
     ```
 
@@ -65,7 +65,7 @@
     docker compose up -d grafana
     ```
 
-    The dashboard appears under **Expenses** (datasource `TeslaMate`, tested on Grafana 13);
+    The dashboard appears under **GarageBooks** (datasource `TeslaMate`, tested on Grafana 13);
     [What the dashboard counts](dashboard.md) explains it.
 
     Provisioned dashboards can't be edited in Grafana. To customise it, import

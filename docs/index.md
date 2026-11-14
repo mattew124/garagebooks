@@ -1,6 +1,6 @@
-# teslamate-expenses
+# GarageBooks
 
-Track what your Tesla costs to own, next to [TeslaMate](https://github.com/teslamate-org/teslamate).
+Track what your Tesla costs to own.
 Record every expense (purchase, insurance, registration, tyres, servicing) in a small web app, and see
 the total cost of ownership in TeslaMate's own Grafana, alongside the charging costs TeslaMate
 already tracks.
@@ -65,7 +65,7 @@ The expenses live in their own `expenses` schema inside the TeslaMate database, 
 them to TeslaMate's charging costs and odometer with no second datasource.
 
 ```
- browser ──► proxy + forward-auth ──► expenses (Flask/gunicorn) ──► TeslaMate Postgres
+ browser ──► proxy + forward-auth ──► GarageBooks (Flask/gunicorn) ──► TeslaMate Postgres
                                                                        ▲   schema `expenses`
                                      Grafana (TeslaMate datasource) ───┘   + public.* (read-only)
 ```
@@ -74,7 +74,7 @@ The app has no login of its own, so it must sit behind a forward-auth gate: see 
 
 ## Notices
 
-Not affiliated with TeslaMate or Tesla. It's an unofficial add-on that reads TeslaMate's data.
+This project is an unofficial community tool and is not affiliated with, endorsed by, or supported by the official TeslaMate project. It reads data from a [TeslaMate](https://github.com/teslamate-org/teslamate) database. Not affiliated with Tesla, Inc.
 
 OneDrive is a trademark of Microsoft Corporation and Grafana is a trademark of Grafana Labs. This
 project is not affiliated with or endorsed by either. The OneDrive and Grafana logos are fetched at

@@ -38,7 +38,7 @@
       "icon": "doc",
       "url": "${expenses_url}",
       "targetBlank": true,
-      "tooltip": "Open the expenses app"
+      "tooltip": "Open GarageBooks"
     },
     {
       "title": "TeslaMate dashboards",
@@ -128,7 +128,7 @@
       },
       {
         "name": "expenses_url",
-        "label": "Expenses URL",
+        "label": "GarageBooks URL",
         "type": "query",
         "hide": 2,
         "datasource": {
@@ -140,8 +140,8 @@
         "multi": false,
         "options": [],
         "regex": "",
-        "query": "SELECT COALESCE((SELECT expenses_url FROM expenses.setting WHERE id = 1), '/expenses/');",
-        "definition": "SELECT COALESCE((SELECT expenses_url FROM expenses.setting WHERE id = 1), '/expenses/');",
+        "query": "SELECT COALESCE((SELECT expenses_url FROM expenses.setting WHERE id = 1), '/garagebooks/');",
+        "definition": "SELECT COALESCE((SELECT expenses_url FROM expenses.setting WHERE id = 1), '/garagebooks/');",
         "current": {}
       },
       {
@@ -1384,7 +1384,7 @@
         "type": "grafana-postgresql-datasource",
         "uid": "TeslaMate"
       },
-      "description": "Every recorded expense in the time range. Add or edit them in the Expenses app (link at the top).",
+      "description": "Every recorded expense in the time range. Add or edit them in GarageBooks (link at the top).",
       "gridPos": {
         "h": 12,
         "w": 24,

@@ -3,7 +3,7 @@
 # expose it any other way.
 #   docker compose -f docker-compose.yml -f docker-compose.traefik.yml up -d
 services:
-  expenses:
+  garagebooks:
     ports: !reset []
     networks:
       - teslamate
@@ -11,14 +11,14 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=${PROXY_NETWORK:-proxy}"
-      - "traefik.http.services.tm-expenses.loadbalancer.server.port=8080"
+      - "traefik.http.services.garagebooks.loadbalancer.server.port=8080"
       # Priority beats a catch-all router on the same host, such as TeslaMate's own.
-      - "traefik.http.routers.tm-expenses-secure.rule=Host(`${FQDN_TM:?}`) && PathPrefix(`${BASE_PATH:-/expenses}`)"
-      - "traefik.http.routers.tm-expenses-secure.priority=100"
-      - "traefik.http.routers.tm-expenses-secure.entrypoints=${PROXY_ENTRYPOINT:-websecure}"
-      - "traefik.http.routers.tm-expenses-secure.tls=true"
-      - "traefik.http.routers.tm-expenses-secure.service=tm-expenses"
-      - "traefik.http.routers.tm-expenses-secure.middlewares=${AUTH_MIDDLEWARE:?the app has no login of its own: set a forward-auth middleware}"
+      - "traefik.http.routers.garagebooks-secure.rule=Host(`${FQDN_TM:?}`) && PathPrefix(`${BASE_PATH:-/garagebooks}`)"
+      - "traefik.http.routers.garagebooks-secure.priority=100"
+      - "traefik.http.routers.garagebooks-secure.entrypoints=${PROXY_ENTRYPOINT:-websecure}"
+      - "traefik.http.routers.garagebooks-secure.tls=true"
+      - "traefik.http.routers.garagebooks-secure.service=garagebooks"
+      - "traefik.http.routers.garagebooks-secure.middlewares=${AUTH_MIDDLEWARE:?the app has no login of its own: set a forward-auth middleware}"
 
 networks:
   proxy:

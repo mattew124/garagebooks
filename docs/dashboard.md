@@ -1,6 +1,6 @@
 # What the dashboard counts
 
-The **Cost of Ownership** dashboard sits in Grafana's **Expenses** folder (see step 6 of
+The **Cost of Ownership** dashboard sits in Grafana's **GarageBooks** folder (see step 6 of
 [Setup](setup.md)). Its two links go to the app (**Add / edit expenses**) and back to TeslaMate's
 own dashboards.
 
@@ -8,7 +8,7 @@ own dashboards.
 
 ## The figures
 
-All of them come from the `expenses.ownership` view (`tmexpenses/schema.sql`), one row per car:
+All of them come from the `expenses.ownership` view (`garagebooks/schema.sql`), one row per car:
 
 | Figure | Definition |
 |---|---|

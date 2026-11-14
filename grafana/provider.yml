@@ -3,11 +3,11 @@
 # updates it whenever you upgrade the app.
 apiVersion: 1
 providers:
-  - name: expenses
+  - name: garagebooks
     orgId: 1
-    folder: Expenses
+    folder: GarageBooks
     type: file
     disableDeletion: true
     updateIntervalSeconds: 60
     options:
-      path: /dashboards-expenses
+      path: /dashboards-garagebooks

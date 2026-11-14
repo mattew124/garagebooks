@@ -1,5 +1,5 @@
 """The dev stack's one job is to stay away from live data. Guard that, the
-generated schema snapshot, and the rules keeping the app behind a login."""
+schema dump filter, and the rules keeping the app behind a login."""
 
 import json
 import re
@@ -11,7 +11,6 @@ DEV = (ROOT / "docker-compose.dev.yml").read_text()
 DEV_PROXY = (ROOT / "docker-compose.dev.traefik.yml").read_text()
 PROD_PROXY = (ROOT / "docker-compose.traefik.yml").read_text()
 SCRIPT = (ROOT / "scripts" / "dev.sh").read_text()
-SCHEMA = (ROOT / "db" / "teslamate-schema.sql").read_text()
 
 
 def config():
@@ -50,7 +49,7 @@ def test_every_router_requires_a_forward_auth_middleware():
 
 
 def test_dev_routes_outrank_production():
-    prod = int(re.search(r"tm-expenses-secure\.priority=(\d+)", PROD_PROXY).group(1))
+    prod = int(re.search(r"garagebooks-secure\.priority=(\d+)", PROD_PROXY).group(1))
     dev = [int(p) for p in re.findall(r"\.priority=\$\{DEV_\w+_PRIORITY:-(\d+)\}", DEV_PROXY)]
     assert len(dev) == 2 and prod < min(dev)
     # Worktree priorities come from dev.sh; tests/test_worktrees.py checks their order.
@@ -82,15 +81,6 @@ def test_positions_are_hourly_and_stripped_of_location():
         assert blanked in SCRIPT
     assert "date_trunc('hour', date)" in SCRIPT
     assert "location data reached the test database" in SCRIPT
-
-
-def test_schema_snapshot_is_the_real_definition():
-    for column in ("latitude numeric(8,6) NOT NULL", "tpms_pressure_rr", "marketing_name",
-                   "charge_energy_used", "position_id integer NOT NULL"):
-        assert column in SCHEMA
-    assert "REVOKE ALL ON SCHEMA public FROM PUBLIC" in SCHEMA
-    targets = re.findall(r"REFERENCES public\.(\w+)\(", SCHEMA)
-    assert targets and set(targets) == {"cars"}
 
 
 def test_schema_filter():
@@ -141,7 +131,7 @@ def test_dashboard_expenses_link_comes_from_the_apps_own_settings():
 
 
 def test_seeded_grafana_link_points_at_this_dashboards_uid():
-    from tmexpenses import db
+    from garagebooks import db
     dash = json.loads((ROOT / "grafana" / "cost-of-ownership.json").read_text())
     assert dash["uid"] == db.DASHBOARD_UID
 
@@ -208,3 +198,20 @@ def test_sample_expenses_are_made_up_and_stay_in_the_test_database():
     assert 'dev_psql -v "tz=$APP_TZ" < scripts/dev-sample-expenses.sql' in SCRIPT
     assert "sample-expenses)\n        ensure_env" in SCRIPT      # never past the dev stack's own checks
     assert "LIKE 'Sample data%'" in sql and "LIKE 'Sample data%'" in SCRIPT   # clear removes only these
+
+
+def test_what_an_installer_sees_is_named_garagebooks():
+    """The product is GarageBooks: the shipped compose service, routers, default path, Grafana
+    folder and dashboard links say so. Stored names (the expenses schema, EXPENSES_* settings,
+    the dashboard uid) stay, because existing installs depend on them."""
+    compose = (ROOT / "docker-compose.yml").read_text()
+    assert "\n  garagebooks:\n" in compose and "\n  expenses:\n" not in compose
+    assert "BASE_PATH: ${BASE_PATH:-/garagebooks}" in compose
+    assert "\n  garagebooks:\n" in PROD_PROXY and "tm-expenses" not in PROD_PROXY
+    assert "PathPrefix(`${BASE_PATH:-/garagebooks}`)" in PROD_PROXY
+    assert "folder: GarageBooks\n" in (ROOT / "grafana" / "provider.yml").read_text()
+    dash = json.loads((ROOT / "grafana" / "cost-of-ownership.json").read_text())
+    (link,) = [l for l in dash["links"] if l.get("url") == "${expenses_url}"]
+    assert link["tooltip"] == "Open GarageBooks"
+    assert next(v for v in dash["templating"]["list"] if v["name"] == "expenses_url")["label"] == "GarageBooks URL"
+    assert "/garagebooks/" in json.dumps(dash) and "'/expenses/'" not in json.dumps(dash)

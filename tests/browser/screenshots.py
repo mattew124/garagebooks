@@ -40,7 +40,7 @@ def main():
         page.goto(UI + "settings")
         # The stack's own addresses are real hostnames: show example ones, without saving them.
         page.fill("[name=grafana_url]", "https://teslamate.example.com/grafana/d/tm-expenses-tco/cost-of-ownership")
-        page.fill("[name=expenses_url]", "https://teslamate.example.com/expenses/")
+        page.fill("[name=expenses_url]", "https://teslamate.example.com/garagebooks/")
         shot(page, "settings-page", full_page=True)
 
         # Invoice storage. The OneDrive card's setup steps show this stack's own callback address:

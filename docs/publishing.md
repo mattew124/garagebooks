@@ -4,7 +4,7 @@ This page is a worked example of putting the app on the internet through a
 [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/),
 gated by [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/), with
 Traefik routing the request to the app. It assumes TeslaMate is already published the same way, on
-`teslamate.example.com`, and puts the app at `https://teslamate.example.com/expenses/`.
+`teslamate.example.com`, and puts the app at `https://teslamate.example.com/garagebooks/`.
 
 !!! danger "No login of its own"
 
@@ -37,7 +37,7 @@ Add a second compose file next to `docker-compose.yml`, `docker-compose.public.y
 # Publishes the UI on Traefik's plain-HTTP entrypoint, for cloudflared only.
 # The app has NO login of its own: only ever use this behind Cloudflare Access.
 services:
-  expenses:
+  garagebooks:
     ports: !reset []
     networks:
       - teslamate
@@ -45,12 +45,12 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=${PROXY_NETWORK:-proxy}"
-      - "traefik.http.services.tm-expenses.loadbalancer.server.port=8080"
+      - "traefik.http.services.garagebooks.loadbalancer.server.port=8080"
       # Priority beats a catch-all router on the same host, such as TeslaMate's own.
-      - "traefik.http.routers.tm-expenses.rule=Host(`${FQDN_TM:?}`) && PathPrefix(`${BASE_PATH:-/expenses}`)"
-      - "traefik.http.routers.tm-expenses.priority=100"
-      - "traefik.http.routers.tm-expenses.entrypoints=web"
-      - "traefik.http.routers.tm-expenses.service=tm-expenses"
+      - "traefik.http.routers.garagebooks.rule=Host(`${FQDN_TM:?}`) && PathPrefix(`${BASE_PATH:-/garagebooks}`)"
+      - "traefik.http.routers.garagebooks.priority=100"
+      - "traefik.http.routers.garagebooks.entrypoints=web"
+      - "traefik.http.routers.garagebooks.service=garagebooks"
 
 networks:
   proxy:
@@ -67,20 +67,20 @@ docker compose -f docker-compose.yml -f docker-compose.public.yml up -d
 
 Two details matter:
 
-- **Scope the rule with `Host()`.** Without it the router matches `/expenses` on *every* hostname
+- **Scope the rule with `Host()`.** Without it the router matches `/garagebooks` on *every* hostname
   that reaches the entrypoint.
 - **Give it a priority.** TeslaMate's own router is usually a catch-all for `/`, and Traefik ranks
-  routers by rule length unless you say otherwise. `priority=100` makes `/expenses` win.
+  routers by rule length unless you say otherwise. `priority=100` makes `/garagebooks` win.
 
 Want a private, LAN-only address as well (say a `websecure` entrypoint with a certificate)? Use
 `docker-compose.traefik.yml` alongside this file, with an `AUTH_MIDDLEWARE` of your own. That route
 doesn't pass through Cloudflare, so it needs its own gate. Both files add the same
-`tm-expenses` service label; the repeat is harmless.
+`garagebooks` service label; the repeat is harmless.
 
 ## 2. The tunnel (cloudflared)
 
 If TeslaMate is already published through a tunnel on this hostname, **skip to step 3**: the same
-tunnel and public hostname already carry `/expenses`, because they forward the whole hostname to
+tunnel and public hostname already carry `/garagebooks`, because they forward the whole hostname to
 Traefik.
 
 Otherwise, in the [Cloudflare Zero Trust dashboard](https://one.dash.cloudflare.com/):
@@ -128,8 +128,8 @@ Access puts a login in front of the hostname. Do this **before** step 2 if the h
 
 1. In Zero Trust, go to **Access → Applications → Add an application → Self-hosted**.
 2. Set the **Application domain** to `teslamate.example.com` and leave the **Path** empty, so Access
-   covers the whole hostname: TeslaMate, Grafana and the expenses app together. Gating only
-   `/expenses` would leave the rest of the hostname open.
+   covers the whole hostname: TeslaMate, Grafana and GarageBooks together. Gating only
+   `/garagebooks` would leave the rest of the hostname open.
 3. Add a policy with the action **Allow**, and include only the people who should see your costs:
    specific email addresses, or a group from your identity provider. Don't use *Everyone*.
 4. Under **Login methods**, pick your identity provider. The one-time PIN sent by email works with
@@ -142,13 +142,13 @@ An application with no Allow policy denies everyone, which is the safe failure. 
 ## 4. Check it
 
 From a machine **outside** your network, or a private browser window, open
-`https://teslamate.example.com/expenses/`. You should land on a Cloudflare Access login page, not
+`https://teslamate.example.com/garagebooks/`. You should land on a Cloudflare Access login page, not
 on the app. Log in with an allowed identity and the app loads.
 
 The same check from the command line:
 
 ```bash
-curl -sI https://teslamate.example.com/expenses/ | head -3
+curl -sI https://teslamate.example.com/garagebooks/ | head -3
 ```
 
 Expect `HTTP/2 302` with a `location:` header on `cloudflareaccess.com`. A `200` or a response from
@@ -158,15 +158,15 @@ To confirm Traefik has the route (run on the server, with Traefik's container na
 
 ```bash
 curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: teslamate.example.com' \
-  http://traefik/expenses/healthz   # 200
+  http://traefik/garagebooks/healthz   # 200
 ```
 
 ## Troubleshooting
 
 | Symptom | Likely cause |
 |---|---|
-| `404 page not found` from Traefik | The router isn't loaded. Check `docker compose logs expenses`; Traefik hides unhealthy containers, so wait for **healthy**. Confirm `FQDN_TM` matches the hostname exactly. |
-| TeslaMate's home page appears at `/expenses` | The router lost to TeslaMate's catch-all. Check `priority=100` and the `Host()` rule. |
+| `404 page not found` from Traefik | The router isn't loaded. Check `docker compose logs garagebooks`; Traefik hides unhealthy containers, so wait for **healthy**. Confirm `FQDN_TM` matches the hostname exactly. |
+| TeslaMate's home page appears at `/garagebooks` | The router lost to TeslaMate's catch-all. Check `priority=100` and the `Host()` rule. |
 | Redirect loop | A global HTTP-to-HTTPS redirect on the `web` entrypoint. Remove it; Cloudflare already ends TLS. |
 | `502 Bad Gateway` from Cloudflare | `cloudflared` can't reach Traefik. Check both are on the same Docker network and the service URL is right. |
 | Tunnel shows **Inactive** | `cloudflared` isn't running, or `TUNNEL_TOKEN` is wrong. Check `docker compose logs cloudflared`. |
@@ -180,4 +180,4 @@ curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: teslamate.example.com' \
   directly, from your LAN or another container, skips it, so never publish the `web` entrypoint to
   the internet.
 - Apps that can't complete a browser login (a phone app calling an API, say) can't pass Access.
-  Cloudflare offers service tokens for those, but the expenses UI is a browser app, so you don't need them.
+  Cloudflare offers service tokens for those, but GarageBooks is a browser app, so you don't need them.
