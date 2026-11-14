@@ -502,13 +502,14 @@ def test_header_on_a_desktop(page):
 
 
 def test_footer_links_to_the_docs_and_names_the_build(page):
-    """Every page ends with the docs link and the version; the dev stack is a build with no version."""
+    """Every page ends with the docs link and the version: a released image (a candidate under test)
+    names its version, a local build says it is a development build."""
     page.goto(UI)
     footer = page.locator("footer")
     docs = footer.get_by_role("link", name="Documentation")
     assert docs.get_attribute("href") == "https://mattew124.github.io/garagebooks/"
     assert docs.get_attribute("rel") == "noopener noreferrer"
-    assert "Development build" in footer.inner_text()
+    assert re.search(r"Development build|Version \d+\.\d+\.\d+", footer.inner_text()), footer.inner_text()
     shot(page, "footer")
 
 

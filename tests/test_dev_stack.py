@@ -161,7 +161,7 @@ def test_saved_onedrive_sign_in_never_includes_a_folder():
 def test_saved_onedrive_sign_in_is_private_and_outside_the_repo():
     save = function_body("onedrive_save")
     assert "umask 077" in save
-    assert 'ONEDRIVE_DEV_FILE="${ONEDRIVE_DEV_FILE:-$HOME/.config/' in SCRIPT
+    assert 'ONEDRIVE_DEV_FILE="$HOME/.config/' in SCRIPT
     assert "outside the repository" in function_body("onedrive_file_check")
     assert "onedrive_file_check" in save and "onedrive_file_check" in function_body("onedrive_link")
 
@@ -215,3 +215,16 @@ def test_what_an_installer_sees_is_named_garagebooks():
     assert link["tooltip"] == "Open GarageBooks"
     assert next(v for v in dash["templating"]["list"] if v["name"] == "expenses_url")["label"] == "GarageBooks URL"
     assert "/garagebooks/" in json.dumps(dash) and "'/expenses/'" not in json.dumps(dash)
+
+
+def test_onedrive_sign_in_saved_before_the_rename_is_still_found():
+    """onedrive-save wrote ~/.config/teslamate-expenses/onedrive-dev before the project was renamed."""
+    out = subprocess.run(["bash", "-c", 'source <(sed -n "/^# ONEDRIVE_DEV_FILE start/,/^# ONEDRIVE_DEV_FILE end/p" scripts/dev.sh); echo "$ONEDRIVE_DEV_FILE"'],
+                         cwd=ROOT, env={"HOME": "/h", "PATH": "/usr/bin:/bin"}, capture_output=True, text=True, check=True).stdout.strip()
+    assert out == "/h/.config/garagebooks/onedrive-dev"          # nothing saved anywhere: the new place
+    import tempfile
+    with tempfile.TemporaryDirectory() as home:
+        old = Path(home, ".config", "teslamate-expenses"); old.mkdir(parents=True); (old / "onedrive-dev").write_text("x")
+        out = subprocess.run(["bash", "-c", 'source <(sed -n "/^# ONEDRIVE_DEV_FILE start/,/^# ONEDRIVE_DEV_FILE end/p" scripts/dev.sh); echo "$ONEDRIVE_DEV_FILE"'],
+                             cwd=ROOT, env={"HOME": home, "PATH": "/usr/bin:/bin"}, capture_output=True, text=True, check=True).stdout.strip()
+        assert out == str(old / "onedrive-dev")

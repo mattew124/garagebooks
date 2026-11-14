@@ -416,7 +416,15 @@ demo_screenshots() {
 # One saved sign-in, in a file any worktree can load, so no other stack has to stay around.
 # It holds the encryption key beside what it encrypts, so it opens the real account: keep it
 # private (0600) and out of the repository.
-ONEDRIVE_DEV_FILE="${ONEDRIVE_DEV_FILE:-$HOME/.config/garagebooks/onedrive-dev}"
+# ONEDRIVE_DEV_FILE start
+if [ -z "${ONEDRIVE_DEV_FILE:-}" ]; then
+    ONEDRIVE_DEV_FILE="$HOME/.config/garagebooks/onedrive-dev"
+    # A sign-in saved before the project was renamed (teslamate-expenses) stays where it is.
+    if [ ! -e "$ONEDRIVE_DEV_FILE" ] && [ -e "$HOME/.config/teslamate-expenses/onedrive-dev" ]; then
+        ONEDRIVE_DEV_FILE="$HOME/.config/teslamate-expenses/onedrive-dev"
+    fi
+fi
+# ONEDRIVE_DEV_FILE end
 
 onedrive_file_check() {
     local repo
