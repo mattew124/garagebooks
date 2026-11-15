@@ -30,6 +30,10 @@ and keeps your existing role when you set `GARAGEBOOKS_DB_USER` (or the old `EXP
   Its default role is now `garagebooks_app`.
 - **Fixed:** `docker-compose.invoices.yml` still named the service `expenses` after 0.4.0-rc1 renamed
   it, so the invoice folder override started a second, broken container. It names `garagebooks` again.
+- **Docs:** a [roadmap](https://mattew124.github.io/garagebooks/roadmap/) of what comes next, in priority
+  order, and [novated lease calculations](https://mattew124.github.io/garagebooks/lease-calculations/) with an
+  example workbook (invented figures) that reads its tax rates from the ATO's pages. Two development scripts,
+  `scripts/ato_rates.py` and `scripts/build_lease_workbook.py`, build it; nothing in the app or image changes.
 
 ## 0.4.0-rc1 - 2026-11-15
 

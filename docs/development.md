@@ -28,6 +28,19 @@ the latest release and opens an issue when it doesn't exit 0. After `--record`, 
 (an upgrade note) and the README line naming the tested release.
 
 
+## Tax rates for the lease workbook
+
+The [novated lease calculations](lease-calculations.md) workbook takes its tax rates from the ATO's
+pages. To rebuild it with today's rates (needs the `.venv`, which has `openpyxl`):
+
+```bash
+.venv/bin/python scripts/build_lease_workbook.py   # rewrites docs/assets/lease-calculator-example.xlsx
+.venv/bin/python scripts/ato_rates.py              # just print the rates it read, as JSON
+```
+
+The tests give both scripts made-up pages and never use the network. Commit the rebuilt workbook
+only if the ATO's rates changed.
+
 ## The TeslaMate project listing
 
 TeslaMate's "Projects using TeslaMate" page can describe this app. The text we want there is
