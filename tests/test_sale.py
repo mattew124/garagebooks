@@ -131,6 +131,12 @@ def test_a_sale_stops_teslamates_odometer_and_still_counts_its_charging(admin):
     admin.execute("UPDATE garagebooks.car SET sold_at = NULL, sale_price = NULL WHERE id = 1")
 
 
+def panel_value(conn, dash, title, car_id):
+    panel = next(p for p in dash["panels"] if p["title"] == title)
+    sql = panel["targets"][0]["rawSql"].replace("$car_id", str(car_id)).replace("$category", "'Initial purchase', 'Tyres'")
+    return list(conn.execute(runnable(sql)).fetchone().values())[0]
+
+
 def test_every_dashboard_query_runs_for_a_sold_car_in_both_forms(empty_db, monkeypatch):
     client, car_id = sale_client(empty_db, monkeypatch)
     sell(client, car_id, date="2025-03-01", price="31000")
@@ -138,15 +144,10 @@ def test_every_dashboard_query_runs_for_a_sold_car_in_both_forms(empty_db, monke
     with connect(empty_db) as conn:
         for form in (sources.TeslaMate(sources.ABSENT), sources.TeslaMate(sources.UNTESTED, "Newer.")):
             dash = dashboard.render("UTC", "", teslamate=form)
-            by_title = {p["title"]: p for p in dash["panels"] if p.get("targets")}
-            def run(title):
-                sql = by_title[title]["targets"][0]["rawSql"].replace("$car_id", str(car_id))
-                sql = sql.replace("$category", "'Initial purchase', 'Tyres'")
-                return list(conn.execute(runnable(sql)).fetchone().values())[0]
-            assert run("Sold") == "Sold 1 Mar 2025 · $31,000"
-            assert run("Total cost") == 10000 and run("TCO per month") > 0
-            assert abs(float(run("TCO per day")) - 10000 / days) < 5
-            assert run("Time owned") == "1 year, 2 months"
+            assert panel_value(conn, dash, "Sold", car_id) == "Sold 1 Mar 2025 · $31,000"
+            assert panel_value(conn, dash, "Total cost", car_id) == 10000 and panel_value(conn, dash, "TCO per month", car_id) > 0
+            assert abs(float(panel_value(conn, dash, "TCO per day", car_id)) - 10000 / days) < 5
+            assert panel_value(conn, dash, "Time owned", car_id) == "1 year, 2 months"
             names = [r["__text"] for r in conn.execute(runnable(next(
                 v["query"] for v in dash["templating"]["list"] if v["name"] == "car_id")))]
             assert "Ute (sold)" in names
