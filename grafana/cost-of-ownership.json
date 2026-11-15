@@ -1377,6 +1377,198 @@
       ]
     },
     {
+      "id": 18,
+      "type": "barchart",
+      "title": "Running costs per FBT year",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "TeslaMate"
+      },
+      "description": "Stacked by category, plus charging, for each FBT year (1 April to 31 March), worked out from each expense's date in the dashboard's time zone. Excludes the purchase price. The time range above still limits what is counted, so a part-year at either end is a part-year.",
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 31
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currency:financial:$",
+          "decimals": 0,
+          "custom": {
+            "fillOpacity": 85,
+            "lineWidth": 1,
+            "axisSoftMin": 0
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Charging"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#0072B2"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Insurance"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#E69F00"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Registration"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#009E73"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Tyres"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#D55E00"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Cabin air filter"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#CC79A7"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Air filter"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#F0E442"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Wheel alignment"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#6A3D9A"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Tyre rotation"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#8C510A"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "orientation": "vertical",
+        "stacking": "normal",
+        "showValue": "never",
+        "xTickLabelRotation": 0,
+        "barWidth": 0.6,
+        "groupWidth": 0.7,
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "transformations": [
+        {
+          "id": "groupingToMatrix",
+          "options": {
+            "rowField": "FBT year",
+            "columnField": "Category",
+            "valueField": "Cost",
+            "emptyValue": "zero"
+          }
+        }
+      ],
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "TeslaMate"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT 'FBT ' || y || '–' || lpad(((y + 1) % 100)::text, 2, '0') AS \"FBT year\", metric AS \"Category\", SUM(value) AS \"Cost\"\nFROM (\n  SELECT garagebooks.fbt_year((e.occurred_at AT TIME ZONE '$tz')::date) AS y, c.name AS metric, SUM(e.amount) AS value\n  FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id\n  WHERE e.car_id = $car_id AND c.kind IN ('running', 'energy') AND $__timeFilter(e.occurred_at)\n  GROUP BY 1, 2\n  /*teslamate*/ UNION ALL\n  SELECT garagebooks.fbt_year(((cp.start_date AT TIME ZONE 'UTC') AT TIME ZONE '$tz')::date), 'Charging', SUM(cp.cost)\n  FROM charging_processes cp\n  WHERE cp.car_id = (SELECT teslamate_car_id FROM garagebooks.car WHERE id = $car_id) AND $__timeFilter(cp.start_date)\n  GROUP BY 1 HAVING SUM(cp.cost) IS NOT NULL /*end*/\n) x GROUP BY 1, 2 ORDER BY min(y), 2",
+          "refId": "A"
+        }
+      ]
+    },
+    {
       "id": 14,
       "type": "table",
       "title": "Expenses",
@@ -1389,7 +1581,7 @@
         "h": 12,
         "w": 24,
         "x": 0,
-        "y": 31
+        "y": 40
       },
       "fieldConfig": {
         "defaults": {

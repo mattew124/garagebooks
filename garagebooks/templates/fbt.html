@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}FBT year · {{ car.name }}{% endblock %}
+{% block main_attrs %} class="narrow"{% endblock %}
+{% macro amount(x, reason='') %}{% if x is none %}<strong class="unavailable">unavailable</strong>{% if reason %} <small>({{ reason }})</small>{% endif %}{% else %}{{ x|money }}{% endif %}{% endmacro %}
+{% block content %}
+<h1>FBT year: {{ car.name }}</h1>
+<p><a href="{{ url_for('car_lease', car_id=car.id) }}">← Lease</a></p>
+{% if not report %}
+<p class="empty" id="fbt-nolease">No lease is recorded for this car, so there is no FBT year to report.
+  <a href="{{ url_for('car_lease_new', car_id=car.id) }}">Add a lease</a> to see its costs by FBT year, the taxable value and the contribution that cancels it.</p>
+{% else %}
+<nav class="row actions fbt-nav" aria-label="FBT year">
+  {% if previous is not none %}<a id="fbt-prev" class="button secondary-link" href="{{ url_for('car_fbt', car_id=car.id, year=previous) }}">← {{ label(previous) }}</a>{% endif %}
+  <strong id="fbt-year">{{ report.label }}</strong>
+  <small>1 April {{ report.year }} to 31 March {{ report.year + 1 }}, income tax year {{ report.income_tax_label }} from 1 July</small>
+  {% if following is not none %}<a id="fbt-next" class="button secondary-link" href="{{ url_for('car_fbt', car_id=car.id, year=following) }}">{{ label(following) }} →</a>{% endif %}
+</nav>
+
+<section class="card stack fbt" aria-labelledby="fbt-tax">
+  <h2 id="fbt-tax">Taxable value and contributions</h2>
+  <dl class="facts">
+    <div><dt>Days held</dt><dd id="fbt-days">{{ report.days_held }} of {{ report.days_in_year }} days</dd></div>
+    {% if report.taxable_value is not none %}
+    <div><dt>Taxable value</dt><dd class="derived" id="fbt-taxable">{{ report.taxable_value|money }}</dd></div>
+    <div><dt>Contribution required to bring FBT to nil</dt><dd class="derived" id="fbt-required">{{ report.required|money }}</dd></div>
+    <div><dt>Contributions made so far</dt><dd id="fbt-made">{{ report.made|money }} <small>({{ report.pays_so_far }} pay{{ '' if report.pays_so_far == 1 else 's' }})</small></dd></div>
+    <div><dt>Expected by the end of the year</dt><dd id="fbt-expected">{{ report.expected|money }} <small>({{ report.pays_in_year }} pay{{ '' if report.pays_in_year == 1 else 's' }})</small></dd></div>
+    <div><dt>{% if report.difference < 0 %}Shortfall{% elif report.difference > 0 %}Excess{% else %}Against the contribution required{% endif %}</dt>
+      <dd class="derived" id="fbt-balance">{% if report.difference == 0 %}Exactly what is required{% else %}{{ (report.difference|abs)|money }}{% endif %}</dd></div>
+    {% endif %}
+  </dl>
+  {% if not report.leases %}
+  <p class="empty" id="fbt-notheld">The car was not held under a lease in this FBT year, so there is no taxable value for it.</p>
+  {% endif %}
+  {% if report.exempt %}
+  <p id="fbt-exempt">This lease is recorded as an exempt electric car, so the taxable value is nil and no contribution is needed.</p>
+  {% endif %}
+  {% for reason in report.reasons %}<p class="fbt-reason"><strong>{{ reason }}</strong></p>{% endfor %}
+  {% if report.leases|length > 1 %}
+  <div class="table-wrap"><table id="fbt-leases">
+    <thead><tr><th>Lease</th><th class="num">Days held</th><th class="num">Taxable value</th><th class="num">Expected</th></tr></thead>
+    <tbody>
+    {% for row, budgets, f in report.leases %}
+    <tr><td>{{ row.package_name or row.financier }} <small>{{ row.start_date.strftime('%d %b %Y') }} to {{ row.end_date.strftime('%d %b %Y') }}</small></td>
+      <td class="num">{{ f.days_held }}</td><td class="num">{{ amount(f.taxable_value) }}</td><td class="num">{{ f.expected|money }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% endif %}
+  {% for row, budgets, f in report.leases %}{% if row.tax_treatment != 'employee_contribution' and not f.exempt %}
+  <p><small>The contribution shown is the one that cancels FBT under the employee contribution method. This lease's tax treatment is recorded
+    as {{ 'something else' if row.tax_treatment else 'not entered' }}.</small></p>
+  {% endif %}{% endfor %}
+  <p><small>Taxable value is the base value × the statutory percentage × days held ÷ days in the FBT year, using each lease's own figures.
+    Contributions are counted from the post-tax payment on each pay date, which GarageBooks takes to be the lease's start date and then every
+    week, fortnight or month after it (as the lease's pay frequency says); your provider's own pay dates may differ a little.</small></p>
+</section>
+
+<section class="card stack fbt" aria-labelledby="fbt-costs">
+  <h2 id="fbt-costs">Running costs by pool</h2>
+  <div class="table-wrap"><table id="fbt-pools">
+    <thead><tr><th>Pool</th><th class="num">Spent</th><th class="num">Budget, pro-rated</th></tr></thead>
+    <tbody>
+    {% for line in report.pools %}
+    <tr data-pool="{{ line.key }}">
+      <td>{{ line.label }}{% if line.categories and not (line.categories|length == 1 and line.categories[0][0] == line.label) %}<br><small>{% for name, total in line.categories %}{{ name }} {{ total|money }}{{ ', ' if not loop.last }}{% endfor %}</small>{% endif %}</td>
+      <td class="num">{{ amount(line.spent, line.reason) }}</td>
+      <td class="num">{{ line.budget|money if line.budget is not none else '—' }}</td>
+    </tr>
+    {% if line.key == 'fuel_charging' and report.teslamate_charging %}
+    <tr id="teslamate-charging"><td><small>including TeslaMate's charging</small></td>
+      <td class="num"><small>{{ amount(report.teslamate_charging.value) }}</small></td><td></td></tr>
+    {% endif %}
+    {% else %}
+    <tr><td colspan="3" class="empty">No running costs in this FBT year.</td></tr>
+    {% endfor %}
+    </tbody>
+    <tfoot><tr id="pool-total"><th>Total running costs</th><td class="num"><strong>{{ amount(report.pool_total) }}</strong></td>
+      <td class="num">{{ report.budget_total|money if report.budget_total is not none else '—' }}</td></tr></tfoot>
+  </table></div>
+  <p><small>Expenses are placed in the FBT year of their date. The yearly budget in force is shown for reference, pro-rated by the days the
+    car was held; it is not a balance, and what each pool has paid out is not tracked here. A category that is in no pool is listed on its own line.
+    Set a category's pool on the <a href="{{ url_for('categories') }}">Categories</a> page.</small></p>
+</section>
+
+<section class="card stack fbt" id="purchases" aria-labelledby="fbt-purchases">
+  <h2 id="fbt-purchases">Purchases</h2>
+  {% if report.purchases %}
+  <ul class="plain">{% for name, total in report.purchases %}<li>{{ name }}: {{ total|money }}</li>{% endfor %}</ul>
+  <p><small>Purchases are left out of the running costs above.</small></p>
+  {% else %}<p class="empty">No purchases in this FBT year.</p>{% endif %}
+</section>
+{% endif %}
+<p><small>These are the statement's figures worked through the published formula, not tax advice. No personal details are stored.</small></p>
+{% endblock %}

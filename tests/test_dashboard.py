@@ -85,7 +85,7 @@ def test_render_starts_the_time_range_at_the_earliest_data():
 def test_period_variable_drives_the_bucketed_charts():
     assert [o["value"] for o in var(SOURCE, "period")["options"]] == ["week", "month", "year"]
     for p in SOURCE["panels"]:
-        if p["title"].startswith(("Running costs per", "Cumulative")):
+        if p["title"].startswith(("Running costs per", "Cumulative")) and "FBT year" not in p["title"]:   # that one is always per FBT year
             assert "date_trunc('$period'" in p["targets"][0]["rawSql"]
 
 

@@ -131,12 +131,14 @@ def odometer_at(conn, teslamate, car_id, when, manual=True):
     return None if row is None else Reading(float(row["km"]), "manual", row["at"])
 
 
-def charging_cost(conn, teslamate, car_id, start=None, end=None):
+def charging_cost(conn, teslamate, car_id, start=None, end=None, include_manual=True):
     """What charging and fuel cost a car, optionally between two moments (start inclusive, end
     exclusive): 'energy' expenses, plus TeslaMate's charging costs for a car it tracks.
+    With include_manual=False, only TeslaMate's part (0 for a car it doesn't track), for a caller
+    that already counts the expenses entered by hand.
     -> Answer. No value, with the reason, when the car is TeslaMate's and TeslaMate can't answer."""
     args = {"car": car_id, "start": start, "end": end}
-    manual = conn.execute(
+    manual = Decimal(0) if not include_manual else conn.execute(
         "SELECT COALESCE(SUM(e.amount), 0) AS total FROM garagebooks.expense e "
         "JOIN garagebooks.category c ON c.id = e.category_id "
         "WHERE e.car_id = %(car)s AND c.kind = 'energy' "

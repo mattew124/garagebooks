@@ -161,6 +161,14 @@ CREATE TABLE IF NOT EXISTS garagebooks.lease_budget (
     PRIMARY KEY (lease_id, pool, effective_from)
 );
 
+-- The FBT year (1 April to 31 March) a date falls in, as the year it starts in: 2025 is "FBT 2025-26".
+-- The app, the dashboard and any query of your own share this one definition; pass the date in the
+-- time zone you mean (occurred_at AT TIME ZONE 'Australia/Brisbane')::date. Roadmap L2.
+CREATE OR REPLACE FUNCTION garagebooks.fbt_year(d date) RETURNS integer
+LANGUAGE sql IMMUTABLE PARALLEL SAFE STRICT
+AS $$ SELECT CASE WHEN EXTRACT(month FROM d) >= 4 THEN EXTRACT(year FROM d)::integer
+                  ELSE EXTRACT(year FROM d)::integer - 1 END $$;
+
 -- The pool each category's expenses are paid from, or NULL for none. Added once, with defaults for
 -- the standard categories; after that the owner's edits (on the Categories page) are never overwritten.
 DO $$

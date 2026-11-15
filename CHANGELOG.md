@@ -44,6 +44,13 @@ and keeps your existing role when you set `GARAGEBOOKS_DB_USER` (or the old `EXP
   not tax advice; no personal details are stored. See [Leases](docs/leases.md). The app adds the new
   `garagebooks.lease` and `garagebooks.lease_budget` tables and `category.budget_pool` on start; with
   the restricted database role, re-run `scripts/provision-db.sh` first.
+- **FBT year and taxable value.** A car's lease page links to a report for each FBT year (1 April to
+  31 March), chosen by the dates of its expenses, never by you: days held, the taxable value under the
+  statutory formula, the contribution that cancels it against what the post-tax payments make, and running
+  costs by budget pool (with TeslaMate's charging, or *unavailable* when it can't be read). The dashboard has a
+  new **Running costs per FBT year** panel, and the database a `garagebooks.fbt_year(date)` function. It is not
+  tax advice. See [Leases](docs/leases.md). The app adds the function on start; with the restricted database
+  role, re-run `scripts/provision-db.sh` first.
 - **Schema:** `expenses` is now `garagebooks`. Grafana panels or queries of your own that name
   `expenses.` need the new name.
 - **Dashboard address:** the uid is now `garagebooks-tco` (was `tm-expenses-tco`), so its address is

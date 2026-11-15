@@ -863,6 +863,35 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         log.info("lease %s of car %s deleted", lease_id, car_id)
         return redirect(url_for("car_lease", car_id=car_id, msg="lease_deleted"), 303)
 
+    # ---- the FBT year report (roadmap L2) -------------------------------------------
+
+    @app.get("/cars/<int:car_id>/fbt")
+    def car_fbt(car_id):
+        car = car_or_404(car_id)
+        today = today_here()
+        try:
+            year = int(request.args["year"]) if "year" in request.args else lease.fbt_year(today)
+        except ValueError:
+            abort(404)
+        if not 1990 <= year <= 2200:
+            abort(404)
+        zone = ZoneInfo(tz)
+        with connect() as conn:
+            rows = db.car_leases(conn, car_id)
+            if not rows:
+                return render_template("fbt.html", car=car, report=None, today=today)
+            leases = [(row, db.lease_budgets(conn, row["id"])) for row in rows]
+            costs = db.fbt_costs(conn, car_id, year, tz)
+            years = lease.fbt_years(rows, db.fbt_years_with_expenses(conn, car_id, tz))
+            # TeslaMate's charging for the year (only its part: what was entered by hand is already in the costs)
+            charging = sources.charging_cost(conn, teslamate(conn), car_id, datetime(year, 4, 1, tzinfo=zone),
+                                             datetime(year + 1, 4, 1, tzinfo=zone), include_manual=False)
+        report = lease.fbt_report(leases, costs, charging, year, today)
+        earlier, later = [y for y in years if y < year], [y for y in years if y > year]
+        return render_template("fbt.html", car=car, report=report, today=today, frequencies={k: v[0] for k, v in lease.FREQUENCIES.items()},
+                               previous=earlier[-1] if earlier else None, following=later[0] if later else None,
+                               label=lease.fbt_label)
+
     @app.post("/categories/<int:category_id>/pool")
     def category_pool(category_id):
         pool = (request.form.get("budget_pool") or "").strip() or None
