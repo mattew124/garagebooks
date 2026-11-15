@@ -65,8 +65,8 @@
         "multi": false,
         "options": [],
         "regex": "",
-        "query": "SELECT id AS __value, name AS __text FROM garagebooks.car ORDER BY id;",
-        "definition": "SELECT id AS __value, name AS __text FROM garagebooks.car ORDER BY id;",
+        "query": "SELECT id AS __value, name || CASE WHEN sold_at IS NOT NULL THEN ' (sold)' ELSE '' END AS __text FROM garagebooks.car ORDER BY id;",
+        "definition": "SELECT id AS __value, name || CASE WHEN sold_at IS NOT NULL THEN ' (sold)' ELSE '' END AS __text FROM garagebooks.car ORDER BY id;",
         "current": {}
       },
       {
@@ -171,7 +171,7 @@
       "id": 1,
       "type": "stat",
       "title": "Total cost",
-      "description": "Purchase + running expenses + charging. All-time (ignores the dashboard time range). Follows the Category filter.",
+      "description": "Purchase + running expenses + charging. All-time (ignores the dashboard time range). Follows the Category filter. Less the sale price once the car is sold, while a purchase category is ticked.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "TeslaMate"
@@ -223,7 +223,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT ((SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'purchase' AND c.name IN ($category)) + (SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'running' AND c.name IN ($category)) + (SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'energy' AND c.name IN ($category)) + (SELECT CASE WHEN 'Charging' IN ($category) THEN teslamate_charging_total ELSE 0 END FROM garagebooks.ownership WHERE car_id = $car_id))",
+          "rawSql": "SELECT ((SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'purchase' AND c.name IN ($category)) + (SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'running' AND c.name IN ($category)) + (SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'energy' AND c.name IN ($category)) + (SELECT CASE WHEN 'Charging' IN ($category) THEN teslamate_charging_total ELSE 0 END FROM garagebooks.ownership WHERE car_id = $car_id) - COALESCE((SELECT sale_price FROM garagebooks.ownership WHERE car_id = $car_id), 0) * (EXISTS (SELECT 1 FROM garagebooks.category WHERE kind = 'purchase' AND name IN ($category)))::int)",
           "refId": "A"
         }
       ]
@@ -476,7 +476,7 @@
       "id": 6,
       "type": "stat",
       "title": "Time owned",
-      "description": "Time since purchase (the first expense in a capital-cost category), else since TeslaMate's first position. Not affected by the Category filter.",
+      "description": "Time since purchase (the first expense in a capital-cost category), else since TeslaMate's first position. Not affected by the Category filter. Stops at the sale date once the car is sold.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "TeslaMate"
@@ -527,7 +527,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT CASE WHEN y > 0 THEN y || CASE WHEN y = 1 THEN ' year' ELSE ' years' END || CASE WHEN m > 0 THEN ', ' || m || CASE WHEN m = 1 THEN ' month' ELSE ' months' END ELSE '' END ELSE m || CASE WHEN m = 1 THEN ' month' ELSE ' months' END END FROM (SELECT EXTRACT(YEAR FROM a)::int AS y, EXTRACT(MONTH FROM a)::int AS m FROM (SELECT age(now(), owned_since) AS a FROM garagebooks.ownership WHERE car_id = $car_id) x) t",
+          "rawSql": "SELECT CASE WHEN y > 0 THEN y || CASE WHEN y = 1 THEN ' year' ELSE ' years' END || CASE WHEN m > 0 THEN ', ' || m || CASE WHEN m = 1 THEN ' month' ELSE ' months' END ELSE '' END ELSE m || CASE WHEN m = 1 THEN ' month' ELSE ' months' END END FROM (SELECT EXTRACT(YEAR FROM a)::int AS y, EXTRACT(MONTH FROM a)::int AS m FROM (SELECT age(COALESCE(owned_until, now()), owned_since) AS a FROM garagebooks.ownership WHERE car_id = $car_id) x) t",
           "refId": "A"
         }
       ]
@@ -536,7 +536,7 @@
       "id": 7,
       "type": "stat",
       "title": "Cost per km — all-in",
-      "description": "Total cost of ownership ÷ distance owned. Includes the purchase price. All-time (ignores the dashboard time range). Follows the Category filter.",
+      "description": "Total cost of ownership ÷ distance owned. Includes the purchase price. All-time (ignores the dashboard time range). Follows the Category filter. Less the sale price once the car is sold, while a purchase category is ticked.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "TeslaMate"
@@ -588,7 +588,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT ((SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'purchase' AND c.name IN ($category)) + (SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'running' AND c.name IN ($category)) + (SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'energy' AND c.name IN ($category)) + (SELECT CASE WHEN 'Charging' IN ($category) THEN teslamate_charging_total ELSE 0 END FROM garagebooks.ownership WHERE car_id = $car_id)) / NULLIF((SELECT distance_km FROM garagebooks.ownership WHERE car_id = $car_id), 0)",
+          "rawSql": "SELECT ((SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'purchase' AND c.name IN ($category)) + (SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'running' AND c.name IN ($category)) + (SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'energy' AND c.name IN ($category)) + (SELECT CASE WHEN 'Charging' IN ($category) THEN teslamate_charging_total ELSE 0 END FROM garagebooks.ownership WHERE car_id = $car_id) - COALESCE((SELECT sale_price FROM garagebooks.ownership WHERE car_id = $car_id), 0) * (EXISTS (SELECT 1 FROM garagebooks.category WHERE kind = 'purchase' AND name IN ($category)))::int) / NULLIF((SELECT distance_km FROM garagebooks.ownership WHERE car_id = $car_id), 0)",
           "refId": "A"
         }
       ]
@@ -658,7 +658,7 @@
       "id": 9,
       "type": "stat",
       "title": "Running cost per month",
-      "description": "(Running expenses + charging) ÷ months owned. Excludes the purchase price. All-time (ignores the dashboard time range). Follows the Category filter.",
+      "description": "(Running expenses + charging) ÷ months owned. Excludes the purchase price. All-time (ignores the dashboard time range). Follows the Category filter. Stops at the sale date once the car is sold.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "TeslaMate"
@@ -710,7 +710,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT ((SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'running' AND c.name IN ($category)) + (SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'energy' AND c.name IN ($category)) + (SELECT CASE WHEN 'Charging' IN ($category) THEN teslamate_charging_total ELSE 0 END FROM garagebooks.ownership WHERE car_id = $car_id)) / GREATEST(EXTRACT(EPOCH FROM now() - (SELECT owned_since FROM garagebooks.ownership WHERE car_id = $car_id)) / 2629746, 1)",
+          "rawSql": "SELECT ((SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'running' AND c.name IN ($category)) + (SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'energy' AND c.name IN ($category)) + (SELECT CASE WHEN 'Charging' IN ($category) THEN teslamate_charging_total ELSE 0 END FROM garagebooks.ownership WHERE car_id = $car_id)) / GREATEST(EXTRACT(EPOCH FROM COALESCE((SELECT owned_until FROM garagebooks.ownership WHERE car_id = $car_id), now()) - (SELECT owned_since FROM garagebooks.ownership WHERE car_id = $car_id)) / 2629746, 1)",
           "refId": "A"
         }
       ]
@@ -719,7 +719,7 @@
       "id": 10,
       "type": "stat",
       "title": "TCO per month",
-      "description": "Total cost of ownership ÷ months owned. All-time (ignores the dashboard time range). Follows the Category filter.",
+      "description": "Total cost of ownership ÷ months owned. All-time (ignores the dashboard time range). Follows the Category filter. Less the sale price once the car is sold, while a purchase category is ticked. Stops at the sale date once the car is sold.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "TeslaMate"
@@ -771,7 +771,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT ((SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'purchase' AND c.name IN ($category)) + (SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'running' AND c.name IN ($category)) + (SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'energy' AND c.name IN ($category)) + (SELECT CASE WHEN 'Charging' IN ($category) THEN teslamate_charging_total ELSE 0 END FROM garagebooks.ownership WHERE car_id = $car_id)) / GREATEST(EXTRACT(EPOCH FROM now() - (SELECT owned_since FROM garagebooks.ownership WHERE car_id = $car_id)) / 2629746, 1)",
+          "rawSql": "SELECT ((SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'purchase' AND c.name IN ($category)) + (SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'running' AND c.name IN ($category)) + (SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'energy' AND c.name IN ($category)) + (SELECT CASE WHEN 'Charging' IN ($category) THEN teslamate_charging_total ELSE 0 END FROM garagebooks.ownership WHERE car_id = $car_id) - COALESCE((SELECT sale_price FROM garagebooks.ownership WHERE car_id = $car_id), 0) * (EXISTS (SELECT 1 FROM garagebooks.category WHERE kind = 'purchase' AND name IN ($category)))::int) / GREATEST(EXTRACT(EPOCH FROM COALESCE((SELECT owned_until FROM garagebooks.ownership WHERE car_id = $car_id), now()) - (SELECT owned_since FROM garagebooks.ownership WHERE car_id = $car_id)) / 2629746, 1)",
           "refId": "A"
         }
       ]
@@ -780,14 +780,14 @@
       "id": 15,
       "type": "stat",
       "title": "Running cost per day",
-      "description": "(Running + charging) ÷ days owned. All-time (ignores the dashboard time range). Follows the Category filter.",
+      "description": "(Running + charging) ÷ days owned. All-time (ignores the dashboard time range). Follows the Category filter. Stops at the sale date once the car is sold.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "TeslaMate"
       },
       "gridPos": {
         "h": 4,
-        "w": 8,
+        "w": 6,
         "x": 0,
         "y": 8
       },
@@ -832,7 +832,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT ((SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'running' AND c.name IN ($category)) + (SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'energy' AND c.name IN ($category)) + (SELECT CASE WHEN 'Charging' IN ($category) THEN teslamate_charging_total ELSE 0 END FROM garagebooks.ownership WHERE car_id = $car_id)) / GREATEST(EXTRACT(EPOCH FROM now() - (SELECT owned_since FROM garagebooks.ownership WHERE car_id = $car_id)) / 86400, 1)",
+          "rawSql": "SELECT ((SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'running' AND c.name IN ($category)) + (SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'energy' AND c.name IN ($category)) + (SELECT CASE WHEN 'Charging' IN ($category) THEN teslamate_charging_total ELSE 0 END FROM garagebooks.ownership WHERE car_id = $car_id)) / GREATEST(EXTRACT(EPOCH FROM COALESCE((SELECT owned_until FROM garagebooks.ownership WHERE car_id = $car_id), now()) - (SELECT owned_since FROM garagebooks.ownership WHERE car_id = $car_id)) / 86400, 1)",
           "refId": "A"
         }
       ]
@@ -841,15 +841,15 @@
       "id": 16,
       "type": "stat",
       "title": "TCO per day",
-      "description": "Total cost ÷ days owned. All-time (ignores the dashboard time range). Follows the Category filter.",
+      "description": "Total cost ÷ days owned. All-time (ignores the dashboard time range). Follows the Category filter. Less the sale price once the car is sold, while a purchase category is ticked. Stops at the sale date once the car is sold.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "TeslaMate"
       },
       "gridPos": {
         "h": 4,
-        "w": 8,
-        "x": 8,
+        "w": 6,
+        "x": 6,
         "y": 8
       },
       "fieldConfig": {
@@ -893,7 +893,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT ((SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'purchase' AND c.name IN ($category)) + (SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'running' AND c.name IN ($category)) + (SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'energy' AND c.name IN ($category)) + (SELECT CASE WHEN 'Charging' IN ($category) THEN teslamate_charging_total ELSE 0 END FROM garagebooks.ownership WHERE car_id = $car_id)) / GREATEST(EXTRACT(EPOCH FROM now() - (SELECT owned_since FROM garagebooks.ownership WHERE car_id = $car_id)) / 86400, 1)",
+          "rawSql": "SELECT ((SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'purchase' AND c.name IN ($category)) + (SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'running' AND c.name IN ($category)) + (SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'energy' AND c.name IN ($category)) + (SELECT CASE WHEN 'Charging' IN ($category) THEN teslamate_charging_total ELSE 0 END FROM garagebooks.ownership WHERE car_id = $car_id) - COALESCE((SELECT sale_price FROM garagebooks.ownership WHERE car_id = $car_id), 0) * (EXISTS (SELECT 1 FROM garagebooks.category WHERE kind = 'purchase' AND name IN ($category)))::int) / GREATEST(EXTRACT(EPOCH FROM COALESCE((SELECT owned_until FROM garagebooks.ownership WHERE car_id = $car_id), now()) - (SELECT owned_since FROM garagebooks.ownership WHERE car_id = $car_id)) / 86400, 1)",
           "refId": "A"
         }
       ]
@@ -902,15 +902,15 @@
       "id": 17,
       "type": "stat",
       "title": "Distance per day",
-      "description": "Distance ÷ days owned. All-time (ignores the dashboard time range).",
+      "description": "Distance ÷ days owned. All-time (ignores the dashboard time range). Stops at the sale date once the car is sold.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "TeslaMate"
       },
       "gridPos": {
         "h": 4,
-        "w": 8,
-        "x": 16,
+        "w": 6,
+        "x": 12,
         "y": 8
       },
       "fieldConfig": {
@@ -954,7 +954,67 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT distance_km / GREATEST(EXTRACT(EPOCH FROM now() - owned_since) / 86400, 1) FROM garagebooks.ownership WHERE car_id = $car_id",
+          "rawSql": "SELECT distance_km / GREATEST(EXTRACT(EPOCH FROM COALESCE(owned_until, now()) - owned_since) / 86400, 1) FROM garagebooks.ownership WHERE car_id = $car_id",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "type": "stat",
+      "title": "Sold",
+      "description": "When the car sold and for how much (set on the Cars page). A dash while you still own it.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "TeslaMate"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "noValue": "–",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "purple",
+                "value": null
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "textMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "TeslaMate"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT 'Sold ' || to_char(sold_at AT TIME ZONE '$tz', 'FMDD Mon YYYY') || ' · ' || chr(36) || CASE WHEN sale_price = trunc(sale_price) THEN to_char(sale_price, 'FM999,999,999,990') ELSE to_char(sale_price, 'FM999,999,999,990.00') END FROM garagebooks.ownership WHERE car_id = $car_id AND sold_at IS NOT NULL",
           "refId": "A"
         }
       ]

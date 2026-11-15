@@ -354,7 +354,7 @@ def test_a_held_back_dashboard_says_so_and_an_absent_one_does_not():
     held = dashboard.render("UTC", "", teslamate=sources.TeslaMate(sources.UNTESTED, "Newer than tested."))
     note = held["panels"][0]
     assert note["id"] == dashboard.NOTE_PANEL_ID and "Newer than tested." in note["options"]["content"]
-    assert all(p["fieldConfig"]["defaults"]["noValue"] == "unavailable" for p in held["panels"] if p["type"] == "stat")
+    assert all(p["fieldConfig"]["defaults"]["noValue"] == "unavailable" for p in held["panels"] if p["type"] == "stat" and p["title"] != "Sold")
     assert min(p["gridPos"]["y"] for p in held["panels"][1:]) == note["gridPos"]["h"]     # everything moved down
     absent = dashboard.render("UTC", "", teslamate=sources.TeslaMate(sources.ABSENT))
     assert all(p["id"] != dashboard.NOTE_PANEL_ID for p in absent["panels"])

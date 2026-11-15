@@ -318,6 +318,34 @@ def parse_car_form(form, kinds):
     return values, errors
 
 
+def parse_sale(form, tz, now):
+    """A sale: the date it sold (a day in `tz`, not in the future) and the price. -> (values, errors).
+    Both blank is no sale (values None). The moment saved is the end of that day, or now for today."""
+    date_raw, price_raw = (form.get("date") or "").strip(), (form.get("price") or "").strip()
+    if not date_raw and not price_raw:
+        return {"sold_at": None, "sale_price": None}, {}
+    errors, values = {}, {}
+    try:
+        if not date_raw:
+            raise ValueError("Enter the date it sold.")
+        sold_at = parse_local_datetime(date_raw, "23:59", tz).replace(second=59)
+        if sold_at.date() > now.date():
+            raise ValueError("The sale date can't be in the future.")
+        values["sold_at"] = min(sold_at, now.replace(microsecond=0))
+    except ValueError as exc:
+        errors["sold_date"] = str(exc)
+    try:
+        if not price_raw:
+            raise ValueError("Enter what it sold for (0 if it was given away).")
+        price = parse_amount(price_raw)
+        if price < 0:
+            raise ValueError("The sale price can't be negative.")
+        values["sale_price"] = price
+    except ValueError as exc:
+        errors["sold_price"] = str(exc)
+    return values, errors
+
+
 def parse_url_setting(raw):
     """A blank clears the setting (None). Otherwise an http(s) URL with no spaces."""
     url = (raw or "").strip()

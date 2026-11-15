@@ -66,6 +66,13 @@ CREATE TABLE IF NOT EXISTS garagebooks.car (
     created_at          timestamptz NOT NULL DEFAULT now()
 );
 
+-- Selling the car: when (a moment, entered as a date in APP_TZ) and for how much. Both or neither.
+-- Added to databases made before it existed; safe to run again.
+ALTER TABLE garagebooks.car ADD COLUMN IF NOT EXISTS sold_at timestamptz;
+ALTER TABLE garagebooks.car ADD COLUMN IF NOT EXISTS sale_price numeric(12,2) CHECK (sale_price >= 0);
+ALTER TABLE garagebooks.car DROP CONSTRAINT IF EXISTS car_sale_both;
+ALTER TABLE garagebooks.car ADD CONSTRAINT car_sale_both CHECK ((sold_at IS NULL) = (sale_price IS NULL));
+
 -- Adds a row for each TeslaMate car that has none, and keeps the names of cars not renamed here
 -- in step. Returns how many it added. Does nothing when there is no TeslaMate. Run on every
 -- start and by the app from time to time, as whoever calls it (the app's role may read cars).
@@ -274,6 +281,10 @@ END $$;
 --   start_km    odometer when you bought it (purchase expense), else the lowest odometer known
 --   current_km  the highest odometer known: TeslaMate's, a reading entered by hand, an expense's
 --   owned_since purchase date, else the earliest position, reading or expense
+--   sale_price, sold_at   what the car sold for and when (NULL while it is owned); tco is net of the sale price
+--   owned_until the sale date (never before owned_since), NULL while owned: time owned and the per-day
+--               and per-month figures stop there. current_km for a sold car is the highest odometer
+--               known at or before the sale.
 --
 -- The view comes in two forms, built by build_ownership(): with TeslaMate's charging costs
 -- and positions, or without them (there is no TeslaMate, or the app is holding its figures
@@ -306,7 +317,7 @@ BEGIN
         ) ch ON true';
         odometer := 'LEFT JOIN LATERAL (
             SELECT MIN(p.odometer)::double precision AS first_km,
-                   MAX(p.odometer)::double precision AS last_km,
+                   MAX(p.odometer) FILTER (WHERE car.sold_at IS NULL OR p.date <= car.sold_at AT TIME ZONE ''UTC'')::double precision AS last_km,
                    MIN(p.date) AT TIME ZONE ''UTC''  AS first_at
             FROM public.positions p
             WHERE p.car_id = car.teslamate_car_id
@@ -315,13 +326,15 @@ BEGIN
     body := format($view$
 SELECT
     v.car_id, v.car_name, v.purchase_total, v.running_total, v.charging_total,
-    v.purchase_total + v.running_total + v.charging_total AS tco,
+    v.purchase_total + v.running_total + v.charging_total - COALESCE(v.sale_price, 0) AS tco,
     v.start_km, v.current_km,
     -- No odometer known => no distance, not 0.
     CASE WHEN v.current_km IS NULL THEN NULL
          ELSE GREATEST(v.current_km - v.start_km, 0)
     END AS distance_km,
-    v.owned_since, v.teslamate_charging_total
+    v.owned_since, v.teslamate_charging_total,
+    v.sale_price, v.sold_at,
+    CASE WHEN v.sold_at IS NULL THEN NULL ELSE GREATEST(v.sold_at, v.owned_since) END AS owned_until
 FROM (
     SELECT
         car.id                                         AS car_id,
@@ -332,7 +345,8 @@ FROM (
         COALESCE(ex.purchase_km::double precision, LEAST(pos.first_km, man.first_km)) AS start_km,
         GREATEST(pos.last_km, man.last_km)             AS current_km,
         COALESCE(ex.purchase_at, LEAST(pos.first_at, man.first_at, ex.first_at)) AS owned_since,
-        tmc.total                                      AS teslamate_charging_total
+        tmc.total                                      AS teslamate_charging_total,
+        car.sale_price, car.sold_at
     FROM garagebooks.car car
     LEFT JOIN LATERAL (
         SELECT
@@ -348,7 +362,8 @@ FROM (
         WHERE e.car_id = car.id
     ) ex ON true
     LEFT JOIN LATERAL (
-        SELECT MIN(r.km)::double precision AS first_km, MAX(r.km)::double precision AS last_km, MIN(r.at) AS first_at
+        SELECT MIN(r.km)::double precision AS first_km, MAX(r.km) FILTER (WHERE car.sold_at IS NULL OR r.at <= car.sold_at)::double precision AS last_km,
+               MIN(r.at) AS first_at
         FROM (
             SELECT o.km, o.read_at AS at FROM garagebooks.odometer_reading o WHERE o.car_id = car.id
             UNION ALL

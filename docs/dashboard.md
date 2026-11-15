@@ -12,12 +12,12 @@ All of them come from the `garagebooks.ownership` view (`garagebooks/schema.sql`
 
 | Figure | Definition |
 |---|---|
-| Total cost | purchase + running expenses + charging |
+| Total cost | purchase + running expenses + charging, less the sale price once the car is sold (see [Selling a car](#selling-a-car)) |
 | Charging | TeslaMate's `charging_processes.cost` for a car it tracks, plus expenses in a charging or fuel category (**Charging**, **Fuel**) |
-| Distance | latest odometer − odometer on the purchase expense (else the lowest odometer known). The odometer is TeslaMate's, a reading entered on the Cars page, or the one on an expense |
+| Distance | latest odometer (for a sold car, the highest known on or before the sale date) − odometer on the purchase expense (else the lowest odometer known). The odometer is TeslaMate's, a reading entered on the Cars page, or the one on an expense |
 | Cost per km — all-in | total cost ÷ distance |
 | Cost per km — running | (running + charging) ÷ distance, excludes the purchase price |
-| Per day and per month | running (or total) cost, or distance, ÷ the time since purchase (at least one day, or one month) |
+| Per day and per month | running (or total) cost, or distance, ÷ the time since purchase, or until the sale date for a sold car (at least one day, or one month) |
 
 With no TeslaMate, the dashboard is written without TeslaMate's parts and counts what you entered.
 When TeslaMate is there but its figures are held back (an untested version, or tables that can't be
@@ -28,6 +28,24 @@ car it tracks instead of showing a figure with the charging missing. See
 The headline panels are all-time. The charts, pie and table follow the dashboard's time range, which
 starts at your earliest data. Grafana has no "all time", so the app works the start out each time it
 starts; a back-dated expense older than that needs the range widened by hand.
+
+## Selling a car
+
+Record the sale on the Cars page (see [Cars](index.md#selling-a-car)). For a sold car:
+
+- **Total cost**, **TCO per month**, **TCO per day** and **Cost per km, all-in** are net of the sale
+  price: purchase + running + charging − sale price. The sale price comes off only while a purchase
+  category is ticked in the **Category** box, because it is what you got back of the purchase price.
+  Running-only figures are not affected.
+- **Time owned** and every per-day and per-month figure divide by the time from purchase to the sale
+  date, not to today, so they stop growing once the car has gone.
+- **Distance** stops at the sale: the highest odometer known on or before the sale date, whether
+  TeslaMate's or one you entered. A reading or drive after the sale is ignored.
+- The **Sold** tile reads *Sold 12 Mar 2026 · $31,000*, and shows a dash for a car you still own. The
+  **Car** box adds *(sold)* after the car's name.
+- Charging or expenses dated after the sale still count: they are real costs.
+
+<!-- screenshot: dashboard-sold - The dashboard for a sold car, with the Sold tile and (sold) in the Car box -->
 
 ## Rebates and refunds
 

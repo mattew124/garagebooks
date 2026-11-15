@@ -43,6 +43,9 @@ MESSAGES = {
     "car_added": "Car added.",
     "car_saved": "Car saved.",
     "car_deleted": "Car deleted.",
+    "car_sold": "Sale saved.",
+    "car_sold_early": "Sale saved. The sale date is before the car's first expense, so its figures may look odd.",
+    "car_unsold": "Sale cleared.",
     "reading_added": "Odometer reading saved.",
     "reading_deleted": "Odometer reading deleted.",
     "settings": "Settings saved.",
@@ -240,6 +243,10 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
     def when(value):
         return value.astimezone(ZoneInfo(tz)).strftime("%d %b %Y %H:%M")
 
+    @app.template_filter("isodate")
+    def isodate(value):
+        return value.astimezone(ZoneInfo(tz)).date().isoformat()
+
     @app.template_filter("day")
     def day(value):
         return value.astimezone(ZoneInfo(tz)).strftime("%d %b %Y")
@@ -338,7 +345,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 # Which storage each car's invoices go to, for the file picker: only where it can be used.
                 "car_storage": {car_id: f["backend"] for car_id, f in folders.items() if store_for(f["backend"])},
                 "default_storage": "onedrive" if drive else "local",
-                "cars": db.cars(conn),
+                "cars": sorted(db.cars(conn), key=lambda c: c["sold_at"] is not None),   # sold cars last (the sort is stable)
                 "categories": db.categories(conn),
                 "values": values or {},
                 "errors": errors or {},
@@ -670,7 +677,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             state = teslamate(conn)
             cars = db.car_details(conn)
             for car in cars:
-                car["odometer"] = sources.odometer_at(conn, state, car["id"], now)
+                car["odometer"] = sources.odometer_at(conn, state, car["id"], min(car["sold_at"] or now, now))
         return render_template("cars.html", cars=cars, kinds=db.CAR_KINDS, teslamate=state, errors=errors or {},
                                values=values or {}, today=now.date().isoformat(),
                                message=MESSAGES.get(request.args.get("msg", ""))), status
@@ -699,6 +706,28 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             db.update_car(conn, car_id, values)
         log.info("car %s updated", car_id)
         return redirect(url_for("cars_page", msg="car_saved"), 303)
+
+    @app.post("/cars/<int:car_id>/sale")
+    def car_sale(car_id):
+        car_or_404(car_id)
+        now = datetime.now(ZoneInfo(tz))
+        if request.form.get("action") == "clear":
+            values, errors = {"sold_at": None, "sale_price": None}, {}
+        else:
+            values, errors = validation.parse_sale(request.form, tz, now)
+        if errors:
+            return render_cars({car_id: errors}, {car_id: request.form}, 400)
+        with connect() as conn:
+            db.set_sale(conn, car_id, values["sold_at"], values["sale_price"])
+            first = db.first_expense_at(conn, car_id)
+        log.info("car %s sale %s", car_id, "recorded" if values["sold_at"] else "cleared")
+        if values["sold_at"] is None:
+            msg = "car_unsold"
+        elif first is not None and values["sold_at"] < first:
+            msg = "car_sold_early"
+        else:
+            msg = "car_sold"
+        return redirect(url_for("cars_page", msg=msg), 303)
 
     @app.post("/cars/<int:car_id>/delete")
     def car_delete(car_id):
