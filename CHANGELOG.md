@@ -7,6 +7,9 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+A payment calculator on the Add and Edit form's amount field works out the true cost of a payment made of several
+parts, such as a discounted gift card plus cash. Only the amount you choose to use is saved. Nothing to do on upgrade.
+
 The rename to GarageBooks reaches the last places the old name was kept: the database schema, the
 dashboard's address and the settings. The app upgrades your database itself on its first start, and
 your data, saved links and OneDrive sign-in carry over.
