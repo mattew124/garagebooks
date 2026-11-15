@@ -44,6 +44,11 @@ Rules of thumb:
 6. Pin production to the digest of the stable build (the run summary shows it), not to `:latest`.
    The stable tag is a fresh build, so its digest differs from the candidate's: give it the same
    quick check before pinning.
+7. Optionally, when you choose to, update TeslaMate's project page if the app's features changed:
+   `scripts/teslamate-listing.sh check` shows how the page differs from `.github/teslamate-listing.md`,
+   and `scripts/teslamate-listing.sh preview` shows everything a pull request would send.
+   `scripts/teslamate-listing.sh propose` sends it, and only after you type yes at a terminal: it
+   publishes under your GitHub account, so it never runs from CI or an agent session.
 
 ## Following a channel
 

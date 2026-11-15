@@ -28,6 +28,33 @@ the latest release and opens an issue when it doesn't exit 0. After `--record`, 
 (an upgrade note) and the README line naming the tested release.
 
 
+## The TeslaMate project listing
+
+TeslaMate's "Projects using TeslaMate" page can describe this app. The text we want there is
+`.github/teslamate-listing.md`, and its first line records a hash of the README's feature list
+that it was written against. A pull request that changes a feature bullet in the README fails
+`tests/test_listing.py` until you have checked the listing still describes the app (a new storage
+option, say), edited it if not, and set the hash the failure message gives. The pull request's
+title and body are `.github/teslamate-listing-pr.md`, reviewed here like any other change.
+
+```bash
+scripts/teslamate-listing.sh check     # how TeslaMate's page differs from our entry (read-only)
+```
+
+```bash
+scripts/teslamate-listing.sh preview   # everything `propose` would send (sends nothing)
+```
+
+```bash
+scripts/teslamate-listing.sh propose   # shows the preview, then opens or refreshes the pull request if you type yes
+```
+
+Proposing it publishes under your GitHub account on `teslamate-org/teslamate`, so it only happens
+when you decide to: `propose` refuses to run without a terminal or under CI, and no workflow runs it
+(a test checks). It updates the same branch and pull request each time. The entry follows
+TeslaMate's trademark policy: no TeslaMate in the name, and its disclaimer word for word (a test
+checks both).
+
 ## CodeQL before you push
 
 CI runs CodeQL on pull requests (`.github/workflows/codeql.yml`). To get the same answer locally:
