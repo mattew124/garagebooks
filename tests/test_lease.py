@@ -4,13 +4,20 @@ All figures are invented. Runs on a database with no TeslaMate, so it passes bot
 
 import re
 from datetime import date, timedelta
+from datetime import datetime
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 import psycopg
 import pytest
 from psycopg.rows import dict_row
 
 from garagebooks import create_app, db, lease, validation
+
+def today_here():
+    """Today as the app sees it (APP_TZ, which these tests set to Brisbane), not the runner's UTC date."""
+    return datetime.now(ZoneInfo("Australia/Brisbane")).date()
+
 
 ORIGIN = {"Origin": "http://localhost"}
 
@@ -39,7 +46,7 @@ def app(empty_db, monkeypatch):
 
 
 def good_form(**over):
-    today = date.today()
+    today = today_here()
     data = {"financier": "Example Finance", "package_name": "Example package",
             "start_date": (today - timedelta(days=100)).isoformat(), "end_date": (today + timedelta(days=1000)).isoformat(),
             "refinance_date": "", "term_months": "36", "pay_frequency": "fortnightly",
@@ -327,7 +334,7 @@ def test_overlapping_leases_are_refused_but_a_refinance_from_the_next_day_is_not
 
 def test_past_and_next_leases_are_listed_below_the_current_one(app):
     client, _url, car_id = app
-    today = date.today()
+    today = today_here()
     add(client, car_id, financier="Old Finance", start_date=(today - timedelta(days=2000)).isoformat(),
         end_date=(today - timedelta(days=400)).isoformat())
     add(client, car_id, financier="Current Finance", start_date=(today - timedelta(days=399)).isoformat(),
@@ -397,7 +404,7 @@ def test_delete_removes_the_lease_and_its_budgets(app):
 
 def test_reading_functions(app):
     client, url, car_id = app
-    today = date.today()
+    today = today_here()
     add(client, car_id)
     with connect(url) as conn:
         assert db.current_lease(conn, car_id, today)["financier"] == "Example Finance"
