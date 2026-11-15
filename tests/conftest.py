@@ -39,14 +39,14 @@ def sh(*args, **kw):
 class Pg:
     def __init__(self, container, port, app_pass):
         self.container, self.port, self.app_pass = container, port, app_pass
-        self.app_url = f"postgresql://expenses_app:{app_pass}@127.0.0.1:{port}/teslamate"
+        self.app_url = f"postgresql://garagebooks_app:{app_pass}@127.0.0.1:{port}/teslamate"
 
     def psql(self, sql):
         return sh("docker", "exec", "-i", self.container, "psql", "-X", "-q", "-v",
                   "ON_ERROR_STOP=1", "-U", "postgres", "-d", "teslamate", "-c", sql)
 
     def provision(self):
-        env = {**os.environ, "DB_CONTAINER": self.container, "EXPENSES_DB_PASS": self.app_pass}
+        env = {**os.environ, "DB_CONTAINER": self.container, "GARAGEBOOKS_DB_PASS": self.app_pass}
         return subprocess.run([str(ROOT / "scripts" / "provision-db.sh")], env=env,
                               capture_output=True, text=True)
 
@@ -91,7 +91,7 @@ def pg():
         # A copy of the database as TeslaMate leaves it, for blank_db: made from another database,
         # because a template can't be in use while it is copied.
         sh("docker", "exec", name, "psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", "postgres",
-           "-c", "CREATE DATABASE tm_pristine TEMPLATE teslamate")
+           "-c", "CREATE DATABASE pristine TEMPLATE teslamate")
         result = pg.provision()
         assert result.returncode == 0, result.stderr
         yield pg
@@ -103,20 +103,20 @@ def pg():
 def admin(pg):
     """Superuser connection with a clean slate of expenses + TeslaMate stub data."""
     with pg.admin() as conn:
-        conn.execute("TRUNCATE expenses.expense, expenses.car_folder, expenses.onedrive_account,"
-                     " expenses.learned_label, expenses.learned_vendor, expenses.import_skip,"
+        conn.execute("TRUNCATE garagebooks.expense, garagebooks.car_folder, garagebooks.onedrive_account,"
+                     " garagebooks.learned_label, garagebooks.learned_vendor, garagebooks.import_skip,"
                      " positions, charging_processes RESTART IDENTITY CASCADE")   # CASCADE: real TeslaMate tables (drives...) reference them
-        conn.execute("DELETE FROM expenses.category WHERE sort_order = 100")
-        conn.execute("UPDATE expenses.setting SET invoice_date_format = NULL, invoice_name_format = NULL, multi_amount = NULL")
+        conn.execute("DELETE FROM garagebooks.category WHERE sort_order = 100")
+        conn.execute("UPDATE garagebooks.setting SET invoice_date_format = NULL, invoice_name_format = NULL, multi_amount = NULL")
         yield conn
 
 
 @pytest.fixture()
 def blank_db(pg):
-    """A TeslaMate database as TeslaMate leaves it: its own tables, no `expenses` schema."""
+    """A TeslaMate database as TeslaMate leaves it: its own tables, no `garagebooks` schema."""
     name = f"blank_{secrets.token_hex(4)}"
     with pg.admin() as conn:
-        conn.execute(f'CREATE DATABASE "{name}" TEMPLATE tm_pristine')
+        conn.execute(f'CREATE DATABASE "{name}" TEMPLATE pristine')
     url = f"postgresql://postgres:{pg.admin_pass}@127.0.0.1:{pg.port}/{name}"
     yield url
     with pg.admin() as conn:

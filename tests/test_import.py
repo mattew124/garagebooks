@@ -72,7 +72,7 @@ def client(app_for, ms, monkeypatch):  # noqa: F811
 
 
 def cat(admin, name):
-    return str(admin.execute("SELECT id FROM expenses.category WHERE name = %s", (name,)).fetchone()["id"])
+    return str(admin.execute("SELECT id FROM garagebooks.category WHERE name = %s", (name,)).fetchone()["id"])
 
 
 def post_rows(admin, **over):
@@ -180,7 +180,7 @@ def test_odometer_stays_blank_when_teslamate_has_nothing(client, admin):
 
 @pytest.fixture()
 def dashed(admin):
-    admin.execute("UPDATE expenses.setting SET invoice_name_format = '%date - %category - %vendor'")
+    admin.execute("UPDATE garagebooks.setting SET invoice_name_format = '%date - %category - %vendor'")
 
 
 def renames(ms):
@@ -359,9 +359,9 @@ def test_the_options_choice_applies_to_the_import_preview(client, admin, monkeyp
     monkeypatch.setitem(TEXT, b"%PDF-scan", OPTIONS)
     pick = lambda: client.get("/onedrive/import/1?sync=1").data.decode()
     assert 'value="590.00"' in pick()                                      # default: the largest
-    admin.execute("UPDATE expenses.setting SET multi_amount = 'min'")
+    admin.execute("UPDATE garagebooks.setting SET multi_amount = 'min'")
     assert 'value="301.00"' in pick() and 'value="590.00"' not in pick()
-    admin.execute("UPDATE expenses.setting SET multi_amount = 'blank'")
+    admin.execute("UPDATE garagebooks.setting SET multi_amount = 'blank'")
     assert 'value="590.00"' not in pick() and 'value="301.00"' not in pick()
 
 
@@ -371,7 +371,7 @@ def test_the_options_choice_applies_to_the_add_page_prefill(client, admin, monke
     send = lambda: client.post("/api/prefill", headers=ORIGIN, data={
         "invoice_file": (io.BytesIO(b"%PDF-scan"), "x.pdf", "application/pdf")}).get_json()["amount"]
     assert send() == "590.00"
-    admin.execute("UPDATE expenses.setting SET multi_amount = 'min'")
+    admin.execute("UPDATE garagebooks.setting SET multi_amount = 'min'")
     assert send() == "301.00"
 
 
@@ -379,7 +379,7 @@ def test_the_options_choice_applies_to_the_add_page_prefill(client, admin, monke
 
 def test_the_preview_flags_a_file_that_looks_like_an_existing_expense(client, admin):
     existing = admin.execute(
-        "INSERT INTO expenses.expense (car_id, category_id, occurred_at, amount, vendor) VALUES (1, %s, '2026-10-23 02:00+00', 1234.50, 'Other') RETURNING id",
+        "INSERT INTO garagebooks.expense (car_id, category_id, occurred_at, amount, vendor) VALUES (1, %s, '2026-10-23 02:00+00', 1234.50, 'Other') RETURNING id",
         (cat(admin, "Tyres"),)).fetchone()["id"]
     page = client.get("/onedrive/import/1?sync=1").data.decode()
     tyres_row = page.split('name="include_0"')[1].split("</tr>")[0]
@@ -389,7 +389,7 @@ def test_the_preview_flags_a_file_that_looks_like_an_existing_expense(client, ad
 
 
 def test_the_per_file_read_flags_it_too(client, admin):
-    admin.execute("INSERT INTO expenses.expense (car_id, category_id, occurred_at, amount) VALUES (1, %s, '2026-10-24 02:00+00', 1234.50)",
+    admin.execute("INSERT INTO garagebooks.expense (car_id, category_id, occurred_at, amount) VALUES (1, %s, '2026-10-24 02:00+00', 1234.50)",
                   (cat(admin, "Tyres"),))
     assert "Possible duplicate" in read(client).data.decode()
 

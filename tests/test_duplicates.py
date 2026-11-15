@@ -14,7 +14,7 @@ WHEN = datetime(2026, 11, 7, 2, 0, tzinfo=timezone.utc)
 
 def seed(admin, date="2026-11-05 02:00+00", amount="1200.50", car=1, category="Tyres", vendor="Tyre Shop"):
     return admin.execute(
-        "INSERT INTO expenses.expense (car_id, category_id, occurred_at, amount, vendor) VALUES (%s, %s, %s, %s, %s) RETURNING id",
+        "INSERT INTO garagebooks.expense (car_id, category_id, occurred_at, amount, vendor) VALUES (%s, %s, %s, %s, %s) RETURNING id",
         (car, category_id(admin, category), date, amount, vendor)).fetchone()["id"]
 
 
@@ -46,7 +46,7 @@ def test_a_different_amount_or_car_is_not_a_duplicate(admin):
         seed(admin, car=2)
         assert found(admin) == []
     finally:
-        admin.execute("DELETE FROM expenses.expense WHERE car_id = 2")
+        admin.execute("DELETE FROM garagebooks.expense WHERE car_id = 2")
         admin.execute("DELETE FROM cars WHERE id = 2")
 
 

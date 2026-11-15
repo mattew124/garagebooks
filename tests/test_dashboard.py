@@ -20,16 +20,16 @@ def test_render_sets_timezone_and_app_link():
     assert tz["query"] == "Australia/Brisbane"
     assert tz["current"]["value"] == "Australia/Brisbane" and tz["current"]["text"] == "Australia/Brisbane"
     assert [o["value"] for o in tz["options"]] == ["Australia/Brisbane"]
-    q = var(dash, "expenses_url")["query"]
-    assert "'/expenses/'" in q and "expenses.setting" in q
-    assert var(dash, "expenses_url")["definition"] == q
+    q = var(dash, "app_url")["query"]
+    assert "'/expenses/'" in q and "garagebooks.setting" in q
+    assert var(dash, "app_url")["definition"] == q
     # nothing else changes
     assert dash["uid"] == SOURCE["uid"] and dash["panels"] == SOURCE["panels"]
 
 
 def test_render_handles_no_base_path_and_quotes():
-    assert "'/'" in var(dashboard.render("UTC", ""), "expenses_url")["query"]
-    q = var(dashboard.render("UTC", "/it's"), "expenses_url")["query"]
+    assert "'/'" in var(dashboard.render("UTC", ""), "app_url")["query"]
+    q = var(dashboard.render("UTC", "/it's"), "app_url")["query"]
     assert "'/it''s/'" in q                      # quote doubled, so the SQL stays valid
 
 
@@ -130,5 +130,5 @@ def test_the_invoice_column_links_a_stored_invoice_to_the_app():
     """An invoice kept in the folder on the server has no link of its own: the app serves it at
     /invoice/<id>, under the address the dashboard already knows the app by."""
     sql = next(t["rawSql"] for p in SOURCE["panels"] for t in p.get("targets", []) if '"Invoice"' in t.get("rawSql", ""))
-    assert "e.invoice_path IS NOT NULL" in sql and "${expenses_url:sqlstring}" in sql
+    assert "e.invoice_path IS NOT NULL" in sql and "${app_url:sqlstring}" in sql
     assert "'/invoice/' || e.id" in sql and "ELSE e.invoice_url END" in sql

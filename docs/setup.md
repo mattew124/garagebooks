@@ -14,10 +14,10 @@
     [OneDrive uploads](onedrive.md) now too, or later with a restart. To keep invoices in a folder
     on this server instead, see [Invoice folder on the server](local-folder.md).
 
-2. **Back up TeslaMate's database.** The first start adds the `expenses` schema to it and changes
+2. **Back up TeslaMate's database.** The first start adds the `garagebooks` schema to it and changes
     nothing else, but take a backup first, as for any upgrade that touches the database.
 
-3. **Run it.** Set `EXPENSES_IMAGE` to a released image, or leave it unset to build locally. Follow
+3. **Run it.** Set `GARAGEBOOKS_IMAGE` to a released image, or leave it unset to build locally. Follow
     a release channel with `:rc` or `:latest`, or pin one version (see [RELEASING.md](https://github.com/mattew124/garagebooks/blob/main/RELEASING.md)).
 
     ```bash
@@ -75,7 +75,7 @@
 
 7. **Check the links.** On first start the app uses `FQDN_TM` to pre-fill its **Settings** page
     (the same idea as TeslaMate's): this app at `https://$FQDN_TM$BASE_PATH/` and the dashboard at
-    `https://$FQDN_TM/grafana/d/tm-expenses-tco` (change the `/grafana` part with `GRAFANA_PATH`).
+    `https://$FQDN_TM/grafana/d/garagebooks-tco` (change the `/grafana` part with `GRAFANA_PATH`).
     Those addresses add a *Dashboards ↗* link to the app's header and make the dashboard's
     *Add / edit expenses* link go to the right place. After that, the Settings page is the only place
     to change them, and restarts never overwrite it. Without `FQDN_TM` they start empty, and you
@@ -85,7 +85,7 @@
 
 ## The database
 
-There is nothing to run. On start the app creates its own `expenses` schema in the TeslaMate
+There is nothing to run. On start the app creates its own `garagebooks` schema in the TeslaMate
 database (idempotent, so upgrades apply themselves), and only ever writes inside it. It reads
 `cars`, `positions` and `charging_processes`, and the version table `schema_migrations`, and stops on a
 TeslaMate newer than the one it was tested with (see [Reference](reference.md#teslamate-version)). This needs TeslaMate's database user, which

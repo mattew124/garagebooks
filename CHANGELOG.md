@@ -5,6 +5,32 @@ steps are in [RELEASING.md](RELEASING.md). Newest first.
 
 Each entry says what an installer must do to upgrade. Where nothing is said, pull the new image.
 
+## Unreleased
+
+The rename to GarageBooks reaches the last places the old name was kept: the database schema, the
+dashboard's address and the settings. The app upgrades your database itself on its first start, and
+your data, saved links and OneDrive sign-in carry over.
+
+**To upgrade:** back up TeslaMate's database, as for any release that changes the schema, then pull
+the new image. On first start the app renames its `expenses` schema to `garagebooks`, renames the
+setting for its own address, and moves a saved dashboard link to the new address. If you move to
+the `/garagebooks` path in the same upgrade (by setting `BASE_PATH`, or by using the default), the saved
+address of the app moves with it, keeping your host: nothing to change on the Settings page. Grafana
+drops the old dashboard and its folder by itself. If you use the
+restricted database role (`SKIP_MIGRATE=1`), re-run `scripts/provision-db.sh` first: it does the same,
+and keeps your existing role when you set `GARAGEBOOKS_DB_USER` (or the old `EXPENSES_DB_USER`) to it.
+
+- **Schema:** `expenses` is now `garagebooks`. Grafana panels or queries of your own that name
+  `expenses.` need the new name.
+- **Dashboard address:** the uid is now `garagebooks-tco` (was `tm-expenses-tco`), so its address is
+  `/d/garagebooks-tco`. The link in the app's header moves by itself; bookmarks to the old address don't.
+- **Settings:** `EXPENSES_ENCRYPTION_KEY` is now `GARAGEBOOKS_ENCRYPTION_KEY` (the old name still works),
+  `EXPENSES_IMAGE` is `GARAGEBOOKS_IMAGE`, `EXPENSES_UID`/`EXPENSES_GID` are `GARAGEBOOKS_UID`/`GARAGEBOOKS_GID`,
+  and `scripts/provision-db.sh` takes `GARAGEBOOKS_DB_USER`/`GARAGEBOOKS_DB_PASS` (old names still work).
+  Its default role is now `garagebooks_app`.
+- **Fixed:** `docker-compose.invoices.yml` still named the service `expenses` after 0.4.0-rc1 renamed
+  it, so the invoice folder override started a second, broken container. It names `garagebooks` again.
+
 ## 0.4.0-rc1 - 2026-11-15
 
 **The project is now called GarageBooks** (it was teslamate-expenses). TeslaMate's trademark policy reserves

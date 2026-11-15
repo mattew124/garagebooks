@@ -37,7 +37,7 @@ ARG VERSION=dev
 ENV APP_VERSION=$VERSION
 
 # Non-root, and it writes nothing, so any other uid works too (`user:` in compose).
-RUN useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin expenses
+RUN useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin garagebooks
 USER 10001:10001
 
 EXPOSE 8080

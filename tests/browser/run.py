@@ -13,8 +13,8 @@ import time
 
 from playwright.sync_api import expect, sync_playwright
 
-BASE = os.environ.get("BASE_PATH", "/expenses-dev")
-UI = f"http://expenses-dev:8080{BASE}/"
+BASE = os.environ.get("BASE_PATH", "/garagebooks-dev")
+UI = f"http://garagebooks-dev:8080{BASE}/"
 GRAFANA = f"http://dev-grafana:3000{BASE}/grafana/"
 OUT = os.environ.get("OUT", "/out")
 MARKER = "BROWSER-TEST"
@@ -100,7 +100,7 @@ def test_large_pdf_is_accepted(page):
     """Uploads over 500 KB are spooled to a temp file. The container's root is read-only, so
     this fails with 'No usable temporary directory' unless TMPDIR points at the tmpfs."""
     big = b"%PDF-1.4\n" + b"0" * (900 * 1024) + b"\n%%EOF\n"
-    resp = page.request.post(UI + "api/prefill", headers={"Origin": "http://expenses-dev:8080"}, multipart={
+    resp = page.request.post(UI + "api/prefill", headers={"Origin": "http://garagebooks-dev:8080"}, multipart={
         "invoice_file": {"name": "large.pdf", "mimeType": "application/pdf", "buffer": big}})
     assert resp.status == 200, f"HTTP {resp.status}: a large PDF upload crashed the app"
     assert set(resp.json()) >= {"date", "amount", "vendor", "category_id", "odometer_km"}
@@ -243,7 +243,7 @@ def picker_checks(page):
 # ---- the invoice folder on the server ---------------------------------------------
 
 LOCAL_FOLDER = "Browser test"      # the only folder in the dev stack's invoice volume these checks write to
-ORIGIN = {"Origin": "http://expenses-dev:8080"}
+ORIGIN = {"Origin": "http://garagebooks-dev:8080"}
 
 
 def readable_pdf(text):
@@ -626,7 +626,7 @@ def test_pdf_can_be_dropped_on_the_form(page):
     """Dropping a PDF onto the invoice box chooses it, as the file button would, and reads it."""
     page.goto(UI + "new")
     if not page.locator("#invoice-drop").count():
-        raise Skip("uploads are off in this stack (no EXPENSES_ENCRYPTION_KEY)")
+        raise Skip("uploads are off in this stack (no GARAGEBOOKS_ENCRYPTION_KEY)")
     expect(page.locator("#invoice-drop-hint")).to_be_visible()
     page.evaluate("""() => {
         const drop = new DataTransfer();
@@ -794,7 +794,7 @@ def test_dashboard(page):
     page.on("response", lambda r: errors.append(f"{r.status} {r.url}")
             if "/api/ds/query" in r.url and r.status >= 400 else None)
     page.set_viewport_size({"width": 1600, "height": 1800})
-    page.goto(GRAFANA + "d/tm-expenses-tco/cost-of-ownership")
+    page.goto(GRAFANA + "d/garagebooks-tco/cost-of-ownership")
     # Stat titles appear, and a value comes back from the datasource.
     expect(page.get_by_text("Total cost", exact=True)).to_be_visible(timeout=30000)
     expect(page.get_by_text("Cost per km — running")).to_be_visible()

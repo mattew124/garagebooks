@@ -35,7 +35,7 @@ def test_test_database_is_never_published():
 
 
 def test_host_ports_are_loopback_only():
-    for name in ("expenses-dev", "dev-grafana"):
+    for name in ("garagebooks-dev", "dev-grafana"):
         (port,) = config()["services"][name]["ports"]
         assert port.startswith("127.0.0.1:")
 
@@ -56,7 +56,7 @@ def test_dev_routes_outrank_production():
 
 
 def test_dev_routes_end_in_a_slash():
-    """Otherwise /expenses-dev/foo would also serve /expenses-dev/foobar."""
+    """Otherwise /garagebooks-dev/foo would also serve /garagebooks-dev/foobar."""
     rules = re.findall(r"PathPrefix\(`([^`]+)`\)", DEV_PROXY)
     assert rules and all(r.endswith("/") for r in rules)
 
@@ -125,9 +125,9 @@ def test_dashboard_expenses_link_comes_from_the_apps_own_settings():
     URL saved on the app's Settings page instead."""
     dash = json.loads((ROOT / "grafana" / "cost-of-ownership.json").read_text())
     (link,) = [l for l in dash["links"] if l.get("title") == "Add / edit expenses"]
-    assert link["url"] == "${expenses_url}"
-    var = next(v for v in dash["templating"]["list"] if v["name"] == "expenses_url")
-    assert "expenses.setting" in var["query"]
+    assert link["url"] == "${app_url}"
+    var = next(v for v in dash["templating"]["list"] if v["name"] == "app_url")
+    assert "garagebooks.setting" in var["query"]
 
 
 def test_seeded_grafana_link_points_at_this_dashboards_uid():
@@ -154,8 +154,8 @@ def function_body(name):
 def test_saved_onedrive_sign_in_never_includes_a_folder():
     """Worktrees share a saved sign-in, never the folder a stack is pointed at."""
     save, link = function_body("onedrive_save"), function_body("onedrive_link")
-    assert "expenses.onedrive_account" in save and "car_folder" not in save
-    assert "DELETE FROM expenses.car_folder" in link
+    assert "garagebooks.onedrive_account" in save and "car_folder" not in save
+    assert "DELETE FROM garagebooks.car_folder" in link
 
 
 def test_saved_onedrive_sign_in_is_private_and_outside_the_repo():
@@ -191,9 +191,9 @@ def test_sample_expenses_are_made_up_and_stay_in_the_test_database():
     nothing but expenses, reads only what the app reads, and holds nothing from a real installation."""
     sql = (ROOT / "scripts" / "dev-sample-expenses.sql").read_text()
     code = re.sub(r"--[^\n]*", "", sql)
-    assert set(re.findall(r"(?:INSERT INTO|DELETE FROM|UPDATE)\s+([\w.]+)", code)) == {"expenses.expense"}
-    assert set(re.findall(r"(?:FROM|JOIN)\s+((?:public|expenses)\.\w+)", code)) <= {
-        "expenses.expense", "expenses.category", "public.cars", "public.positions"}
+    assert set(re.findall(r"(?:INSERT INTO|DELETE FROM|UPDATE)\s+([\w.]+)", code)) == {"garagebooks.expense"}
+    assert set(re.findall(r"(?:FROM|JOIN)\s+((?:public|garagebooks)\.\w+)", code)) <= {
+        "garagebooks.expense", "garagebooks.category", "public.cars", "public.positions"}
     assert set(re.findall(r"https?://([^/'\s]+)", sql)) == {"example.com"}
     assert 'dev_psql -v "tz=$APP_TZ" < scripts/dev-sample-expenses.sql' in SCRIPT
     assert "sample-expenses)\n        ensure_env" in SCRIPT      # never past the dev stack's own checks
@@ -211,9 +211,9 @@ def test_what_an_installer_sees_is_named_garagebooks():
     assert "PathPrefix(`${BASE_PATH:-/garagebooks}`)" in PROD_PROXY
     assert "folder: GarageBooks\n" in (ROOT / "grafana" / "provider.yml").read_text()
     dash = json.loads((ROOT / "grafana" / "cost-of-ownership.json").read_text())
-    (link,) = [l for l in dash["links"] if l.get("url") == "${expenses_url}"]
+    (link,) = [l for l in dash["links"] if l.get("url") == "${app_url}"]
     assert link["tooltip"] == "Open GarageBooks"
-    assert next(v for v in dash["templating"]["list"] if v["name"] == "expenses_url")["label"] == "GarageBooks URL"
+    assert next(v for v in dash["templating"]["list"] if v["name"] == "app_url")["label"] == "GarageBooks URL"
     assert "/garagebooks/" in json.dumps(dash) and "'/expenses/'" not in json.dumps(dash)
 
 
@@ -228,3 +228,17 @@ def test_onedrive_sign_in_saved_before_the_rename_is_still_found():
         out = subprocess.run(["bash", "-c", 'source <(sed -n "/^# ONEDRIVE_DEV_FILE start/,/^# ONEDRIVE_DEV_FILE end/p" scripts/dev.sh); echo "$ONEDRIVE_DEV_FILE"'],
                              cwd=ROOT, env={"HOME": home, "PATH": "/usr/bin:/bin"}, capture_output=True, text=True, check=True).stdout.strip()
         assert out == str(old / "onedrive-dev")
+
+
+def compose_services(path):
+    text = (ROOT / path).read_text()
+    block = text.split("\nservices:\n", 1)[1].split("\n\n", 1)[0] if "\nservices:\n" in text else ""
+    return set(re.findall(r"^  ([a-z][\w-]*):\s*$", block, re.M))
+
+
+def test_every_override_file_names_a_service_the_main_file_has():
+    """An override for a service that doesn't exist starts a broken second container instead."""
+    main = compose_services("docker-compose.yml")
+    assert main == {"garagebooks"}
+    for override in ("docker-compose.traefik.yml", "docker-compose.invoices.yml"):
+        assert compose_services(override) and compose_services(override) <= main, override

@@ -32,11 +32,11 @@ def app_for(pg, admin, monkeypatch, root):
     def make(folder=root, transport=None):
         """`folder` None: the feature is off. `transport`: OneDrive is on as well."""
         monkeypatch.delenv("INVOICES_DIR", raising=False)
-        monkeypatch.delenv("EXPENSES_ENCRYPTION_KEY", raising=False)
+        monkeypatch.delenv("GARAGEBOOKS_ENCRYPTION_KEY", raising=False)
         if folder is not None:
             monkeypatch.setenv("INVOICES_DIR", str(folder))
         if transport is not None:
-            monkeypatch.setenv("EXPENSES_ENCRYPTION_KEY", KEY)
+            monkeypatch.setenv("GARAGEBOOKS_ENCRYPTION_KEY", KEY)
         app = create_app(connect=lambda: psycopg.connect(pg.app_url, row_factory=dict_row),
                          onedrive_transport=transport)
         app.testing = True
@@ -119,7 +119,7 @@ def test_browsing_goes_down_and_up_and_uses_this_folder(client, admin):
     assert "<code>/Cars/Test car</code>" in down and "⬑ Up" in down and "folder=/Cars" in down
     assert "No folders in here." in down and 'name="folder_id" value="/Cars/Test car"' in down
     assert choose(client).status_code == 303
-    row = admin.execute("SELECT * FROM expenses.car_folder").fetchone()
+    row = admin.execute("SELECT * FROM garagebooks.car_folder").fetchone()
     assert (row["backend"], row["folder_id"], row["folder_path"]) == ("local", "/Cars/Test car", "/Cars/Test car")
 
 
@@ -138,13 +138,13 @@ def test_a_folder_outside_the_mount_or_missing_cant_be_browsed_or_chosen(client,
     assert client.get(f"/local/browse/1?folder={bad}").status_code == 502
     resp = choose(client, bad)
     assert resp.status_code == 400 and b"Couldn&#39;t use that folder" in resp.data
-    assert admin.execute("SELECT count(*) AS n FROM expenses.car_folder").fetchone()["n"] == 0
+    assert admin.execute("SELECT count(*) AS n FROM garagebooks.car_folder").fetchone()["n"] == 0
 
 
 def test_the_app_starts_while_the_database_is_still_down(monkeypatch, root):
     """Checking the folder at start asks the database whether a car uses it: that must not stop the start."""
     monkeypatch.setenv("INVOICES_DIR", str(root))
-    monkeypatch.delenv("EXPENSES_ENCRYPTION_KEY", raising=False)
+    monkeypatch.delenv("GARAGEBOOKS_ENCRYPTION_KEY", raising=False)
 
     def down():
         raise psycopg.OperationalError("connection refused")
@@ -156,7 +156,7 @@ def test_the_app_starts_while_the_database_is_still_down(monkeypatch, root):
 def app_with(pg, monkeypatch, folder, required, connect=None):
     monkeypatch.setenv("INVOICES_DIR", str(folder))
     monkeypatch.setenv("INVOICES_REQUIRED", required)
-    monkeypatch.delenv("EXPENSES_ENCRYPTION_KEY", raising=False)
+    monkeypatch.delenv("GARAGEBOOKS_ENCRYPTION_KEY", raising=False)
     app = create_app(connect=connect or (lambda: psycopg.connect(pg.app_url, row_factory=dict_row)))
     app.testing = True
     return app.test_client()
@@ -172,7 +172,7 @@ def test_required_and_missing_the_app_refuses_to_start_and_says_why(pg, admin, m
 def test_required_and_only_the_empty_mount_point_the_app_refuses_to_start(pg, admin, monkeypatch, tmp_path, caplog):
     bare = tmp_path / "mount-point"
     bare.mkdir()
-    admin.execute("INSERT INTO expenses.car_folder (car_id, folder_id, folder_path, backend) "
+    admin.execute("INSERT INTO garagebooks.car_folder (car_id, folder_id, folder_path, backend) "
                   "VALUES (1, '/Cars', '/Cars', 'local')")
     with pytest.raises(RuntimeError, match="INVOICES_REQUIRED"):
         app_with(pg, monkeypatch, bare, "1")
@@ -206,7 +206,7 @@ def test_required_but_the_database_is_down_at_start_it_still_starts(monkeypatch,
         raise psycopg.OperationalError("connection refused")
     monkeypatch.setenv("INVOICES_DIR", str(root))
     monkeypatch.setenv("INVOICES_REQUIRED", "1")
-    monkeypatch.delenv("EXPENSES_ENCRYPTION_KEY", raising=False)
+    monkeypatch.delenv("GARAGEBOOKS_ENCRYPTION_KEY", raising=False)
     assert create_app(connect=down) is not None
 
 
@@ -226,7 +226,7 @@ def test_a_share_that_did_not_mount_is_reported_and_nothing_lands_on_the_servers
     bare = tmp_path / "mount-point"
     bare.mkdir()
     c = app_for(folder=bare)
-    admin.execute("INSERT INTO expenses.car_folder (car_id, folder_id, folder_path, backend) "
+    admin.execute("INSERT INTO garagebooks.car_folder (car_id, folder_id, folder_path, backend) "
                   "VALUES (1, '/Cars/Test car', '/Cars/Test car', 'local')")
     page = c.get("/storage").data.decode()
     assert "isn't there" in page and "mounted" in page
@@ -244,7 +244,7 @@ def test_clear_forgets_the_folder_and_keeps_the_files(client, admin, root):
     choose(client)
     upload(client, admin)
     assert client.post("/local/folders/1/clear", headers=ORIGIN).status_code == 303
-    assert admin.execute("SELECT count(*) AS n FROM expenses.car_folder").fetchone()["n"] == 0
+    assert admin.execute("SELECT count(*) AS n FROM garagebooks.car_folder").fetchone()["n"] == 0
     assert len(files(root)) == 1
 
 
@@ -295,7 +295,7 @@ def test_a_folder_that_has_gone_is_an_error_not_recreated(client, admin, root):
 def test_an_unmounted_folder_is_reported_everywhere_and_never_created(app_for, admin, tmp_path):
     gone = tmp_path / "not-mounted"
     c = app_for(folder=gone)
-    admin.execute("INSERT INTO expenses.car_folder (car_id, folder_id, folder_path, backend) "
+    admin.execute("INSERT INTO garagebooks.car_folder (car_id, folder_id, folder_path, backend) "
                   "VALUES (1, '/Cars', '/Cars', 'local')")
     page = c.get("/storage")
     assert page.status_code == 200 and b"isn't there" in page.data and b"Choose folder" not in page.data
@@ -571,9 +571,9 @@ def test_corrections_are_learned_from_local_files_too(stocked, admin):
         stocked.post("/local/import/1", data=data, headers=ORIGIN)
     finally:
         TEXT[b"%PDF-tyres"] = TYRES_TEXT
-    learned = admin.execute("SELECT field, label FROM expenses.learned_label").fetchall()
+    learned = admin.execute("SELECT field, label FROM garagebooks.learned_label").fetchall()
     assert {"field": "amount", "label": "amount payable"} in learned
-    assert admin.execute("SELECT vendor FROM expenses.learned_vendor").fetchone()["vendor"] == "example tyres"
+    assert admin.execute("SELECT vendor FROM garagebooks.learned_vendor").fetchone()["vendor"] == "example tyres"
 
 
 # ---- beside OneDrive: each car uses one or the other ---------------------------------
@@ -589,7 +589,7 @@ def test_a_car_on_the_local_folder_uploads_there_and_microsoft_hears_nothing(bot
     c, ms = both
     choose_folder(c)                    # OneDrive first...
     assert choose(c).status_code == 303  # ...then the folder on the server takes the car over
-    assert admin.execute("SELECT backend FROM expenses.car_folder").fetchone()["backend"] == "local"
+    assert admin.execute("SELECT backend FROM garagebooks.car_folder").fetchone()["backend"] == "local"
     before = len(ms.calls)
     assert upload(c, admin).status_code == 303
     assert len(ms.calls) == before and len(files(root)) == 1
@@ -615,7 +615,7 @@ def test_clearing_on_one_page_leaves_a_folder_chosen_on_the_other(both, admin):
     c, _ = both
     choose(c)
     c.post("/onedrive/folders/1/clear", headers=ORIGIN)
-    assert admin.execute("SELECT backend FROM expenses.car_folder").fetchone()["backend"] == "local"
+    assert admin.execute("SELECT backend FROM garagebooks.car_folder").fetchone()["backend"] == "local"
     assert c.get("/onedrive/import/1").status_code == 303     # not this car's storage: nothing to import here
 
 

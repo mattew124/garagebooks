@@ -1,6 +1,6 @@
 {
   "title": "Cost of Ownership",
-  "uid": "tm-expenses-tco",
+  "uid": "garagebooks-tco",
   "tags": [
     "tesla",
     "TeslamateCustomDashboards"
@@ -36,7 +36,7 @@
       "title": "Add / edit expenses",
       "type": "link",
       "icon": "doc",
-      "url": "${expenses_url}",
+      "url": "${app_url}",
       "targetBlank": true,
       "tooltip": "Open GarageBooks"
     },
@@ -82,8 +82,8 @@
         "multi": true,
         "options": [],
         "regex": "",
-        "query": "SELECT name FROM (SELECT name, sort_order AS s FROM expenses.category UNION ALL SELECT 'Charging', 1000) x ORDER BY s, name",
-        "definition": "SELECT name FROM (SELECT name, sort_order AS s FROM expenses.category UNION ALL SELECT 'Charging', 1000) x ORDER BY s, name",
+        "query": "SELECT name FROM (SELECT name, sort_order AS s FROM garagebooks.category UNION ALL SELECT 'Charging', 1000) x ORDER BY s, name",
+        "definition": "SELECT name FROM (SELECT name, sort_order AS s FROM garagebooks.category UNION ALL SELECT 'Charging', 1000) x ORDER BY s, name",
         "current": {
           "selected": true,
           "text": [
@@ -127,7 +127,7 @@
         ]
       },
       {
-        "name": "expenses_url",
+        "name": "app_url",
         "label": "GarageBooks URL",
         "type": "query",
         "hide": 2,
@@ -140,8 +140,8 @@
         "multi": false,
         "options": [],
         "regex": "",
-        "query": "SELECT COALESCE((SELECT expenses_url FROM expenses.setting WHERE id = 1), '/garagebooks/');",
-        "definition": "SELECT COALESCE((SELECT expenses_url FROM expenses.setting WHERE id = 1), '/garagebooks/');",
+        "query": "SELECT COALESCE((SELECT app_url FROM garagebooks.setting WHERE id = 1), '/garagebooks/');",
+        "definition": "SELECT COALESCE((SELECT app_url FROM garagebooks.setting WHERE id = 1), '/garagebooks/');",
         "current": {}
       },
       {
@@ -223,7 +223,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT ((SELECT COALESCE(SUM(e.amount), 0) FROM expenses.expense e JOIN expenses.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'purchase' AND c.name IN ($category)) + (SELECT COALESCE(SUM(e.amount), 0) FROM expenses.expense e JOIN expenses.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'running' AND c.name IN ($category)) + (SELECT CASE WHEN 'Charging' IN ($category) THEN charging_total ELSE 0 END FROM expenses.ownership WHERE car_id = $car_id))",
+          "rawSql": "SELECT ((SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'purchase' AND c.name IN ($category)) + (SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'running' AND c.name IN ($category)) + (SELECT CASE WHEN 'Charging' IN ($category) THEN charging_total ELSE 0 END FROM garagebooks.ownership WHERE car_id = $car_id))",
           "refId": "A"
         }
       ]
@@ -284,7 +284,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT (SELECT COALESCE(SUM(e.amount), 0) FROM expenses.expense e JOIN expenses.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'purchase' AND c.name IN ($category))",
+          "rawSql": "SELECT (SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'purchase' AND c.name IN ($category))",
           "refId": "A"
         }
       ]
@@ -345,7 +345,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT (SELECT COALESCE(SUM(e.amount), 0) FROM expenses.expense e JOIN expenses.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'running' AND c.name IN ($category))",
+          "rawSql": "SELECT (SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'running' AND c.name IN ($category))",
           "refId": "A"
         }
       ]
@@ -406,7 +406,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT (SELECT CASE WHEN 'Charging' IN ($category) THEN charging_total ELSE 0 END FROM expenses.ownership WHERE car_id = $car_id)",
+          "rawSql": "SELECT (SELECT CASE WHEN 'Charging' IN ($category) THEN charging_total ELSE 0 END FROM garagebooks.ownership WHERE car_id = $car_id)",
           "refId": "A"
         }
       ]
@@ -467,7 +467,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT distance_km FROM expenses.ownership WHERE car_id = $car_id",
+          "rawSql": "SELECT distance_km FROM garagebooks.ownership WHERE car_id = $car_id",
           "refId": "A"
         }
       ]
@@ -527,7 +527,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT CASE WHEN y > 0 THEN y || CASE WHEN y = 1 THEN ' year' ELSE ' years' END || CASE WHEN m > 0 THEN ', ' || m || CASE WHEN m = 1 THEN ' month' ELSE ' months' END ELSE '' END ELSE m || CASE WHEN m = 1 THEN ' month' ELSE ' months' END END FROM (SELECT EXTRACT(YEAR FROM a)::int AS y, EXTRACT(MONTH FROM a)::int AS m FROM (SELECT age(now(), owned_since) AS a FROM expenses.ownership WHERE car_id = $car_id) x) t",
+          "rawSql": "SELECT CASE WHEN y > 0 THEN y || CASE WHEN y = 1 THEN ' year' ELSE ' years' END || CASE WHEN m > 0 THEN ', ' || m || CASE WHEN m = 1 THEN ' month' ELSE ' months' END ELSE '' END ELSE m || CASE WHEN m = 1 THEN ' month' ELSE ' months' END END FROM (SELECT EXTRACT(YEAR FROM a)::int AS y, EXTRACT(MONTH FROM a)::int AS m FROM (SELECT age(now(), owned_since) AS a FROM garagebooks.ownership WHERE car_id = $car_id) x) t",
           "refId": "A"
         }
       ]
@@ -588,7 +588,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT ((SELECT COALESCE(SUM(e.amount), 0) FROM expenses.expense e JOIN expenses.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'purchase' AND c.name IN ($category)) + (SELECT COALESCE(SUM(e.amount), 0) FROM expenses.expense e JOIN expenses.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'running' AND c.name IN ($category)) + (SELECT CASE WHEN 'Charging' IN ($category) THEN charging_total ELSE 0 END FROM expenses.ownership WHERE car_id = $car_id)) / NULLIF((SELECT distance_km FROM expenses.ownership WHERE car_id = $car_id), 0)",
+          "rawSql": "SELECT ((SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'purchase' AND c.name IN ($category)) + (SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'running' AND c.name IN ($category)) + (SELECT CASE WHEN 'Charging' IN ($category) THEN charging_total ELSE 0 END FROM garagebooks.ownership WHERE car_id = $car_id)) / NULLIF((SELECT distance_km FROM garagebooks.ownership WHERE car_id = $car_id), 0)",
           "refId": "A"
         }
       ]
@@ -649,7 +649,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT ((SELECT COALESCE(SUM(e.amount), 0) FROM expenses.expense e JOIN expenses.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'running' AND c.name IN ($category)) + (SELECT CASE WHEN 'Charging' IN ($category) THEN charging_total ELSE 0 END FROM expenses.ownership WHERE car_id = $car_id)) / NULLIF((SELECT distance_km FROM expenses.ownership WHERE car_id = $car_id), 0)",
+          "rawSql": "SELECT ((SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'running' AND c.name IN ($category)) + (SELECT CASE WHEN 'Charging' IN ($category) THEN charging_total ELSE 0 END FROM garagebooks.ownership WHERE car_id = $car_id)) / NULLIF((SELECT distance_km FROM garagebooks.ownership WHERE car_id = $car_id), 0)",
           "refId": "A"
         }
       ]
@@ -710,7 +710,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT ((SELECT COALESCE(SUM(e.amount), 0) FROM expenses.expense e JOIN expenses.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'running' AND c.name IN ($category)) + (SELECT CASE WHEN 'Charging' IN ($category) THEN charging_total ELSE 0 END FROM expenses.ownership WHERE car_id = $car_id)) / GREATEST(EXTRACT(EPOCH FROM now() - (SELECT owned_since FROM expenses.ownership WHERE car_id = $car_id)) / 2629746, 1)",
+          "rawSql": "SELECT ((SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'running' AND c.name IN ($category)) + (SELECT CASE WHEN 'Charging' IN ($category) THEN charging_total ELSE 0 END FROM garagebooks.ownership WHERE car_id = $car_id)) / GREATEST(EXTRACT(EPOCH FROM now() - (SELECT owned_since FROM garagebooks.ownership WHERE car_id = $car_id)) / 2629746, 1)",
           "refId": "A"
         }
       ]
@@ -771,7 +771,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT ((SELECT COALESCE(SUM(e.amount), 0) FROM expenses.expense e JOIN expenses.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'purchase' AND c.name IN ($category)) + (SELECT COALESCE(SUM(e.amount), 0) FROM expenses.expense e JOIN expenses.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'running' AND c.name IN ($category)) + (SELECT CASE WHEN 'Charging' IN ($category) THEN charging_total ELSE 0 END FROM expenses.ownership WHERE car_id = $car_id)) / GREATEST(EXTRACT(EPOCH FROM now() - (SELECT owned_since FROM expenses.ownership WHERE car_id = $car_id)) / 2629746, 1)",
+          "rawSql": "SELECT ((SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'purchase' AND c.name IN ($category)) + (SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'running' AND c.name IN ($category)) + (SELECT CASE WHEN 'Charging' IN ($category) THEN charging_total ELSE 0 END FROM garagebooks.ownership WHERE car_id = $car_id)) / GREATEST(EXTRACT(EPOCH FROM now() - (SELECT owned_since FROM garagebooks.ownership WHERE car_id = $car_id)) / 2629746, 1)",
           "refId": "A"
         }
       ]
@@ -832,7 +832,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT ((SELECT COALESCE(SUM(e.amount), 0) FROM expenses.expense e JOIN expenses.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'running' AND c.name IN ($category)) + (SELECT CASE WHEN 'Charging' IN ($category) THEN charging_total ELSE 0 END FROM expenses.ownership WHERE car_id = $car_id)) / GREATEST(EXTRACT(EPOCH FROM now() - (SELECT owned_since FROM expenses.ownership WHERE car_id = $car_id)) / 86400, 1)",
+          "rawSql": "SELECT ((SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'running' AND c.name IN ($category)) + (SELECT CASE WHEN 'Charging' IN ($category) THEN charging_total ELSE 0 END FROM garagebooks.ownership WHERE car_id = $car_id)) / GREATEST(EXTRACT(EPOCH FROM now() - (SELECT owned_since FROM garagebooks.ownership WHERE car_id = $car_id)) / 86400, 1)",
           "refId": "A"
         }
       ]
@@ -893,7 +893,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT ((SELECT COALESCE(SUM(e.amount), 0) FROM expenses.expense e JOIN expenses.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'purchase' AND c.name IN ($category)) + (SELECT COALESCE(SUM(e.amount), 0) FROM expenses.expense e JOIN expenses.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'running' AND c.name IN ($category)) + (SELECT CASE WHEN 'Charging' IN ($category) THEN charging_total ELSE 0 END FROM expenses.ownership WHERE car_id = $car_id)) / GREATEST(EXTRACT(EPOCH FROM now() - (SELECT owned_since FROM expenses.ownership WHERE car_id = $car_id)) / 86400, 1)",
+          "rawSql": "SELECT ((SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'purchase' AND c.name IN ($category)) + (SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'running' AND c.name IN ($category)) + (SELECT CASE WHEN 'Charging' IN ($category) THEN charging_total ELSE 0 END FROM garagebooks.ownership WHERE car_id = $car_id)) / GREATEST(EXTRACT(EPOCH FROM now() - (SELECT owned_since FROM garagebooks.ownership WHERE car_id = $car_id)) / 86400, 1)",
           "refId": "A"
         }
       ]
@@ -954,7 +954,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT distance_km / GREATEST(EXTRACT(EPOCH FROM now() - owned_since) / 86400, 1) FROM expenses.ownership WHERE car_id = $car_id",
+          "rawSql": "SELECT distance_km / GREATEST(EXTRACT(EPOCH FROM now() - owned_since) / 86400, 1) FROM garagebooks.ownership WHERE car_id = $car_id",
           "refId": "A"
         }
       ]
@@ -1135,7 +1135,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT c.name AS \"Category\", SUM(e.amount) AS \"Cost\"\nFROM expenses.expense e JOIN expenses.category c ON c.id = e.category_id\nWHERE e.car_id = $car_id AND c.kind = 'running' AND $__timeFilter(e.occurred_at)\nGROUP BY c.name\nUNION ALL\nSELECT 'Charging', SUM(cp.cost) FROM charging_processes cp\nWHERE cp.car_id = $car_id AND $__timeFilter(cp.start_date)\nHAVING SUM(cp.cost) IS NOT NULL\nORDER BY 2 DESC",
+          "rawSql": "SELECT c.name AS \"Category\", SUM(e.amount) AS \"Cost\"\nFROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id\nWHERE e.car_id = $car_id AND c.kind = 'running' AND $__timeFilter(e.occurred_at)\nGROUP BY c.name\nUNION ALL\nSELECT 'Charging', SUM(cp.cost) FROM charging_processes cp\nWHERE cp.car_id = $car_id AND $__timeFilter(cp.start_date)\nHAVING SUM(cp.cost) IS NOT NULL\nORDER BY 2 DESC",
           "refId": "A"
         }
       ]
@@ -1318,7 +1318,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT date_trunc('$period', e.occurred_at AT TIME ZONE '$tz') AS time, c.name AS metric, SUM(e.amount) AS value\nFROM expenses.expense e JOIN expenses.category c ON c.id = e.category_id\nWHERE e.car_id = $car_id AND c.kind = 'running' AND $__timeFilter(e.occurred_at)\nGROUP BY 1, 2\nUNION ALL\nSELECT date_trunc('$period', (cp.start_date AT TIME ZONE 'UTC') AT TIME ZONE '$tz'), 'Charging', SUM(cp.cost)\nFROM charging_processes cp\nWHERE cp.car_id = $car_id AND $__timeFilter(cp.start_date)\nGROUP BY 1 HAVING SUM(cp.cost) IS NOT NULL\nORDER BY 1",
+          "rawSql": "SELECT date_trunc('$period', e.occurred_at AT TIME ZONE '$tz') AS time, c.name AS metric, SUM(e.amount) AS value\nFROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id\nWHERE e.car_id = $car_id AND c.kind = 'running' AND $__timeFilter(e.occurred_at)\nGROUP BY 1, 2\nUNION ALL\nSELECT date_trunc('$period', (cp.start_date AT TIME ZONE 'UTC') AT TIME ZONE '$tz'), 'Charging', SUM(cp.cost)\nFROM charging_processes cp\nWHERE cp.car_id = $car_id AND $__timeFilter(cp.start_date)\nGROUP BY 1 HAVING SUM(cp.cost) IS NOT NULL\nORDER BY 1",
           "refId": "A"
         }
       ]
@@ -1371,7 +1371,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "WITH m AS (\n  SELECT date_trunc('$period', e.occurred_at AT TIME ZONE '$tz') AS t, SUM(e.amount) AS a\n  FROM expenses.expense e WHERE e.car_id = $car_id GROUP BY 1\n  UNION ALL\n  SELECT date_trunc('$period', (cp.start_date AT TIME ZONE 'UTC') AT TIME ZONE '$tz'), SUM(cp.cost)\n  FROM charging_processes cp WHERE cp.car_id = $car_id GROUP BY 1\n)\nSELECT t AS time, SUM(SUM(a)) OVER (ORDER BY t) AS \"Cumulative cost\"\nFROM m WHERE a IS NOT NULL GROUP BY t ORDER BY t",
+          "rawSql": "WITH m AS (\n  SELECT date_trunc('$period', e.occurred_at AT TIME ZONE '$tz') AS t, SUM(e.amount) AS a\n  FROM garagebooks.expense e WHERE e.car_id = $car_id GROUP BY 1\n  UNION ALL\n  SELECT date_trunc('$period', (cp.start_date AT TIME ZONE 'UTC') AT TIME ZONE '$tz'), SUM(cp.cost)\n  FROM charging_processes cp WHERE cp.car_id = $car_id GROUP BY 1\n)\nSELECT t AS time, SUM(SUM(a)) OVER (ORDER BY t) AS \"Cumulative cost\"\nFROM m WHERE a IS NOT NULL GROUP BY t ORDER BY t",
           "refId": "A"
         }
       ]
@@ -1498,7 +1498,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT e.occurred_at AS \"Date\", c.name AS \"Category\", e.vendor AS \"Vendor\", e.amount AS \"Amount\",\n       e.odometer_km AS \"Odometer\", CASE WHEN e.invoice_path IS NOT NULL THEN rtrim(${expenses_url:sqlstring}, '/') || '/invoice/' || e.id ELSE e.invoice_url END AS \"Invoice\",\n       e.notes AS \"Notes\"\nFROM expenses.expense e JOIN expenses.category c ON c.id = e.category_id\nWHERE e.car_id = $car_id AND $__timeFilter(e.occurred_at)\nORDER BY e.occurred_at DESC",
+          "rawSql": "SELECT e.occurred_at AS \"Date\", c.name AS \"Category\", e.vendor AS \"Vendor\", e.amount AS \"Amount\",\n       e.odometer_km AS \"Odometer\", CASE WHEN e.invoice_path IS NOT NULL THEN rtrim(${app_url:sqlstring}, '/') || '/invoice/' || e.id ELSE e.invoice_url END AS \"Invoice\",\n       e.notes AS \"Notes\"\nFROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id\nWHERE e.car_id = $car_id AND $__timeFilter(e.occurred_at)\nORDER BY e.occurred_at DESC",
           "refId": "A"
         }
       ]

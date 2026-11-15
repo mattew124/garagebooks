@@ -6,10 +6,10 @@
 name: garagebooks-dev
 
 services:
-  expenses-dev:
+  garagebooks-dev:
     build: .
-    # EXPENSES_IMAGE: test a released image rather than this working tree.
-    image: ${EXPENSES_IMAGE:-garagebooks:${DEV_TAG:-dev}}
+    # GARAGEBOOKS_IMAGE: test a released image rather than this working tree.
+    image: ${GARAGEBOOKS_IMAGE:-garagebooks:${DEV_TAG:-dev}}
     restart: unless-stopped
     read_only: true
     cap_drop: [ALL]
@@ -24,10 +24,10 @@ services:
       # Same as the live setup: the TeslaMate database user. The app creates its own schema.
       DATABASE_USER: teslamate
       DATABASE_PASS: ${DEV_ADMIN_DB_PASS:-}
-      BASE_PATH: ${DEV_BASE_PATH:-/expenses-dev}
+      BASE_PATH: ${DEV_BASE_PATH:-/garagebooks-dev}
       # OneDrive is on in dev, with a throwaway key from .dev/env; the app
       # registration is entered on its OneDrive page.
-      EXPENSES_ENCRYPTION_KEY: ${DEV_ENCRYPTION_KEY:-}
+      GARAGEBOOKS_ENCRYPTION_KEY: ${DEV_ENCRYPTION_KEY:-}
       APP_TZ: ${APP_TZ:-UTC}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       TZ: ${APP_TZ:-UTC}
@@ -98,7 +98,7 @@ services:
       DATABASE_PASS: ${DEV_ADMIN_DB_PASS:-}
       DATABASE_SSL_MODE: disable
       GF_SECURITY_ADMIN_PASSWORD: ${DEV_GRAFANA_PASS:-}
-      GF_SERVER_ROOT_URL: http://localhost:${DEV_GRAFANA_PORT:-8090}${DEV_BASE_PATH:-/expenses-dev}/grafana
+      GF_SERVER_ROOT_URL: http://localhost:${DEV_GRAFANA_PORT:-8090}${DEV_BASE_PATH:-/garagebooks-dev}/grafana
       GF_SERVER_SERVE_FROM_SUB_PATH: "true"
       # View without a Grafana login: this stack is only on loopback or behind
       # the proxy's forward-auth.
@@ -107,7 +107,7 @@ services:
       GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /dashboards-dev/cost-of-ownership.json
       TZ: ${APP_TZ:-UTC}
     volumes:
-      - ./grafana/provider.dev.yml:/etc/grafana/provisioning/dashboards/expenses-dev.yml:ro
+      - ./grafana/provider.dev.yml:/etc/grafana/provisioning/dashboards/garagebooks-dev.yml:ro
       - dev-dashboards:/dashboards-dev:ro
     depends_on:
       dev-db:

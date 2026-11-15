@@ -43,7 +43,7 @@ def worktree(main, name):
 def test_main_checkout_keeps_the_standard_names(repo):
     i = info(repo)
     assert i["project"] == "garagebooks-dev"
-    assert i["base_path"] == "/expenses-dev"
+    assert i["base_path"] == "/garagebooks-dev"
     assert (i["ui_port"], i["grafana_port"]) == ("8089", "8090")
     assert i["image"] == "garagebooks:dev"
 
@@ -51,7 +51,7 @@ def test_main_checkout_keeps_the_standard_names(repo):
 def test_worktrees_get_their_own_stack(repo):
     a, b = info(worktree(repo, "fix-odometer")), info(worktree(repo, "Feature_Two"))
     assert a["project"] == "garagebooks-dev-fix-odometer"
-    assert a["base_path"] == "/expenses-dev/fix-odometer"
+    assert a["base_path"] == "/garagebooks-dev/fix-odometer"
     assert b["project"] == "garagebooks-dev-feature-two"   # sanitised for docker
     main = info(repo)
     for key in ("project", "base_path", "ui_port", "grafana_port", "image", "router_suffix"):
@@ -60,7 +60,7 @@ def test_worktrees_get_their_own_stack(repo):
 
 def test_worktree_routes_outrank_the_main_dev_stack(repo):
     main, wt = info(repo), info(worktree(repo, "x"))
-    # /expenses-dev/ (main) is a prefix of /expenses-dev/x/, so the worktree must win.
+    # /garagebooks-dev/ (main) is a prefix of /garagebooks-dev/x/, so the worktree must win.
     assert int(wt["ui_priority"]) > int(main["grafana_priority"]) > int(main["ui_priority"])
     assert int(wt["grafana_priority"]) > int(wt["ui_priority"])
 
@@ -74,7 +74,7 @@ def test_reserved_or_unusable_worktree_names_are_refused(repo):
 
 
 def test_instance_can_be_named_explicitly(repo):
-    assert info(repo, {"DEV_INSTANCE": "demo"})["base_path"] == "/expenses-dev/demo"
+    assert info(repo, {"DEV_INSTANCE": "demo"})["base_path"] == "/garagebooks-dev/demo"
 
 
 def run_destroy(checkout, tmp_path):

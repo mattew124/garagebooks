@@ -1,12 +1,12 @@
 # GarageBooks: runs *beside* the TeslaMate stack, not inside it.
 # It joins TeslaMate's own compose network (external) to reach the `database`
 # service, using the same database user and password as TeslaMate. The app creates
-# its own `expenses` schema when it starts. See https://mattew124.github.io/garagebooks/setup/
+# its own `garagebooks` schema when it starts. See https://mattew124.github.io/garagebooks/setup/
 services:
   garagebooks:
     build: .
-    # Pin a released version: EXPENSES_IMAGE=ghcr.io/mattew124/garagebooks:0.1.0
-    image: ${EXPENSES_IMAGE:-garagebooks:latest}
+    # Pin a released version: GARAGEBOOKS_IMAGE=ghcr.io/mattew124/garagebooks:0.1.0
+    image: ${GARAGEBOOKS_IMAGE:-garagebooks:latest}
     restart: unless-stopped
     read_only: true
     cap_drop: [ALL]

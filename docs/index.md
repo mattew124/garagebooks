@@ -9,7 +9,7 @@ already tracks.
 
     This project was written with an AI coding assistant (Claude Code), directed
     and tested by a person, not hand-written or audited line by line. It has tests, runs in a
-    read-only, non-root container and only writes inside its own `expenses` schema, but treat it as
+    read-only, non-root container and only writes inside its own `garagebooks` schema, but treat it as
     you would any young, unreviewed software: back up your TeslaMate database before first use, and
     read the code before you trust it with anything you care about.
 
@@ -61,12 +61,12 @@ Air filter, Wheel alignment, Tyre rotation. Add more on the **Categories** page
 
 ## How it fits together
 
-The expenses live in their own `expenses` schema inside the TeslaMate database, so Grafana joins
+The expenses live in their own `garagebooks` schema inside the TeslaMate database, so Grafana joins
 them to TeslaMate's charging costs and odometer with no second datasource.
 
 ```
  browser ──► proxy + forward-auth ──► GarageBooks (Flask/gunicorn) ──► TeslaMate Postgres
-                                                                       ▲   schema `expenses`
+                                                                       ▲   schema `garagebooks`
                                      Grafana (TeslaMate datasource) ───┘   + public.* (read-only)
 ```
 

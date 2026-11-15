@@ -9,7 +9,7 @@ the Invoice storage page. Personal Microsoft accounts can't use app-only (client
 credentials) access to OneDrive, so a delegated sign-in is the only way in.
 
 The refresh token is the key to the whole drive (Files.ReadWrite), so it and the
-client secret are encrypted with EXPENSES_ENCRYPTION_KEY before they reach the
+client secret are encrypted with GARAGEBOOKS_ENCRYPTION_KEY before they reach the
 database: a backup of the TeslaMate database on its own can't open the drive.
 
 Every HTTP call goes through `transport(method, url, data, headers) -> (status, json)`,
@@ -74,12 +74,12 @@ def http(method, url, data=None, headers=None, timeout=60, raw=False):
 
 
 def token_box(key):
-    """EXPENSES_ENCRYPTION_KEY -> Fernet. Raises ValueError naming the variable."""
+    """GARAGEBOOKS_ENCRYPTION_KEY -> Fernet. Raises ValueError naming the variable."""
     try:
         return Fernet(key.encode() if isinstance(key, str) else key)
     except (ValueError, TypeError, AttributeError):
         raise ValueError(
-            "EXPENSES_ENCRYPTION_KEY must be 32 random bytes, url-safe base64 encoded "
+            "GARAGEBOOKS_ENCRYPTION_KEY must be 32 random bytes, url-safe base64 encoded "
             "(see https://mattew124.github.io/garagebooks/onedrive/)") from None
 
 
@@ -126,7 +126,7 @@ class OneDrive:
             return self.box.decrypt(token.encode()).decode()
         except InvalidToken:
             raise SignInExpired(
-                "The saved OneDrive details can't be read (was EXPENSES_ENCRYPTION_KEY changed?). "
+                "The saved OneDrive details can't be read (was GARAGEBOOKS_ENCRYPTION_KEY changed?). "
                 "Enter the client secret and connect again on the Invoice storage page.") from None
 
     # ---- sign-in --------------------------------------------------------------

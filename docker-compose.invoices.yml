@@ -3,10 +3,10 @@
 #   docker compose -f docker-compose.yml -f docker-compose.invoices.yml up -d
 # Set INVOICES_HOST_DIR in .env to the folder on the server.
 services:
-  expenses:
+  garagebooks:
     # Files are written as this user, so it must be able to write to the folder. Leave it unless the
     # folder belongs to someone else and can't be given to 10001 (see the page above).
-    user: "${EXPENSES_UID:-10001}:${EXPENSES_GID:-10001}"
+    user: "${GARAGEBOOKS_UID:-10001}:${GARAGEBOOKS_GID:-10001}"
     environment:
       INVOICES_DIR: /invoices
       # Only shown on the Invoice storage page, so it names the folder as you know it on the server.

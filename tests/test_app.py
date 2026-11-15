@@ -20,7 +20,7 @@ def client(pg, admin, monkeypatch):
 
 
 def category_id(admin, name):
-    return admin.execute("SELECT id FROM expenses.category WHERE name=%s", (name,)).fetchone()["id"]
+    return admin.execute("SELECT id FROM garagebooks.category WHERE name=%s", (name,)).fetchone()["id"]
 
 
 def form(admin, **over):
@@ -32,11 +32,11 @@ def form(admin, **over):
 
 
 def rows(admin):
-    return admin.execute("SELECT * FROM expenses.expense ORDER BY id").fetchall()
+    return admin.execute("SELECT * FROM garagebooks.expense ORDER BY id").fetchall()
 
 
 def test_seeded_categories(admin):
-    names = [r["name"] for r in admin.execute("SELECT name FROM expenses.category ORDER BY sort_order")]
+    names = [r["name"] for r in admin.execute("SELECT name FROM garagebooks.category ORDER BY sort_order")]
     assert names[:8] == ["Initial purchase", "Insurance", "Registration", "Tyres",
                          "Cabin air filter", "Air filter", "Wheel alignment", "Tyre rotation"]
 
@@ -198,7 +198,7 @@ def test_add_category(client, admin):
     dup = client.post("/categories", data={"name": "car WASH"}, headers=ORIGIN)
     assert dup.status_code == 400 and b"already exists" in dup.data
     assert client.post("/categories", data={"name": " "}, headers=ORIGIN).status_code == 400
-    admin.execute("DELETE FROM expenses.category WHERE name='Car wash'")  # leave seed list intact
+    admin.execute("DELETE FROM garagebooks.category WHERE name='Car wash'")  # leave seed list intact
 
 
 def test_odometer_lookup_uses_utc_positions(client, admin):
@@ -254,10 +254,10 @@ def test_app_role_is_least_privilege(pg, admin):
         for sql in ("SELECT * FROM public.charging_processes",
                     "SELECT id FROM public.positions",
                     "UPDATE public.cars SET name = 'x'",
-                    "DROP TABLE expenses.expense",
-                    "UPDATE expenses.category SET kind='purchase'",
-                    "DELETE FROM expenses.category",
-                    "SELECT * FROM expenses.ownership"):
+                    "DROP TABLE garagebooks.expense",
+                    "UPDATE garagebooks.category SET kind='purchase'",
+                    "DELETE FROM garagebooks.category",
+                    "SELECT * FROM garagebooks.ownership"):
             with pytest.raises(psycopg.errors.InsufficientPrivilege):
                 conn.execute(sql)
 
@@ -265,7 +265,7 @@ def test_app_role_is_least_privilege(pg, admin):
 def test_provision_is_idempotent(pg, admin):
     assert pg.provision().returncode == 0
     assert pg.provision().returncode == 0
-    n = admin.execute("SELECT count(*) AS n FROM expenses.category WHERE sort_order < 100").fetchone()["n"]
+    n = admin.execute("SELECT count(*) AS n FROM garagebooks.category WHERE sort_order < 100").fetchone()["n"]
     assert n == 8
 
 
@@ -273,9 +273,9 @@ def test_provision_rejects_weak_or_missing_password(pg):
     import os, subprocess
     from tests.conftest import ROOT
     for pw in ("", "short", "has space in it 1234567890", "quote'inside1234567890"):
-        env = {**os.environ, "DB_CONTAINER": pg.container, "EXPENSES_DB_PASS": pw}
+        env = {**os.environ, "DB_CONTAINER": pg.container, "GARAGEBOOKS_DB_PASS": pw}
         r = subprocess.run([str(ROOT / "scripts" / "provision-db.sh")], env=env, capture_output=True, text=True)
-        assert r.returncode != 0 and "EXPENSES_DB_PASS" in r.stderr
+        assert r.returncode != 0 and "GARAGEBOOKS_DB_PASS" in r.stderr
 
 
 def test_ownership_view(admin):
@@ -284,10 +284,10 @@ def test_ownership_view(admin):
     admin.execute("""INSERT INTO positions (latitude, longitude, date, odometer, car_id) VALUES
         (0, 0, '2025-01-10 00:00', 2123, 1), (0, 0, '2026-11-01 00:00', 57197, 1)""")
     admin.execute("INSERT INTO charging_processes (start_date, position_id, cost, car_id) VALUES (now(), 1, 100.25, 1), (now(), 1, NULL, 1), (now(), 1, 50, 1)")
-    admin.execute("""INSERT INTO expenses.expense (car_id, category_id, occurred_at, amount, odometer_km) VALUES
+    admin.execute("""INSERT INTO garagebooks.expense (car_id, category_id, occurred_at, amount, odometer_km) VALUES
         (1, %s, '2024-01-01 00:00+10', 60000, 1500), (1, %s, '2025-06-01 00:00+10', 1000, 5000)""",
                   (purchase, insurance))
-    r = admin.execute("SELECT * FROM expenses.ownership").fetchone()
+    r = admin.execute("SELECT * FROM garagebooks.ownership").fetchone()
     assert (r["purchase_total"], r["running_total"], r["charging_total"], r["tco"]) == (60000, 1000, 150.25, 61150.25)
     assert (r["start_km"], r["current_km"], r["distance_km"]) == (1500, 57197, 55697)   # purchase odometer wins
     assert r["owned_since"] == datetime.fromisoformat("2024-01-01T00:00:00+10:00")
@@ -295,41 +295,41 @@ def test_ownership_view(admin):
 
 def test_ownership_view_without_purchase_or_data(admin):
     admin.execute("INSERT INTO positions (latitude, longitude, date, odometer, car_id) VALUES (0, 0, '2025-01-10 00:00', 2000, 1), (0, 0, '2025-02-10', 2600, 1)")
-    r = admin.execute("SELECT * FROM expenses.ownership").fetchone()
+    r = admin.execute("SELECT * FROM garagebooks.ownership").fetchone()
     assert (r["tco"], r["start_km"], r["distance_km"]) == (0, 2000, 600)
     admin.execute("TRUNCATE positions CASCADE")   # CASCADE: real TeslaMate tables reference it
-    r = admin.execute("SELECT * FROM expenses.ownership").fetchone()
+    r = admin.execute("SELECT * FROM garagebooks.ownership").fetchone()
     assert r["distance_km"] is None and r["owned_since"] is None
 
 
 def test_settings_page_saves_urls_and_header_links_to_dashboards(client, admin):
     """Like TeslaMate's own Settings page: the URLs are set in this app's UI, not in compose."""
-    admin.execute("UPDATE expenses.setting SET expenses_url = NULL, grafana_url = NULL")
+    admin.execute("UPDATE garagebooks.setting SET app_url = NULL, grafana_url = NULL")
     assert b"Dashboards" not in client.get("/").data          # nothing set, so no dead link
     assert b'name="grafana_url"' in client.get("/settings").data
-    ok = client.post("/settings", data={"expenses_url": "https://tm.example.test/expenses/",
+    ok = client.post("/settings", data={"app_url": "https://tm.example.test/expenses/",
                                         "grafana_url": " https://tm.example.test/grafana/d/tco "},
                      headers=ORIGIN)
     assert ok.status_code == 303
-    row = admin.execute("SELECT expenses_url, grafana_url FROM expenses.setting").fetchone()
-    assert row == {"expenses_url": "https://tm.example.test/expenses/",
+    row = admin.execute("SELECT app_url, grafana_url FROM garagebooks.setting").fetchone()
+    assert row == {"app_url": "https://tm.example.test/expenses/",
                    "grafana_url": "https://tm.example.test/grafana/d/tco"}
     assert b'href="https://tm.example.test/grafana/d/tco"' in client.get("/").data
     # blank clears a URL
-    client.post("/settings", data={"expenses_url": "", "grafana_url": ""}, headers=ORIGIN)
+    client.post("/settings", data={"app_url": "", "grafana_url": ""}, headers=ORIGIN)
     assert b"Dashboards" not in client.get("/").data
 
 
 def test_settings_rejects_non_http_urls(client, admin):
     for bad in ("javascript:alert(1)", "ftp://x.test/", "not a url", "https://a b.test/"):
-        r = client.post("/settings", data={"expenses_url": "", "grafana_url": bad}, headers=ORIGIN)
+        r = client.post("/settings", data={"app_url": "", "grafana_url": bad}, headers=ORIGIN)
         assert r.status_code == 400 and b"http" in r.data, bad
-    assert admin.execute("SELECT grafana_url FROM expenses.setting").fetchone()["grafana_url"] is None
+    assert admin.execute("SELECT grafana_url FROM garagebooks.setting").fetchone()["grafana_url"] is None
 
 
 def test_settings_invoice_name_format(client, admin):
-    q = lambda: admin.execute("SELECT invoice_name_format AS f FROM expenses.setting").fetchone()["f"]
-    base = {"expenses_url": "", "grafana_url": "", "invoice_date_format": ""}
+    q = lambda: admin.execute("SELECT invoice_name_format AS f FROM garagebooks.setting").fetchone()["f"]
+    base = {"app_url": "", "grafana_url": "", "invoice_date_format": ""}
     assert q() is None
     ok = client.post("/settings", data={**base, "invoice_name_format": " %date - %category - %vendor "}, headers=ORIGIN)
     assert ok.status_code == 303 and q() == "%date - %category - %vendor"
@@ -340,8 +340,8 @@ def test_settings_invoice_name_format(client, admin):
 
 
 def test_settings_multi_amount_choice(client, admin):
-    q = lambda: admin.execute("SELECT multi_amount AS f FROM expenses.setting").fetchone()["f"]
-    base = {"expenses_url": "", "grafana_url": "", "invoice_date_format": "", "invoice_name_format": ""}
+    q = lambda: admin.execute("SELECT multi_amount AS f FROM garagebooks.setting").fetchone()["f"]
+    base = {"app_url": "", "grafana_url": "", "invoice_date_format": "", "invoice_name_format": ""}
     assert q() is None
     page = client.get("/settings").data.decode()
     assert 'name="multi_amount"' in page and "largest" in page and "smallest" in page and "blank" in page.lower()
@@ -362,22 +362,22 @@ def test_settings_page_describes_every_alias(client):
 
 
 def test_settings_example_follows_the_saved_template(client, admin):
-    admin.execute("UPDATE expenses.setting SET invoice_name_format = '%date - %category - %vendor', "
+    admin.execute("UPDATE garagebooks.setting SET invoice_name_format = '%date - %category - %vendor', "
                   "invoice_date_format = 'yyyy-mm-dd'")
     assert "2026-11-07 - Tyres - Tyre Shop.pdf" in client.get("/settings").data.decode()
 
 
 def test_settings_invoice_date_format(client, admin):
-    q = lambda: admin.execute("SELECT invoice_date_format AS f FROM expenses.setting").fetchone()["f"]
+    q = lambda: admin.execute("SELECT invoice_date_format AS f FROM garagebooks.setting").fetchone()["f"]
     assert q() is None and b"yymmdd" in client.get("/settings").data      # default is shown
-    ok = client.post("/settings", data={"expenses_url": "", "grafana_url": "", "invoice_date_format": " YYYY-MM-DD "},
+    ok = client.post("/settings", data={"app_url": "", "grafana_url": "", "invoice_date_format": " YYYY-MM-DD "},
                      headers=ORIGIN)
     assert ok.status_code == 303 and q() == "yyyy-mm-dd"
     assert b'value="yyyy-mm-dd"' in client.get("/settings").data
-    bad = client.post("/settings", data={"expenses_url": "", "grafana_url": "", "invoice_date_format": "yy/mm/dd"},
+    bad = client.post("/settings", data={"app_url": "", "grafana_url": "", "invoice_date_format": "yy/mm/dd"},
                       headers=ORIGIN)
     assert bad.status_code == 400 and q() == "yyyy-mm-dd"
-    client.post("/settings", data={"expenses_url": "", "grafana_url": "", "invoice_date_format": ""}, headers=ORIGIN)
+    client.post("/settings", data={"app_url": "", "grafana_url": "", "invoice_date_format": ""}, headers=ORIGIN)
     assert q() is None                                                   # blank = back to the default
 
 
@@ -386,7 +386,7 @@ def test_settings_invoice_date_format(client, admin):
 def tables(url):
     with psycopg.connect(url) as conn:
         return {r[0] for r in conn.execute(
-            "SELECT table_name FROM information_schema.tables WHERE table_schema = 'expenses'")}
+            "SELECT table_name FROM information_schema.tables WHERE table_schema = 'garagebooks'")}
 
 
 def test_first_start_creates_the_schema(blank_db, monkeypatch):
@@ -402,13 +402,13 @@ def test_restart_keeps_data_and_is_idempotent(blank_db, monkeypatch):
     monkeypatch.setenv("DATABASE_URL", blank_db)
     create_app()
     with psycopg.connect(blank_db, autocommit=True) as conn:
-        conn.execute("INSERT INTO expenses.category (name) VALUES ('Car wash')")
-        conn.execute("UPDATE expenses.setting SET grafana_url = 'https://g.example.test/'")
+        conn.execute("INSERT INTO garagebooks.category (name) VALUES ('Car wash')")
+        conn.execute("UPDATE garagebooks.setting SET grafana_url = 'https://g.example.test/'")
     create_app()
     with psycopg.connect(blank_db) as conn:
-        assert conn.execute("SELECT count(*) FROM expenses.category WHERE name = 'Car wash'").fetchone()[0] == 1
-        assert conn.execute("SELECT grafana_url FROM expenses.setting").fetchone()[0] == "https://g.example.test/"
-        assert conn.execute("SELECT count(*) FROM expenses.category WHERE sort_order < 100").fetchone()[0] == 8
+        assert conn.execute("SELECT count(*) FROM garagebooks.category WHERE name = 'Car wash'").fetchone()[0] == 1
+        assert conn.execute("SELECT grafana_url FROM garagebooks.setting").fetchone()[0] == "https://g.example.test/"
+        assert conn.execute("SELECT count(*) FROM garagebooks.category WHERE sort_order < 100").fetchone()[0] == 8
 
 
 def test_skip_migrate_for_a_restricted_role(blank_db, monkeypatch):
@@ -432,7 +432,7 @@ def test_migration_failure_is_explained(pg, blank_db, monkeypatch):
 
 def stored_urls(url):
     with psycopg.connect(url) as conn:
-        return conn.execute("SELECT expenses_url, grafana_url FROM expenses.setting").fetchone()
+        return conn.execute("SELECT app_url, grafana_url FROM garagebooks.setting").fetchone()
 
 
 def test_first_start_seeds_urls_from_fqdn(blank_db, monkeypatch):
@@ -441,7 +441,7 @@ def test_first_start_seeds_urls_from_fqdn(blank_db, monkeypatch):
     monkeypatch.setenv("BASE_PATH", "/expenses")
     create_app()
     assert stored_urls(blank_db) == ("https://tm.example.test/expenses/",
-                                     "https://tm.example.test/grafana/d/tm-expenses-tco")
+                                     "https://tm.example.test/grafana/d/garagebooks-tco")
 
 
 def test_fqdn_seeds_only_once_so_clearing_a_url_sticks(blank_db, monkeypatch):
@@ -449,7 +449,7 @@ def test_fqdn_seeds_only_once_so_clearing_a_url_sticks(blank_db, monkeypatch):
     monkeypatch.setenv("FQDN_TM", "tm.example.test")
     create_app()
     with psycopg.connect(blank_db, autocommit=True) as conn:
-        conn.execute("UPDATE expenses.setting SET grafana_url = NULL, expenses_url = 'https://other.test/x/'")
+        conn.execute("UPDATE garagebooks.setting SET grafana_url = NULL, app_url = 'https://other.test/x/'")
     create_app()                                   # a restart
     assert stored_urls(blank_db) == ("https://other.test/x/", None)
 
@@ -459,7 +459,7 @@ def test_grafana_path_can_be_changed(blank_db, monkeypatch):
     monkeypatch.setenv("FQDN_TM", "tm.example.test")
     monkeypatch.setenv("GRAFANA_PATH", "/dash")
     create_app()
-    assert stored_urls(blank_db)[1] == "https://tm.example.test/dash/d/tm-expenses-tco"
+    assert stored_urls(blank_db)[1] == "https://tm.example.test/dash/d/garagebooks-tco"
 
 
 def test_no_fqdn_or_a_bad_one_leaves_urls_empty(blank_db, monkeypatch):
@@ -468,13 +468,13 @@ def test_no_fqdn_or_a_bad_one_leaves_urls_empty(blank_db, monkeypatch):
     create_app()
     assert stored_urls(blank_db) == (None, None)
     with psycopg.connect(blank_db, autocommit=True) as conn:
-        conn.execute("DROP SCHEMA expenses CASCADE")
+        conn.execute("DROP SCHEMA garagebooks CASCADE")
     for bad in ("evil.test/x y", "http://tm.example.test", "tm example"):
         monkeypatch.setenv("FQDN_TM", bad)
         create_app()                               # must not crash
         assert stored_urls(blank_db) == (None, None), bad
         with psycopg.connect(blank_db, autocommit=True) as conn:
-            conn.execute("DROP SCHEMA expenses CASCADE")
+            conn.execute("DROP SCHEMA garagebooks CASCADE")
 
 
 def test_settings_file_name_defaults_are_real_text_you_can_edit(client, admin):
@@ -486,14 +486,14 @@ def test_settings_file_name_defaults_are_real_text_you_can_edit(client, admin):
 
 def test_saving_the_default_file_name_keeps_following_the_default(client, admin):
     """The text is the default, so it's stored as 'default' (NULL) rather than frozen as a copy."""
-    data = {"expenses_url": "", "grafana_url": "", "invoice_date_format": "yymmdd",
+    data = {"app_url": "", "grafana_url": "", "invoice_date_format": "yymmdd",
             "invoice_name_format": "%date %category - %vendor"}
     assert client.post("/settings", data=data, headers=ORIGIN).status_code == 303
-    row = admin.execute("SELECT invoice_date_format AS d, invoice_name_format AS n FROM expenses.setting").fetchone()
+    row = admin.execute("SELECT invoice_date_format AS d, invoice_name_format AS n FROM garagebooks.setting").fetchone()
     assert row["d"] is None and row["n"] is None
     data["invoice_name_format"] = "%date - %category"
     client.post("/settings", data=data, headers=ORIGIN)
-    assert admin.execute("SELECT invoice_name_format AS n FROM expenses.setting").fetchone()["n"] == "%date - %category"
+    assert admin.execute("SELECT invoice_name_format AS n FROM garagebooks.setting").fetchone()["n"] == "%date - %category"
 
 
 
@@ -588,7 +588,7 @@ def test_form_is_grouped_and_amount_has_its_unit_beside_it(client):
 
 
 def test_dashboards_link_carries_the_grafana_icon_instead_of_an_arrow(client, admin):
-    admin.execute("UPDATE expenses.setting SET grafana_url = 'https://tm.example.test/grafana/d/tco'")
+    admin.execute("UPDATE garagebooks.setting SET grafana_url = 'https://tm.example.test/grafana/d/tco'")
     html = client.get("/").data.decode()
     assert re.search(r'<a href="https://tm\.example\.test/grafana/d/tco" target="_blank" rel="noopener noreferrer">'
                      r'<img src="/provider-icon/grafana" alt="" class="nav-icon">Dashboards</a>', html)

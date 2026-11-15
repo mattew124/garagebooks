@@ -10,7 +10,7 @@ from garagebooks import db, onedrive
 
 FOLDER = "Expenses test"
 
-drive = onedrive.OneDrive(os.environ["EXPENSES_ENCRYPTION_KEY"])
+drive = onedrive.OneDrive(os.environ["GARAGEBOOKS_ENCRYPTION_KEY"])
 try:
     with db.connect() as conn:
         account = db.onedrive_account(conn, lock=True)

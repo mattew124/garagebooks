@@ -1,7 +1,7 @@
 # garagebooks
 
 Expense tracking and total cost of ownership for TeslaMate: a Flask UI
-(`garagebooks/`), an `expenses` schema in the TeslaMate database (`db/`), and a
+(`garagebooks/`), an `garagebooks` schema in the TeslaMate database (`db/`), and a
 Grafana dashboard (`grafana/`). See README.md and `docs/`, the documentation site.
 
 ## Rules
@@ -14,7 +14,7 @@ Grafana dashboard (`grafana/`). See README.md and `docs/`, the documentation sit
 - Location history stays out of the test database. `dev.sh` blanks latitude,
   longitude and elevation; don't copy more of `positions` without blanking them.
 - The app has no login, so it must only ever be published behind forward-auth.
-- The app connects as TeslaMate's own database user and creates its `expenses` schema itself
+- The app connects as TeslaMate's own database user and creates its `garagebooks` schema itself
   on start (`garagebooks/schema.sql`, idempotent, no setup scripts). It must only ever touch
   `expenses.*` and read `cars`, `positions` and `charging_processes`. `scripts/provision-db.sh`
   and `db/grants.sql` are the optional least-privilege path (`SKIP_MIGRATE=1`): keep them working.
@@ -54,7 +54,7 @@ after any UI or dashboard change.
 
 Parallel sessions each get a git worktree under `.claude/worktrees/<name>/`, and
 `scripts/dev.sh` gives each worktree its own dev stack and test database at
-`/expenses-dev/<name>/`, so you never test another session's code.
+`/garagebooks-dev/<name>/`, so you never test another session's code.
 
 1. Start with `scripts/dev.sh setup` (creates `.venv`), then `scripts/dev.sh up`.
    `scripts/dev.sh info` shows this checkout's stack, path and ports.

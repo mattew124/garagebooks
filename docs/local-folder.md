@@ -154,7 +154,7 @@ to read and write the folder.
     ```
 
     A share already mounted for your own user (`uid=1000,gid=1000`, say) works just as well with
-    `EXPENSES_UID=1000` and `EXPENSES_GID=1000`. If the two don't match, saving an invoice says *The app
+    `GARAGEBOOKS_UID=1000` and `GARAGEBOOKS_GID=1000`. If the two don't match, saving an invoice says *The app
     has no permission to write in the invoice folder* and writes nothing.
 
 - **An NFS share.** Ownership is the numeric user and group on the NFS server. Either give the
@@ -173,8 +173,8 @@ sudo chmod 770 /mnt/nas/cars/invoices
 To run the app as another user, set these in `.env` and start it again:
 
 ```bash
-EXPENSES_UID=1000
-EXPENSES_GID=1000
+GARAGEBOOKS_UID=1000
+GARAGEBOOKS_GID=1000
 ```
 
 One thing to do when you change the user on an installation that has already run: the Grafana

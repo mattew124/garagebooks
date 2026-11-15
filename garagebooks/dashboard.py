@@ -26,7 +26,7 @@ def render(tz, base_path, source=SOURCE, start=None):
     tzvar["query"] = tz
     tzvar["current"] = {"selected": False, "text": tz, "value": tz}
     tzvar["options"] = [{"selected": True, "text": tz, "value": tz}]
-    link = variables["expenses_url"]
+    link = variables["app_url"]
     here = "'" + (base_path or "").replace("'", "''") + "/'"
     for key in ("query", "definition"):
         if _FALLBACK not in link[key]:

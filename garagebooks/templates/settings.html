@@ -6,13 +6,13 @@
 <form method="post" class="card stack">
   <label>Grafana dashboard URL
     <input type="url" name="grafana_url" maxlength="2048" value="{{ values.grafana_url or '' }}"
-           placeholder="https://teslamate.example.com/grafana/d/tm-expenses-tco">
+           placeholder="https://teslamate.example.com/grafana/d/garagebooks-tco">
     {% if errors.grafana_url %}<span class="error">{{ errors.grafana_url }}</span>{% endif %}
     <small>Adds a Dashboards link to the header. Leave blank to hide it.</small></label>
   <label>This app's URL
-    <input type="url" name="expenses_url" maxlength="2048" value="{{ values.expenses_url or '' }}"
+    <input type="url" name="app_url" maxlength="2048" value="{{ values.app_url or '' }}"
            placeholder="https://teslamate.example.com/garagebooks/">
-    {% if errors.expenses_url %}<span class="error">{{ errors.expenses_url }}</span>{% endif %}
+    {% if errors.app_url %}<span class="error">{{ errors.app_url }}</span>{% endif %}
     <small>Where you open this app. The Grafana dashboard's “Add / edit expenses” link goes here.</small></label>
   <label>Invoice file name date
     <input type="text" name="invoice_date_format" maxlength="20" value="{{ values.invoice_date_format or date_default }}"

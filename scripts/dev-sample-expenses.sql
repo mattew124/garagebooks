@@ -10,9 +10,9 @@
 
 BEGIN;
 
-DELETE FROM expenses.expense WHERE notes LIKE 'Sample data%';
+DELETE FROM garagebooks.expense WHERE notes LIKE 'Sample data%';
 
-INSERT INTO expenses.expense (car_id, category_id, occurred_at, amount, odometer_km, vendor, notes, invoice_url)
+INSERT INTO garagebooks.expense (car_id, category_id, occurred_at, amount, odometer_km, vendor, notes, invoice_url)
 WITH s AS (
   SELECT row_number() OVER (ORDER BY days_ago DESC, category) AS n, *
   FROM (VALUES
@@ -46,7 +46,7 @@ SELECT car.id, cat.id, at.moment, s.amount,
        CASE WHEN s.invoice THEN 'https://example.com/sample-invoice-' || s.n || '.pdf' END
 FROM s
 CROSS JOIN LATERAL (SELECT id FROM public.cars ORDER BY id LIMIT 1) AS car
-JOIN expenses.category cat ON cat.name = s.category
+JOIN garagebooks.category cat ON cat.name = s.category
 CROSS JOIN LATERAL (SELECT (date_trunc('day', now() AT TIME ZONE :'tz') - make_interval(days => s.days_ago) + make_interval(hours => s.hour)) AT TIME ZONE :'tz' AS moment) AS at;
 
 COMMIT;

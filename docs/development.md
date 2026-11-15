@@ -47,7 +47,7 @@ network, so it can't touch live data. It listens on localhost unless `dev.env` s
 (see `dev.env.example`).
 
 ```bash
-scripts/dev.sh up             # http://localhost:8089/expenses-dev/ and :8090/expenses-dev/grafana/
+scripts/dev.sh up             # http://localhost:8089/garagebooks-dev/ and :8090/garagebooks-dev/grafana/
 scripts/dev.sh test-browser   # Playwright in a container; screenshots in .dev/screenshots
 scripts/dev.sh refresh        # re-copy TeslaMate data, keeping your test expenses
 scripts/dev.sh reset          # wipe the test database
@@ -61,7 +61,7 @@ scripts/dev.sh psql           # a psql shell on the test database
 scripts/dev.sh onedrive-save  # save a OneDrive sign-in for the dev stack to reuse
 ```
 
-Each git worktree gets its own stack and test database at `/expenses-dev/<worktree>/`, so
+Each git worktree gets its own stack and test database at `/garagebooks-dev/<worktree>/`, so
 parallel branches never share running code. `scripts/dev.sh info` shows a checkout's path and
 ports, `list` shows every running dev stack, and `destroy` removes one (its containers, test database, image and `.dev` folder). `.worktreeinclude`
 copies your `dev.env` into new Claude Code worktrees.

@@ -63,6 +63,6 @@ remembers which category you gave each vendor's invoices. A label or vendor is u
 guesses once you've confirmed it twice; a learned label that finds two different values in one
 PDF leaves the field blank rather than guessing. Nothing is learned if your value isn't in the
 PDF text. **Import page → See and remove what it has learned** lists everything and lets you
-delete it. This stores only short labels and vendor names, in the `expenses` schema.
+delete it. This stores only short labels and vendor names, in the `garagebooks` schema.
 
 <!-- screenshot: learned-page - The page listing what the importer has learned -->

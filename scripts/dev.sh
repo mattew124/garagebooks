@@ -37,8 +37,8 @@
 # of your choosing (DEV_INVOICES_DIR).
 #
 # Each git worktree gets its own stack, test DB and URL path
-# (/expenses-dev/<worktree>/), so parallel sessions can't replace each other's
-# running code. The main checkout keeps /expenses-dev/. DEV_INSTANCE overrides
+# (/garagebooks-dev/<worktree>/), so parallel sessions can't replace each other's
+# running code. The main checkout keeps /garagebooks-dev/. DEV_INSTANCE overrides
 # the name.
 #
 # The seed only READS TeslaMate (pg_dump, COPY TO STDOUT). It copies the full
@@ -112,13 +112,13 @@ export DEV_INVOICES_SHOWN="$DEV_INVOICES_DIR"
 
 if [ -z "$INSTANCE" ]; then
     PROJECT=garagebooks-dev
-    export DEV_BASE_PATH=/expenses-dev DEV_ROUTER_SUFFIX= DEV_TAG=dev
+    export DEV_BASE_PATH=/garagebooks-dev DEV_ROUTER_SUFFIX= DEV_TAG=dev
     export DEV_UI_PRIORITY=110 DEV_GRAFANA_PRIORITY=120
     export DEV_UI_PORT="${DEV_UI_PORT:-8089}" DEV_GRAFANA_PORT="${DEV_GRAFANA_PORT:-8090}"
 else
     PROJECT="garagebooks-dev-$INSTANCE"
-    export DEV_BASE_PATH="/expenses-dev/$INSTANCE" DEV_ROUTER_SUFFIX="-$INSTANCE" DEV_TAG="dev-$INSTANCE"
-    # Above the main stack's routes: /expenses-dev/ is a prefix of this path.
+    export DEV_BASE_PATH="/garagebooks-dev/$INSTANCE" DEV_ROUTER_SUFFIX="-$INSTANCE" DEV_TAG="dev-$INSTANCE"
+    # Above the main stack's routes: /garagebooks-dev/ is a prefix of this path.
     export DEV_UI_PRIORITY=130 DEV_GRAFANA_PRIORITY=140
     # A stable pair of loopback ports per name, clear of the main stack's.
     slot=$(( $(printf '%s' "$INSTANCE" | cksum | cut -d' ' -f1) % 400 ))
@@ -265,7 +265,7 @@ SQL
     dev_psql -At -c "SELECT 'dev: test DB has ' || (SELECT count(*) FROM public.cars) || ' car(s), '
         || (SELECT count(*) FROM public.charging_processes) || ' charges, '
         || (SELECT count(*) FROM public.positions) || ' hourly odometer readings, '
-        || (SELECT count(*) FROM expenses.expense) || ' test expense(s)'"
+        || (SELECT count(*) FROM garagebooks.expense) || ' test expense(s)'"
 }
 
 # Generated rows only (scripts/demo-seed.sql); nothing is read from TeslaMate's data.
@@ -276,15 +276,15 @@ demo_data() {
     python3 scripts/dev-sample-invoices.py "$ROOT/$INVOICES" >/dev/null
     # The car is pointed at it below, not through the app, so leave the marker choosing a folder would.
     printf 'Demo invoice folder for garagebooks.\n' > "$ROOT/$INVOICES/.garagebooks"
-    dev_psql -c "INSERT INTO expenses.car_folder (car_id, folder_id, folder_path, backend)
+    dev_psql -c "INSERT INTO garagebooks.car_folder (car_id, folder_id, folder_path, backend)
                  SELECT id, '/Sample invoices', '/Sample invoices', 'local' FROM public.cars
                  ON CONFLICT (car_id) DO NOTHING"
     # The app works out the dashboard's time range from the data at start-up, and started with none.
-    compose restart expenses-dev >/dev/null
+    compose restart garagebooks-dev >/dev/null
     compose up -d --wait >/dev/null
     dev_psql -At -c "SELECT 'dev: demo DB has ' || (SELECT count(*) FROM public.charging_processes) || ' charges, '
         || (SELECT count(*) FROM public.positions) || ' odometer readings, '
-        || (SELECT count(*) FROM expenses.expense) || ' expenses'"
+        || (SELECT count(*) FROM garagebooks.expense) || ' expenses'"
 }
 
 # TeslaMate's own tables, created by the release this app was tested with: its image migrates the
@@ -333,7 +333,7 @@ seed_settings() {
         graf="http://localhost:$DEV_GRAFANA_PORT$DEV_BASE_PATH/grafana/"
     fi
     dev_psql -q -v "app=$app" -v "graf=$graf" <<'SQL'
-UPDATE expenses.setting SET expenses_url = :'app', grafana_url = :'graf' WHERE id = 1;
+UPDATE garagebooks.setting SET app_url = :'app', grafana_url = :'graf' WHERE id = 1;
 SQL
 }
 
@@ -343,8 +343,8 @@ start() {
     require_invoices
     prepare_database
     if [ -n "$image" ]; then
-        export EXPENSES_IMAGE="$image"
-        compose pull expenses-dev
+        export GARAGEBOOKS_IMAGE="$image"
+        compose pull garagebooks-dev
         compose up -d --no-build --wait
     else
         compose up -d --build --wait
@@ -368,7 +368,7 @@ instance=${INSTANCE:-main}
 base_path=$DEV_BASE_PATH
 ui_port=$DEV_UI_PORT
 grafana_port=$DEV_GRAFANA_PORT
-image=${EXPENSES_IMAGE:-garagebooks:$DEV_TAG}
+image=${GARAGEBOOKS_IMAGE:-garagebooks:$DEV_TAG}
 invoices=$DEV_INVOICES_DIR
 router_suffix=${DEV_ROUTER_SUFFIX:-none}
 ui_priority=$DEV_UI_PRIORITY
@@ -442,7 +442,7 @@ onedrive_save() {
     ensure_env
     [ -n "$(compose ps -q dev-db)" ] || { echo "dev: start this stack first: scripts/dev.sh up" >&2; exit 1; }
     local row key
-    row="$(dev_psql -At -c "COPY (SELECT client_id, client_secret, secret_expires, account, refresh_token FROM expenses.onedrive_account WHERE refresh_token IS NOT NULL) TO STDOUT")"
+    row="$(dev_psql -At -c "COPY (SELECT client_id, client_secret, secret_expires, account, refresh_token FROM garagebooks.onedrive_account WHERE refresh_token IS NOT NULL) TO STDOUT")"
     [ -n "$row" ] || { echo "dev: this stack isn't signed in: connect it on its OneDrive page first" >&2; exit 1; }
     key="$(sed -n 's/^DEV_ENCRYPTION_KEY=//p' "$ENVF")"
     ( umask 077
@@ -461,7 +461,7 @@ onedrive_link() {
         exit 1
     }
     local app key row current
-    app="$(compose ps -q expenses-dev)"
+    app="$(compose ps -q garagebooks-dev)"
     [ -n "$app" ] || { echo "dev: start this stack first: scripts/dev.sh up" >&2; exit 1; }
     key="$(sed -n 's/^DEV_ENCRYPTION_KEY=//p' "$ONEDRIVE_DEV_FILE")"
     row="$(sed -n 's/^ONEDRIVE_ROW=//p' "$ONEDRIVE_DEV_FILE")"
@@ -474,21 +474,21 @@ onedrive_link() {
           printf 'DEV_ENCRYPTION_KEY=%s\n' "$key" >> "$ENVF.new"
           mv "$ENVF.new" "$ENVF" )
         # Same image (it may be `up --image`), new key.
-        EXPENSES_IMAGE="$(docker inspect -f '{{.Config.Image}}' "$app")"
-        export EXPENSES_IMAGE
-        compose up -d --no-build --wait expenses-dev
+        GARAGEBOOKS_IMAGE="$(docker inspect -f '{{.Config.Image}}' "$app")"
+        export GARAGEBOOKS_IMAGE
+        compose up -d --no-build --wait garagebooks-dev
     fi
     {
         cat <<'SQL'
 BEGIN;
-DELETE FROM expenses.car_folder;
+DELETE FROM garagebooks.car_folder;
 CREATE TEMP TABLE incoming (client_id text, client_secret text, secret_expires date, account text, refresh_token text) ON COMMIT DROP;
 COPY incoming FROM STDIN;
 SQL
         printf '%s\n' "$row"
         cat <<'SQL'
 \.
-INSERT INTO expenses.onedrive_account (id, client_id, client_secret, secret_expires, account, refresh_token)
+INSERT INTO garagebooks.onedrive_account (id, client_id, client_secret, secret_expires, account, refresh_token)
     SELECT true, client_id, client_secret, secret_expires, account, refresh_token FROM incoming
     ON CONFLICT (id) DO UPDATE SET client_id = EXCLUDED.client_id, client_secret = EXCLUDED.client_secret,
         secret_expires = EXCLUDED.secret_expires, account = EXCLUDED.account, refresh_token = EXCLUDED.refresh_token,
@@ -496,7 +496,7 @@ INSERT INTO expenses.onedrive_account (id, client_id, client_secret, secret_expi
 COMMIT;
 SQL
     } | dev_psql
-    compose exec -T expenses-dev python - < scripts/onedrive-test-folder.py
+    compose exec -T garagebooks-dev python - < scripts/onedrive-test-folder.py
     onedrive_save >/dev/null   # Microsoft replaced the refresh token: keep the newest
 }
 
@@ -531,13 +531,13 @@ case "${1:-}" in
     sample-expenses)
         ensure_env
         if [ "${2:-}" = clear ]; then
-            dev_psql -c "DELETE FROM expenses.expense WHERE notes LIKE 'Sample data%'"
+            dev_psql -c "DELETE FROM garagebooks.expense WHERE notes LIKE 'Sample data%'"
         else
             dev_psql -v "tz=$APP_TZ" < scripts/dev-sample-expenses.sql
             echo "dev: sample expenses added to the test database"
         fi ;;
     sample-invoices) ensure_env; require_invoices; python3 scripts/dev-sample-invoices.py "$DEV_INVOICES_DIR" ;;
     psql) ensure_env; shift; dev_psql "$@" ;;
-    logs) ensure_env; compose logs -f expenses-dev ;;
+    logs) ensure_env; compose logs -f garagebooks-dev ;;
     *) sed -n '3,34p' "$0" >&2; exit 2 ;;
 esac

@@ -13,7 +13,7 @@
 
 > **Vibe coded.** This project was written with an AI coding assistant (Claude Code), directed
 > and tested by a person, not hand-written or audited line by line. It has tests, runs in a
-> read-only, non-root container and only writes inside its own `expenses` schema, but treat it as you
+> read-only, non-root container and only writes inside its own `garagebooks` schema, but treat it as you
 > would any young, unreviewed software: back up your TeslaMate database before first use, and
 > read the code before you trust it with anything you care about.
 >
@@ -28,7 +28,7 @@
   OneDrive folder, with the link filled in for you.
 - **Or keep invoices on your own server**: mount a folder (a NAS share, say) and the app saves the
   PDFs there, per car and category, and shows them itself behind your login.
-- **Postgres schema** `expenses` inside the TeslaMate database, so Grafana joins it to
+- **Postgres schema** `garagebooks` inside the TeslaMate database, so Grafana joins it to
   TeslaMate's charging costs and odometer with no second datasource.
 - **Grafana dashboard** "Cost of Ownership": total cost of ownership, purchase vs running
   vs charging, cost per km, per day and per month, monthly spend by category, cumulative cost, and
@@ -42,7 +42,7 @@
 
 ```
  browser ──► proxy + forward-auth ──► GarageBooks (Flask/gunicorn) ──► TeslaMate Postgres
-                                                                       ▲   schema `expenses`
+                                                                       ▲   schema `garagebooks`
                                      Grafana (TeslaMate datasource) ───┘   + public.* (read-only)
 ```
 
@@ -56,7 +56,7 @@ and development.
 The app has **no login of its own**. Only publish it behind a forward-auth gate, such as Authentik
 or Authelia with Traefik. `docker-compose.traefik.yml` refuses to start without one.
 
-Back up TeslaMate's database first: the first start adds the `expenses` schema to it and changes
+Back up TeslaMate's database first: the first start adds the `garagebooks` schema to it and changes
 nothing else.
 
 Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md) first.

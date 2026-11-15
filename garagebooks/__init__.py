@@ -1,6 +1,6 @@
-"""TeslaMate expenses: a small web UI for recording what the car costs to own.
+"""GarageBooks: a small web UI for recording what the car costs to own.
 
-Data lives in the `expenses` schema of the TeslaMate database; the Grafana
+Data lives in the `garagebooks` schema of the TeslaMate database; the Grafana
 dashboard in grafana/ turns it (plus TeslaMate's own charging costs) into total
 cost of ownership.
 """
@@ -128,12 +128,14 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
     refresh_dashboard()
     # Room for the largest PDF plus the rest of the form.
     app.config["MAX_CONTENT_LENGTH"] = validation.MAX_PDF_BYTES + 1024 * 1024
-    # EXPENSES_ENCRYPTION_KEY turns OneDrive on; everything else is set up in the UI.
+    # GARAGEBOOKS_ENCRYPTION_KEY turns OneDrive on; everything else is set up in the UI. Its name up
+    # to 0.4.0-rc1, EXPENSES_ENCRYPTION_KEY, still works, so an upgrade doesn't turn OneDrive off.
     drive = None
-    if os.environ.get("EXPENSES_ENCRYPTION_KEY"):
-        drive = onedrive.OneDrive(os.environ["EXPENSES_ENCRYPTION_KEY"], onedrive_transport)
+    key = os.environ.get("GARAGEBOOKS_ENCRYPTION_KEY") or os.environ.get("EXPENSES_ENCRYPTION_KEY")
+    if key:
+        drive = onedrive.OneDrive(key, onedrive_transport)
     elif os.environ.get("ONEDRIVE_TOKEN_KEY"):
-        log.warning("ONEDRIVE_TOKEN_KEY was renamed EXPENSES_ENCRYPTION_KEY; OneDrive stays off until it is set.")
+        log.warning("ONEDRIVE_TOKEN_KEY was renamed GARAGEBOOKS_ENCRYPTION_KEY; OneDrive stays off until it is set.")
     # INVOICES_DIR turns on keeping invoices in a folder on the server: a host folder (a NAS share,
     # say) mounted into the container. The app serves those PDFs itself, at /invoice/<id>.
     local = None
@@ -1205,7 +1207,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
     def settings():
         values, errors = {}, {}
         if request.method == "POST":
-            for field in ("expenses_url", "grafana_url"):
+            for field in ("app_url", "grafana_url"):
                 raw = request.form.get(field, "")
                 values[field] = raw
                 try:
@@ -1235,7 +1237,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 date_pattern = values["invoice_date_format"]
                 name_format = values["invoice_name_format"]
                 with connect() as conn:
-                    db.save_settings(conn, values["expenses_url"], values["grafana_url"],
+                    db.save_settings(conn, values["app_url"], values["grafana_url"],
                                      None if date_pattern == validation.DEFAULT_DATE_PATTERN else date_pattern,
                                      None if name_format == validation.DEFAULT_NAME_FORMAT else name_format,
                                      values["multi_amount"])

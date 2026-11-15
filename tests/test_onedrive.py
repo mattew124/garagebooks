@@ -152,9 +152,9 @@ def app_for(pg, admin, monkeypatch):
 
     def make(transport, key=KEY, icon_fetch=None):
         if key is None:
-            monkeypatch.delenv("EXPENSES_ENCRYPTION_KEY", raising=False)
+            monkeypatch.delenv("GARAGEBOOKS_ENCRYPTION_KEY", raising=False)
         else:
-            monkeypatch.setenv("EXPENSES_ENCRYPTION_KEY", key)
+            monkeypatch.setenv("GARAGEBOOKS_ENCRYPTION_KEY", key)
         app = create_app(connect=lambda: psycopg.connect(pg.app_url, row_factory=dict_row),
                          onedrive_transport=transport, icon_fetch=icon_fetch)
         app.testing = True
@@ -209,7 +209,7 @@ def with_pdf(data, content=PDF, name="invoice.pdf"):
 
 
 def account(admin):
-    return admin.execute("SELECT * FROM expenses.onedrive_account").fetchone()
+    return admin.execute("SELECT * FROM garagebooks.onedrive_account").fetchone()
 
 
 # ---- not configured -------------------------------------------------------------
@@ -219,7 +219,7 @@ def test_hidden_without_token_key(app_for, ms, admin):
     assert b'name="invoice_file"' not in c.get("/new").data
     assert b"/onedrive" not in c.get("/").data
     page = c.get("/storage").data.decode()
-    assert "EXPENSES_ENCRYPTION_KEY" in page and "Connect OneDrive" not in page
+    assert "GARAGEBOOKS_ENCRYPTION_KEY" in page and "Connect OneDrive" not in page
     assert save_credentials(c).status_code == 404
     assert c.post("/onedrive/connect", headers=ORIGIN).status_code == 404
     assert c.post("/new", data=with_pdf(form(admin)), headers=ORIGIN).status_code == 303
@@ -227,7 +227,7 @@ def test_hidden_without_token_key(app_for, ms, admin):
 
 
 def test_bad_token_key_refuses_to_start(app_for, ms):
-    with pytest.raises(ValueError, match="EXPENSES_ENCRYPTION_KEY"):
+    with pytest.raises(ValueError, match="GARAGEBOOKS_ENCRYPTION_KEY"):
         app_for(ms, key="not-a-fernet-key")
 
 
@@ -347,7 +347,7 @@ def test_browse_and_choose_folder(client, ms, admin):
     page = client.get("/onedrive/browse/1?folder=TESTCAR").data.decode()
     assert "/Cars/Test car" in page and "Invoices" in page
     assert choose_folder(client).status_code == 303
-    assert admin.execute("SELECT car_id, folder_id, folder_path FROM expenses.car_folder").fetchall() == [
+    assert admin.execute("SELECT car_id, folder_id, folder_path FROM garagebooks.car_folder").fetchall() == [
         {"car_id": 1, "folder_id": "INV", "folder_path": "/Cars/Test car/Invoices"}]
     assert "/Cars/Test car/Invoices" in client.get("/storage").data.decode()
 
@@ -366,7 +366,7 @@ def test_folder_can_be_cleared(client, ms, admin):
     sign_in(client, ms)
     choose_folder(client)
     assert client.post("/onedrive/folders/1/clear", headers=ORIGIN).status_code == 303
-    assert admin.execute("SELECT count(*) AS n FROM expenses.car_folder").fetchone()["n"] == 0
+    assert admin.execute("SELECT count(*) AS n FROM garagebooks.car_folder").fetchone()["n"] == 0
 
 
 # ---- upload ---------------------------------------------------------------------
@@ -374,7 +374,7 @@ def test_folder_can_be_cleared(client, ms, admin):
 def test_upload_name_follows_the_date_format_setting(client, ms, admin):
     sign_in(client, ms)
     choose_folder(client)
-    admin.execute("UPDATE expenses.setting SET invoice_date_format = 'yyyy-mm-dd'")
+    admin.execute("UPDATE garagebooks.setting SET invoice_date_format = 'yyyy-mm-dd'")
     client.post("/new", data=with_pdf(form(admin, invoice_url="")), headers=ORIGIN)
     (put,) = ms.uploads()
     assert unquote(urlparse(put[1]).path).endswith(":/2026-11-07 Tyres - Tyre Shop.pdf:/content")
@@ -383,7 +383,7 @@ def test_upload_name_follows_the_date_format_setting(client, ms, admin):
 def test_upload_name_follows_the_name_template(client, ms, admin):
     sign_in(client, ms)
     choose_folder(client)
-    admin.execute("UPDATE expenses.setting SET invoice_name_format = '%date - %category - %vendor'")
+    admin.execute("UPDATE garagebooks.setting SET invoice_name_format = '%date - %category - %vendor'")
     client.post("/new", data=with_pdf(form(admin, invoice_url="")), headers=ORIGIN)
     (put,) = ms.uploads()
     assert unquote(urlparse(put[1]).path).endswith(":/261107 - Tyres - Tyre Shop.pdf:/content")
@@ -499,12 +499,12 @@ def test_onedrive_events_are_logged_without_secrets(client, ms, admin, caplog):
 
 def test_old_variable_name_is_explained(monkeypatch, caplog):
     import logging
-    monkeypatch.delenv("EXPENSES_ENCRYPTION_KEY", raising=False)
+    monkeypatch.delenv("GARAGEBOOKS_ENCRYPTION_KEY", raising=False)
     monkeypatch.setenv("ONEDRIVE_TOKEN_KEY", Fernet.generate_key().decode())
     caplog.set_level(logging.WARNING, logger="garagebooks")
     from garagebooks import create_app
     create_app(connect=lambda: None)
-    assert any("ONEDRIVE_TOKEN_KEY" in m and "EXPENSES_ENCRYPTION_KEY" in m for m in caplog.messages)
+    assert any("ONEDRIVE_TOKEN_KEY" in m and "GARAGEBOOKS_ENCRYPTION_KEY" in m for m in caplog.messages)
 
 
 def test_expired_sign_in_is_explained(client, ms, admin, monkeypatch):
@@ -528,10 +528,10 @@ def test_huge_upload_is_refused(client, ms, admin):
 
 def test_app_role_can_use_onedrive_tables_only(pg, admin):
     with psycopg.connect(pg.app_url, autocommit=True) as conn:
-        conn.execute("SELECT * FROM expenses.car_folder")
-        conn.execute("SELECT * FROM expenses.onedrive_account")
+        conn.execute("SELECT * FROM garagebooks.car_folder")
+        conn.execute("SELECT * FROM garagebooks.onedrive_account")
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
-            conn.execute("DROP TABLE expenses.car_folder")
+            conn.execute("DROP TABLE garagebooks.car_folder")
 
 
 def test_setup_page_has_the_full_registration_walkthrough(client):
@@ -546,7 +546,7 @@ def test_setup_page_has_the_full_registration_walkthrough(client):
 def test_folder_note_shows_the_name_the_settings_produce(client, ms, admin):
     sign_in(client, ms)
     assert "261107 Tyres - Tyre Shop.pdf" in client.get("/storage").data.decode()     # the defaults
-    admin.execute("UPDATE expenses.setting SET invoice_name_format = '%date - %category', "
+    admin.execute("UPDATE garagebooks.setting SET invoice_name_format = '%date - %category', "
                   "invoice_date_format = 'yyyy-mm-dd'")
     page = client.get("/storage").data.decode()
     assert "2026-11-07 - Tyres.pdf" in page and "Settings" in page

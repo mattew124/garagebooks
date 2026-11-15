@@ -11,13 +11,14 @@ account (OneDrive Personal). To keep the PDFs on your own server instead, see
 1. **Add an encryption key.** Add a key to `.env` and restart the app, which creates its own tables:
 
     ```bash
-    EXPENSES_ENCRYPTION_KEY=<output of: openssl rand -base64 32 | tr '+/' '-_'>
+    GARAGEBOOKS_ENCRYPTION_KEY=<output of: openssl rand -base64 32 | tr '+/' '-_'>
     ```
 
     The key encrypts the client secret and the saved sign-in (a refresh token for your whole
     OneDrive) before they go into the database, so a database dump or backup on its own can't
     open the drive. Keep the key out of those backups. If you lose or change it, enter the
-    secret and connect again.
+    secret and connect again. Up to 0.4.0-rc1 the key was called `EXPENSES_ENCRYPTION_KEY`; that
+    name still works.
 
 2. **Register an app with Microsoft** (once per installation; see
     [Registering the app](#registering-the-app) below), then enter its client ID and secret on

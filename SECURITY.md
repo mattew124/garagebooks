@@ -18,7 +18,7 @@ Only the latest release (and the current release candidate, if there is one). Up
 
 - The app has **no login of its own**. It must only ever be published behind a forward-auth gate;
   anything that bypasses or weakens that assumption is in scope.
-- The OneDrive sign-in is stored encrypted, with a key (`EXPENSES_ENCRYPTION_KEY`) kept outside the
+- The OneDrive sign-in is stored encrypted, with a key (`GARAGEBOOKS_ENCRYPTION_KEY`) kept outside the
   database. Anything that exposes the key, the client secret or the saved tokens is in scope.
 - The project is "vibe coded" (see the README). It has tests, static analysis and dependency and image
   scanning, but has not had a manual security review.

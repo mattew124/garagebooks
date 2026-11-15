@@ -15,7 +15,7 @@ Traefik routing the request to the app. It assumes TeslaMate is already publishe
 ## How a request travels
 
 ```
- browser ──► Cloudflare edge ──► tunnel ──► cloudflared ──► Traefik :80 ──► expenses :8080
+ browser ──► Cloudflare edge ──► tunnel ──► cloudflared ──► Traefik :80 ──► garagebooks :8080
              (TLS, Access login)  (outbound only)           (`web` entrypoint)
 ```
 

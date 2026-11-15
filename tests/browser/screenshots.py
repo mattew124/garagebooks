@@ -10,8 +10,8 @@ import re
 
 from playwright.sync_api import expect, sync_playwright
 
-BASE = os.environ.get("BASE_PATH", "/expenses-dev")
-UI = f"http://expenses-dev:8080{BASE}/"
+BASE = os.environ.get("BASE_PATH", "/garagebooks-dev")
+UI = f"http://garagebooks-dev:8080{BASE}/"
 GRAFANA = f"http://dev-grafana:3000{BASE}/grafana/"
 OUT = os.environ.get("OUT", "/out")
 
@@ -39,8 +39,8 @@ def main():
         shot(page, "expense-form")
         page.goto(UI + "settings")
         # The stack's own addresses are real hostnames: show example ones, without saving them.
-        page.fill("[name=grafana_url]", "https://teslamate.example.com/grafana/d/tm-expenses-tco/cost-of-ownership")
-        page.fill("[name=expenses_url]", "https://teslamate.example.com/garagebooks/")
+        page.fill("[name=grafana_url]", "https://teslamate.example.com/grafana/d/garagebooks-tco/cost-of-ownership")
+        page.fill("[name=app_url]", "https://teslamate.example.com/garagebooks/")
         shot(page, "settings-page", full_page=True)
 
         # Invoice storage. The OneDrive card's setup steps show this stack's own callback address:
@@ -63,7 +63,7 @@ def main():
                                   color_scheme="light", locale="en-AU")
         dash = big.new_page()
         # Kiosk drops Grafana's side menu and breadcrumb; the boxes and time range stay.
-        dash.goto(GRAFANA + "d/tm-expenses-tco/cost-of-ownership"
+        dash.goto(GRAFANA + "d/garagebooks-tco/cost-of-ownership"
                   "?kiosk&_dash.hideTimePicker=false&_dash.hideVariables=false&_dash.hideLinks=false")
         expect(dash.get_by_text("Total cost", exact=True)).to_be_visible(timeout=30000)
         dash.wait_for_load_state("networkidle")
