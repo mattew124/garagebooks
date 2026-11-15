@@ -100,6 +100,38 @@
     </span>
   </label>
 
+  <details id="pay-calc" class="pay-calc" hidden>
+    <summary>Payment calculator</summary>
+    <p><small>For a payment made of several parts, such as a discounted gift card plus cash. Add each part's
+      face value and what it cost you. Only the amount you choose to use is saved: none of these figures are.</small></p>
+    <div id="pay-rows"></div>
+    <p><button type="button" class="secondary" id="pay-add">Add a part</button></p>
+    <dl class="pay-totals">
+      <dt>Invoice covered</dt><dd id="pay-covered">$0.00</dd>
+      <dt>True cost</dt><dd id="pay-cost">$0.00</dd>
+      <dt>Saved</dt><dd id="pay-saved">$0.00</dd>
+    </dl>
+    <p id="pay-problem" role="alert" class="pay-problem"></p>
+    <button type="button" id="pay-use" disabled>Use this amount</button>
+    <template id="pay-row-template">
+      <fieldset class="pay-row">
+        <legend class="pay-legend">Part</legend>
+        <label>Face value
+          <span class="affix"><span>$</span><input data-part="face" inputmode="decimal" autocomplete="off" placeholder="0.00"></span></label>
+        <label>It cost you
+          <select data-part="mode">
+            <option value="paid">an amount paid</option>
+            <option value="off">a percentage off</option>
+            <option value="cash">the full value (cash)</option>
+          </select></label>
+        <label data-part-value>
+          <span data-part-value-label>Amount paid</span>
+          <span class="affix"><span data-part-unit>$</span><input data-part="value" inputmode="decimal" autocomplete="off" placeholder="0.00"></span></label>
+        <button type="button" class="secondary" data-part="remove">Remove</button>
+      </fieldset>
+    </template>
+  </details>
+
   <label>Odometer
     <span class="affix">
       <input name="odometer_km" inputmode="decimal" autocomplete="off" value="{{ values.odometer_km }}">

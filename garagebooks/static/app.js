@@ -334,6 +334,104 @@ document.addEventListener("DOMContentLoaded", () => {
     }));
   }
 
+  // Payment calculator: the true cost of a payment made of parts, such as a discounted gift card plus cash.
+  // Works in whole cents so nothing drifts. The parts are never named, never sent and never saved: "Use this
+  // amount" only puts the result in the amount field, and the server checks it like any typed figure.
+  const payCalc = document.getElementById("pay-calc");
+  if (payCalc && amountInput) {
+    const rowsBox = document.getElementById("pay-rows");
+    const template = document.getElementById("pay-row-template");
+    const useBtn = document.getElementById("pay-use");
+    const problem = document.getElementById("pay-problem");
+    const money = (cents) => `${cents < 0 ? "-" : ""}$${(Math.abs(cents) / 100).toLocaleString("en-AU",
+      { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    // "12.5" -> 1250 (hundredths of a unit), or null for anything that is not a plain non-negative number.
+    const hundredths = (text) => {
+      const m = /^(\d*)(?:\.(\d{0,2}))?$/.exec(text.replace(/[$,%\s]/g, ""));
+      if (!m || (m[1] === "" && !m[2])) return null;
+      return parseInt(m[1] || "0", 10) * 100 + parseInt((m[2] || "").padEnd(2, "0"), 10);
+    };
+    let costCents = null;
+
+    function renumber() {
+      rowsBox.querySelectorAll(".pay-row").forEach((row, i) => {
+        row.querySelector(".pay-legend").textContent = `Part ${i + 1}`;
+        row.querySelector("[data-part=remove]").setAttribute("aria-label", `Remove part ${i + 1}`);
+      });
+    }
+    function addRow() {
+      const row = template.content.firstElementChild.cloneNode(true);
+      rowsBox.append(row);
+      renumber();
+      return row;
+    }
+    function recalc() {
+      let covered = 0, cost = 0, bad = 0, used = 0;
+      rowsBox.querySelectorAll(".pay-row").forEach((row) => {
+        const face = row.querySelector("[data-part=face]");
+        const mode = row.querySelector("[data-part=mode]").value;
+        const value = row.querySelector("[data-part=value]");
+        row.querySelector("[data-part-value]").hidden = mode === "cash";
+        row.querySelector("[data-part-value-label]").textContent = mode === "off" ? "Percentage off" : "Amount paid";
+        row.querySelector("[data-part-unit]").textContent = mode === "off" ? "%" : "$";
+        const empty = face.value.trim() === "" && (mode === "cash" || value.value.trim() === "");
+        const f = hundredths(face.value);
+        const v = mode === "cash" ? 0 : hundredths(value.value);
+        let paid = null;
+        if (!empty && f !== null && v !== null) {
+          if (mode === "cash") paid = f;
+          else if (mode === "paid") paid = v;
+          else if (v <= 10000) paid = Math.round(f * (10000 - v) / 10000);
+        }
+        face.setAttribute("aria-invalid", String(!empty && f === null));
+        value.setAttribute("aria-invalid", String(!empty && mode !== "cash" && (v === null || (mode === "off" && v > 10000))));
+        if (empty) return;
+        if (paid === null) { bad++; return; }
+        covered += f; cost += paid; used++;
+      });
+      document.getElementById("pay-covered").textContent = money(covered);
+      document.getElementById("pay-cost").textContent = money(cost);
+      document.getElementById("pay-saved").textContent = money(covered - cost);
+      problem.textContent = bad ? "Check the parts outlined: each needs a face value, and an amount paid or a percentage from 0 to 100." : "";
+      costCents = bad || !used ? null : cost;
+      useBtn.disabled = costCents === null;
+    }
+
+    payCalc.hidden = false;
+    addRow(); addRow();
+    document.getElementById("pay-add").addEventListener("click", () => {
+      addRow().querySelector("[data-part=face]").focus();
+      recalc();
+    });
+    rowsBox.addEventListener("input", recalc);
+    rowsBox.addEventListener("change", recalc);
+    rowsBox.addEventListener("click", (ev) => {
+      const btn = ev.target.closest("[data-part=remove]");
+      if (!btn) return;
+      const row = btn.closest(".pay-row");
+      const next = row.nextElementSibling || row.previousElementSibling;
+      rowsBox.removeChild(row);
+      if (!rowsBox.children.length) addRow();
+      renumber();
+      recalc();
+      (next || rowsBox.firstElementChild).querySelector("[data-part=face]").focus();
+    });
+    rowsBox.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" && ev.target.matches("input")) {   // Enter must not save the whole form
+        ev.preventDefault();
+        if (costCents !== null) useBtn.click();
+      }
+    });
+    useBtn.addEventListener("click", () => {
+      if (costCents === null) return;
+      amountInput.value = (costCents / 100).toFixed(2);
+      calcNote.textContent = "";
+      amountInput.dispatchEvent(new Event("input", { bubbles: true }));
+      amountInput.focus();
+    });
+    recalc();
+  }
+
   // An upload can take a few seconds: say so, and stop a second click sending it twice.
   function markSending() {
     const file = form.elements.invoice_file;
