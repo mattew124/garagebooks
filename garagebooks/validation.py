@@ -294,6 +294,30 @@ def parse_category_name(raw):
     return name
 
 
+MAX_CAR_NAME_LEN = 100
+MAX_CAR_TEXT_LEN = 60
+
+
+def parse_car_form(form, kinds):
+    """A car's name, type (one of `kinds`), make and model. -> (values, errors)."""
+    values, errors = {}, {}
+    name = " ".join((form.get("name") or "").split())
+    if not name:
+        errors["name"] = "Enter a name for the car."
+    elif len(name) > MAX_CAR_NAME_LEN:
+        errors["name"] = f"The name is too long (max {MAX_CAR_NAME_LEN} characters)."
+    values["name"] = name
+    values["kind"] = (form.get("kind") or "").strip()
+    if values["kind"] not in kinds:
+        errors["kind"] = "Choose the type of car."
+    for field, label in (("make", "The make"), ("model", "The model")):
+        text = " ".join((form.get(field) or "").split())
+        if len(text) > MAX_CAR_TEXT_LEN:
+            errors[field] = f"{label} is too long (max {MAX_CAR_TEXT_LEN} characters)."
+        values[field] = text or None
+    return values, errors
+
+
 def parse_url_setting(raw):
     """A blank clears the setting (None). Otherwise an http(s) URL with no spaces."""
     url = (raw or "").strip()

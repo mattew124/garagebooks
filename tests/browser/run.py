@@ -398,6 +398,14 @@ def remove_marked(page):
         page.once("dialog", lambda d: d.accept())
         page.click("button.danger")
         page.wait_for_url(re.compile(r"msg=deleted"))
+    page.goto(UI + "cars")                      # and a car a stopped run added by hand
+    while page.locator(".car", has_text=MARKER).count():
+        car = page.locator(".car", has_text=MARKER).first
+        car.locator("summary", has_text="Edit").click()
+        page.once("dialog", lambda d: d.accept())
+        car.get_by_role("button", name="Delete car").click()
+        page.wait_for_url(re.compile(r"msg=car_deleted"))
+        page.goto(UI + "cars")
 
 
 def test_form(page):
@@ -787,6 +795,40 @@ def test_folder_browser(page):
     shot(page, "folder-browser-phone")
 
 
+def test_cars_page(page):
+    """The app's own car list: TeslaMate's cars are there, and one can be added by hand, given an
+    odometer reading, and deleted again."""
+    page.goto(UI + "cars")
+    expect(page.locator("#teslamate-status")).to_have_attribute("data-state", "ok")
+    expect(page.locator(".car small", has_text="from TeslaMate").first).to_be_visible()
+    page.fill("#add-car input[name=name]", MARKER)
+    page.select_option("#add-car select[name=kind]", "ICE")
+    page.fill("#add-car input[name=make]", "Example")
+    page.click("#add-car button[type=submit]")
+    page.wait_for_url(re.compile(r"msg=car_added"))
+    car = page.locator(".car", has_text=MARKER)
+    expect(car).to_contain_text("added by hand")
+    expect(car.locator(".car-odometer")).to_contain_text("not recorded")
+    car.locator("summary", has_text="Odometer readings").click()
+    car.locator("input[name=km]").fill("12,345")
+    car.get_by_role("button", name="Add reading").click()
+    page.wait_for_url(re.compile(r"msg=reading_added"))
+    car = page.locator(".car", has_text=MARKER)
+    expect(car.locator(".car-odometer")).to_contain_text("12,345 km")
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "sideways scroll on a phone"
+    car.locator("summary", has_text="Odometer readings").click()
+    shot(page, "cars-phone")
+    page.goto(UI + "new")                                         # the new car can be chosen for an expense
+    assert MARKER in page.locator("select[name=car_id]").inner_text()
+    page.goto(UI + "cars")
+    car = page.locator(".car", has_text=MARKER)
+    car.locator("summary", has_text="Edit").click()
+    page.once("dialog", lambda d: d.accept())
+    car.get_by_role("button", name="Delete car").click()
+    page.wait_for_url(re.compile(r"msg=car_deleted"))
+    expect(page.locator(".car", has_text=MARKER)).to_have_count(0)
+
+
 def test_dashboard(page):
     add_expense(page, "62000", "Initial purchase")
     add_expense(page, "1500", "Tyres")
@@ -833,6 +875,7 @@ def main():
         step("list: tiles or rows, sorting, and back to the same view", test_list_toggle_sort_and_return, page)
         step("rows on a phone show whole dates, categories and amounts", test_rows_on_a_phone_show_whole_values, page)
         step("no sideways scroll on a phone", test_phone_layout_has_no_sideways_scroll, page)
+        step("cars: TeslaMate's are listed, one is added by hand, read and deleted", test_cars_page, page)
         step("header stays tidy on a phone", test_header_stays_tidy_on_a_phone, page)
         step("phone list shows amount, invoice and edit", test_list_shows_key_fields_on_a_phone, page)
         step("a likely duplicate is asked about, then saved anyway", test_duplicate_is_asked_about_before_saving, page)

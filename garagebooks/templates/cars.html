@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Cars{% endblock %}
+{% block main_attrs %} class="narrow"{% endblock %}
+{% macro car_fields(v, e) %}
+  <div class="row">
+    <label>Name <input name="name" maxlength="100" required value="{{ v.name or '' }}" autocomplete="off">
+      {% if e.name %}<span class="error">{{ e.name }}</span>{% endif %}</label>
+    <label>Type
+      <select name="kind">
+        {% for code, label in kinds.items() %}<option value="{{ code }}" {{ 'selected' if (v.kind or 'BEV') == code }}>{{ label }}</option>{% endfor %}
+      </select>
+      {% if e.kind %}<span class="error">{{ e.kind }}</span>{% endif %}</label>
+  </div>
+  <div class="row">
+    <label>Make <input name="make" maxlength="60" value="{{ v.make or '' }}" autocomplete="off">
+      {% if e.make %}<span class="error">{{ e.make }}</span>{% endif %}</label>
+    <label>Model <input name="model" maxlength="60" value="{{ v.model or '' }}" autocomplete="off">
+      {% if e.model %}<span class="error">{{ e.model }}</span>{% endif %}</label>
+  </div>
+{% endmacro %}
+{% block content %}
+<h1>Cars</h1>
+<p id="teslamate-status" data-state="{{ teslamate.state }}"><small>
+  {% if teslamate.state == "ok" %}TeslaMate is connected: the cars it tracks are listed here by themselves, with their odometer and charging costs.
+  {% elif teslamate.state == "absent" %}TeslaMate is not configured, and isn't needed: add your cars here and enter odometer readings by hand.
+  {% else %}TeslaMate's figures are unavailable. Everything entered by hand carries on.
+  {% endif %}</small></p>
+{% if teslamate.reason %}<p class="{{ 'notice' if teslamate.state == 'ok' else 'error' }}" id="teslamate-reason">{{ teslamate.reason }}</p>{% endif %}
+<div class="cards">
+{% for c in cars %}{% set e = errors.get(c.id, {}) %}{% set v = values.get(c.id) %}
+<section class="card stack car" id="car-{{ c.id }}">
+  <h2>{{ c.name }} <small>{{ 'from TeslaMate' if c.teslamate_car_id is not none else 'added by hand' }}</small></h2>
+  <p class="car-odometer">Odometer:
+    {% if c.odometer %}<strong>{{ c.odometer.km|km }}</strong>
+      <small>{% if c.odometer.source == "teslamate" %}from TeslaMate{% else %}entered {{ c.odometer.at|day }}{% endif %}</small>
+    {% elif c.teslamate_car_id is not none and teslamate.state not in ("ok", "absent") %}<strong>unavailable</strong>
+    {% else %}<strong>not recorded</strong>{% endif %}
+    · {{ c.expenses }} expense{{ '' if c.expenses == 1 else 's' }}</p>
+  <details{{ ' open' if e and not (e.km or e.date) }}>
+    <summary>Edit</summary>
+    <form method="post" action="{{ url_for('car_update', car_id=c.id) }}" class="stack">
+      {{ car_fields(v if v and not (e.km or e.date) else c, e) }}
+      <button type="submit" class="secondary">Save car</button>
+    </form>
+    {% if c.teslamate_car_id is none and c.expenses == 0 %}
+    <form method="post" action="{{ url_for('car_delete', car_id=c.id) }}" data-confirm="Delete {{ c.name }}?">
+      <button type="submit" class="secondary danger">Delete car</button>
+    </form>
+    {% endif %}
+    {% if e.delete %}<span class="error">{{ e.delete }}</span>{% endif %}
+  </details>
+  <details{{ ' open' if e.km or e.date }}>
+    <summary>Odometer readings</summary>
+    <form method="post" action="{{ url_for('reading_add', car_id=c.id) }}" class="row">
+      <label>Date <input type="date" name="date" required value="{{ (v.date if v and (e.km or e.date)) or today }}">
+        {% if e.date %}<span class="error">{{ e.date }}</span>{% endif %}</label>
+      <label>Odometer (km) <input name="km" inputmode="decimal" required value="{{ (v.km if v and (e.km or e.date)) or '' }}" autocomplete="off">
+        {% if e.km %}<span class="error">{{ e.km }}</span>{% endif %}</label>
+      <button type="submit" class="secondary">Add reading</button>
+    </form>
+    {% if c.readings %}
+    <ul class="plain readings">
+      {% for r in c.readings %}
+      <li class="row"><span>{{ r.read_at|day }} · {{ r.km|km }}</span>
+        <form method="post" action="{{ url_for('reading_delete', car_id=c.id, reading_id=r.id) }}">
+          <button type="submit" class="secondary">Delete</button></form></li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    <p><small>{% if c.teslamate_car_id is not none %}TeslaMate's odometer is used when it can be read; readings here fill in when it can't.
+      {% else %}The latest reading is the car's odometer. {% endif %}The odometer on an expense counts as a reading too.</small></p>
+  </details>
+</section>
+{% else %}
+<p class="empty">No cars yet. Add one below.</p>
+{% endfor %}
+</div>
+<form method="post" action="{{ url_for('cars_page') }}" class="card stack" id="add-car">
+  <h2>Add a car</h2>
+  {{ car_fields(values.get('new', {}), errors.get('new', {})) }}
+  <button type="submit" class="button">Add car</button>
+  <p><small>For a car TeslaMate doesn't track: any make, electric or not. Cars TeslaMate tracks are added automatically.</small></p>
+</form>
+{% endblock %}

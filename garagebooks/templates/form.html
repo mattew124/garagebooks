@@ -39,7 +39,7 @@
 
   {% if uploads_enabled %}
   {# Where the chosen car's invoices go decides what the button offers; app.js follows the car. #}
-  {% set picked = car_storage.get(values.car_id|int(0)) or default_storage %}
+  {% set picked = car_storage.get(values.get('car_id', 0)|int(0)) or default_storage %}
   <section class="card stack">
   <h2 class="card-title">Invoice</h2>
   {{ car_field() }}

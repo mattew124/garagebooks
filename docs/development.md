@@ -9,11 +9,23 @@ The tests let the real TeslaMate image (the release in `garagebooks/compat.py`) 
 throwaway database, so docker pulls `teslamate/teslamate` the first time. They then start the app so
 it creates its own schema, and also cover the optional `scripts/provision-db.sh` role.
 
+TeslaMate is optional, so the suite runs both ways, and CI runs both (the `test` and `no-teslamate`
+jobs). A feature isn't done until its tests pass in each:
+
+```bash
+TEST_TESLAMATE=0 .venv/bin/python -m pytest -q   # plain PostgreSQL, no TeslaMate tables at all
+```
+
+Mark a test that needs TeslaMate's real tables `@pytest.mark.teslamate` (skipped in that run), and use
+the `empty_db` fixture for one about a database with no TeslaMate, which then runs every time. New code
+never queries TeslaMate's tables itself: it asks `garagebooks/sources.py` ("which cars?", "what was the
+odometer?", "what did charging cost?") and handles "no answer".
+
 ## Testing against a TeslaMate release
 
 TeslaMate can change its tables in any release, so each release of this app records the one it was
-tested with (`TESTED_TESLAMATE` and `TESTED_MIGRATION` in `garagebooks/compat.py`) and refuses to
-start on a newer database. To try a new TeslaMate, with nothing but docker and the `.venv`:
+tested with (`TESTED_TESLAMATE` and `TESTED_MIGRATION` in `garagebooks/compat.py`) and holds
+TeslaMate's figures back on a newer database. To try a new TeslaMate, with nothing but docker and the `.venv`:
 
 ```bash
 scripts/teslamate-compat.sh 4.5.0            # or `latest`; defaults to the recorded release

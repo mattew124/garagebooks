@@ -1,8 +1,8 @@
 """GarageBooks: a small web UI for recording what the car costs to own.
 
-Data lives in the `garagebooks` schema of the TeslaMate database; the Grafana
-dashboard in grafana/ turns it (plus TeslaMate's own charging costs) into total
-cost of ownership.
+Data lives in the `garagebooks` schema, in TeslaMate's database where there is a TeslaMate;
+the Grafana dashboard in grafana/ turns it (plus TeslaMate's own charging costs, when it has
+them) into total cost of ownership. TeslaMate is optional: see sources.py.
 """
 
 import hashlib
@@ -21,7 +21,7 @@ from flask import Flask, abort, g, jsonify, make_response, redirect, render_temp
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from . import compat, dashboard, db, docinfo, icons, invoices, logs, onedrive, storage, updates, validation
+from . import dashboard, db, docinfo, icons, invoices, logs, onedrive, sources, storage, updates, validation
 
 log = logging.getLogger("garagebooks.app")
 
@@ -40,6 +40,11 @@ MESSAGES = {
                             "this car's invoices. Choose its folder on the Invoice storage page, then upload "
                             "it again.",
     "category": "Category added.",
+    "car_added": "Car added.",
+    "car_saved": "Car saved.",
+    "car_deleted": "Car deleted.",
+    "reading_added": "Odometer reading saved.",
+    "reading_deleted": "Odometer reading deleted.",
     "settings": "Settings saved.",
     "folders": "Folders saved.",
     "connected": "OneDrive connected.",
@@ -52,6 +57,7 @@ MESSAGES = {
 
 # PDFs read per page without JavaScript: each is downloaded and text-extracted (OCR for scans) while
 # the request waits, so a big folder is worked through in rounds. The normal page reads them all, one request each.
+TESLAMATE_RECHECK_SECONDS = 60   # how often the app looks again at whether TeslaMate is there and readable
 TOKEN_MARGIN_SECONDS = 120   # a kept access token is dropped this long before it expires
 IMPORT_BATCH = 10
 # ...and stop reading more files once a round has taken this long (OCR can take 10+ seconds a file,
@@ -104,9 +110,40 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             db.migrate()
         else:
             log.info("SKIP_MIGRATE=1: not touching the schema")
-        with db.connect() as conn:   # refuses to start on a TeslaMate newer than the tested one
-            compat.check(conn, allow_untested=os.environ.get("ALLOW_UNTESTED_TESLAMATE") == "1")
+            with db.connect() as conn:
+                if not db.has_schema(conn):
+                    raise RuntimeError("SKIP_MIGRATE=1, but the 'garagebooks' schema in this database is from an "
+                                       "older release. Run scripts/provision-db.sh again, then start the app.")
     dashboard_dir = os.environ.get("DASHBOARD_DIR")
+    allow_untested = os.environ.get("ALLOW_UNTESTED_TESLAMATE") == "1"
+    # What is known about TeslaMate, looked at again every so often: it may be installed, upgraded
+    # or repaired while the app runs. "view" is the form the ownership view was last put in.
+    known = {"teslamate": sources.TeslaMate(sources.UNAVAILABLE, "The database has not been looked at yet."),
+             "at": None, "view": None, "logged": None}
+
+    def teslamate(conn=None, fresh=False):
+        """TeslaMate's state (sources.TeslaMate). With a connection, and when it was last looked at over
+        a minute ago (or fresh=True), look again: add its new cars to ours, and put the ownership view
+        in the form that fits."""
+        now = time.monotonic()
+        if conn is None or not (fresh or known["at"] is None or now - known["at"] > TESLAMATE_RECHECK_SECONDS):
+            return known["teslamate"]
+        found = sources.detect(conn, allow_untested)
+        known["teslamate"], known["at"] = found, now
+        if (found.state, found.reason) != known["logged"]:
+            known["logged"] = (found.state, found.reason)
+            if found.state == sources.OK and found.reason:
+                log.error("ALLOW_UNTESTED_TESLAMATE=1: using TeslaMate's figures anyway. %s", found.reason)
+            elif found.state == sources.OK:
+                log.info("TeslaMate: installed and within what was tested; its odometer and charging figures are used")
+            elif found.state == sources.ABSENT:
+                log.info("TeslaMate: not installed in this database; everything comes from what is entered by hand")
+            else:
+                log.warning("TeslaMate: %s; its figures are held back. %s", found.state, found.reason)
+        sources.sync_cars(conn, found)
+        if known["view"] != found.usable and db.build_ownership(conn, found.usable) is not None:
+            known["view"] = found.usable
+        return found
 
     def refresh_dashboard():
         """Write the dashboard with a time range that starts at the earliest data. Run on start and
@@ -116,15 +153,21 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         try:
             try:
                 with connect() as conn:
-                    start = db.first_activity(conn)
+                    start = sources.first_activity(conn, teslamate(conn))
             except Exception as exc:    # no data yet, or no database: Grafana's own default range then
                 log.info("Dashboard time range left at its default (%s)", exc)
                 start = None
-            wrote = dashboard.export(dashboard_dir, tz, os.environ.get("BASE_PATH", "").rstrip("/"), start=start)
+            wrote = dashboard.export(dashboard_dir, tz, os.environ.get("BASE_PATH", "").rstrip("/"), start=start,
+                                     teslamate=known["teslamate"])
             log.info("Grafana dashboard %s in %s", "written" if wrote else "already up to date", dashboard_dir)
         except OSError as exc:
             log.warning("Could not write the Grafana dashboard to %s: %s", dashboard_dir, exc)
 
+    try:
+        with connect() as conn:
+            teslamate(conn, fresh=True)
+    except Exception as exc:    # noqa: BLE001 - no database yet: looked at again on the first request
+        log.info("TeslaMate not looked for at start: %s", exc)
     refresh_dashboard()
     # Room for the largest PDF plus the rest of the form.
     app.config["MAX_CONTENT_LENGTH"] = validation.MAX_PDF_BYTES + 1024 * 1024
@@ -260,6 +303,23 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         source = request.headers.get("Origin") or request.headers.get("Referer")
         if not source or urlparse(source).netloc != request.host:
             abort(403)
+
+    @app.before_request
+    def look_for_teslamate():
+        """Once a minute at most: has TeslaMate appeared, gone or changed? The dashboard follows."""
+        if request.endpoint in (None, "static", "healthz", "provider_icon"):
+            return
+        if known["at"] is not None and time.monotonic() - known["at"] <= TESLAMATE_RECHECK_SECONDS:
+            return
+        before = known["teslamate"]
+        try:
+            with connect() as conn:
+                teslamate(conn)
+        except Exception as exc:    # noqa: BLE001 - the page itself will say the database is down
+            log.debug("TeslaMate not looked for: %s", exc)
+            return
+        if known["teslamate"] != before:
+            refresh_dashboard()
 
     @app.context_processor
     def dashboards_link():
@@ -602,6 +662,88 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         return render_template("categories.html", categories=cats, error=error,
                                message=MESSAGES.get(request.args.get("msg", ""))), (400 if error else 200)
 
+    # ---- cars ----------------------------------------------------------------
+
+    def render_cars(errors=None, values=None, status=200):
+        now = datetime.now(ZoneInfo(tz))
+        with connect() as conn:
+            state = teslamate(conn)
+            cars = db.car_details(conn)
+            for car in cars:
+                car["odometer"] = sources.odometer_at(conn, state, car["id"], now)
+        return render_template("cars.html", cars=cars, kinds=db.CAR_KINDS, teslamate=state, errors=errors or {},
+                               values=values or {}, today=now.date().isoformat(),
+                               message=MESSAGES.get(request.args.get("msg", ""))), status
+
+    @app.get("/cars")
+    def cars_page():
+        return render_cars()
+
+    @app.post("/cars")
+    def car_add():
+        values, errors = validation.parse_car_form(request.form, db.CAR_KINDS)
+        if errors:
+            return render_cars({"new": errors}, {"new": request.form}, 400)
+        with connect() as conn:
+            car_id = db.add_car(conn, values)
+        log.info("car %s added by hand", car_id)
+        return redirect(url_for("cars_page", msg="car_added"), 303)
+
+    @app.post("/cars/<int:car_id>")
+    def car_update(car_id):
+        car_or_404(car_id)
+        values, errors = validation.parse_car_form(request.form, db.CAR_KINDS)
+        if errors:
+            return render_cars({car_id: errors}, {car_id: request.form}, 400)
+        with connect() as conn:
+            db.update_car(conn, car_id, values)
+        log.info("car %s updated", car_id)
+        return redirect(url_for("cars_page", msg="car_saved"), 303)
+
+    @app.post("/cars/<int:car_id>/delete")
+    def car_delete(car_id):
+        car_or_404(car_id)
+        with connect() as conn:
+            deleted = db.delete_car(conn, car_id)
+        if not deleted:
+            return render_cars({car_id: {"delete": "Only a car added by hand that has no expenses can be deleted."}},
+                               status=400)
+        log.info("car %s deleted", car_id)
+        return redirect(url_for("cars_page", msg="car_deleted"), 303)
+
+    @app.post("/cars/<int:car_id>/readings")
+    def reading_add(car_id):
+        car_or_404(car_id)
+        errors = {}
+        try:
+            # A reading is for a day: noon, or this moment for today's (noon may still be ahead).
+            read_at = min(validation.parse_local_datetime(request.form.get("date"), "12:00", tz),
+                          datetime.now(ZoneInfo(tz)).replace(microsecond=0)) \
+                if request.form.get("date") == datetime.now(ZoneInfo(tz)).date().isoformat() \
+                else validation.parse_local_datetime(request.form.get("date"), "12:00", tz)
+        except ValueError as exc:
+            errors["date"] = str(exc)
+        try:
+            km = validation.parse_odometer(request.form.get("km"))
+            if km is None:
+                raise ValueError("Enter the odometer reading.")
+        except ValueError as exc:
+            errors["km"] = str(exc)
+        if errors:
+            return render_cars({car_id: errors}, {car_id: request.form}, 400)
+        with connect() as conn:
+            db.add_reading(conn, car_id, read_at, km)
+        refresh_dashboard()
+        log.info("odometer reading added for car %s", car_id)
+        return redirect(url_for("cars_page", msg="reading_added"), 303)
+
+    @app.post("/cars/<int:car_id>/readings/<int:reading_id>/delete")
+    def reading_delete(car_id, reading_id):
+        with connect() as conn:
+            if not db.delete_reading(conn, car_id, reading_id):
+                abort(404)
+        return redirect(url_for("cars_page", msg="reading_deleted"), 303)
+
     @app.get("/learned")
     def learned_page():
         with connect() as conn:
@@ -890,9 +1032,10 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                   if guess["missing"] else ""))
         if guess["date"] and not row["odometer_km"]:
             with connect() as conn:
-                reading = db.odometer_at(conn, car["id"], datetime.combine(guess["date"], dtime(12), ZoneInfo(tz)))
+                reading = sources.odometer_at(conn, teslamate(), car["id"],
+                                              datetime.combine(guess["date"], dtime(12), ZoneInfo(tz)), manual=False)
             if reading is not None:
-                row["odometer_km"] = f"{reading:.1f}".rstrip("0").rstrip(".")
+                row["odometer_km"] = f"{reading.km:.1f}".rstrip("0").rstrip(".")
                 row["odo_note"] = "from TeslaMate"
         if guess["date"] and guess["amount"] is not None:
             with connect() as conn:
@@ -1316,7 +1459,9 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 request.args.get("date"), request.args.get("time"), tz)
         except ValueError as exc:
             return jsonify(error=str(exc)), 400
+        # Only TeslaMate's: an older reading entered by hand is not the odometer on this day.
         with connect() as conn:
-            return jsonify(odometer_km=db.odometer_at(conn, car_id, when))
+            reading = sources.odometer_at(conn, teslamate(), car_id, when, manual=False)
+        return jsonify(odometer_km=reading.km if reading else None)
 
     return app

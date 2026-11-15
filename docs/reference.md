@@ -42,7 +42,22 @@ The app connects as `DATABASE_USER` with `DATABASE_PASS` to `DATABASE_NAME` on `
 
 ## TeslaMate version
 
-Each release is tested against one TeslaMate release (named in the README and in `garagebooks/compat.py`). TeslaMate has no stable database schema, so on start the app compares the newest migration in TeslaMate's `schema_migrations` table with the one it was tested against. If the database is **newer**, the app stops with a message saying so; upgrade GarageBooks to a release that lists a newer TeslaMate. `ALLOW_UNTESTED_TESLAMATE=1` (in `.env`, restart to apply) starts it anyway and logs an error on every start; use it only for a short while, since a changed table can make pages or the dashboard wrong or fail. An older TeslaMate is not refused. If the role cannot read `schema_migrations`, the app warns and carries on.
+Each release is tested against one TeslaMate release (named in the README and in `garagebooks/compat.py`). TeslaMate has no stable database schema, so on start the app compares the newest migration in TeslaMate's `schema_migrations` table with the one it was tested against. If the database is **newer**, the app still runs, and holds TeslaMate's figures back: the odometer look-up, TeslaMate's charging costs and the totals that need them say *unavailable* for the cars TeslaMate tracks, with the reason on the Cars page, at the top of the dashboard and in the log. Everything you entered is unaffected. Upgrade GarageBooks to a release that lists a newer TeslaMate and the figures return by themselves. `ALLOW_UNTESTED_TESLAMATE=1` (in `.env`, restart to apply) uses them anyway and logs an error; use it only for a short while, since a changed table can make the figures wrong. An older TeslaMate is not held back. If the role cannot read `schema_migrations`, the app warns and carries on.
+
+## Without TeslaMate
+
+TeslaMate is optional. GarageBooks keeps its own list of cars (the Cars page): the cars TeslaMate tracks are added to it automatically, and any other car, electric or not, is added by hand. What TeslaMate would supply is then entered by hand: odometer readings on the Cars page (an expense's odometer counts too), and charging or fuel costs as expenses in the **Charging** and **Fuel** categories.
+
+The app looks at the database once a minute and is in one of four states, shown on the Cars page:
+
+| State | When | What happens |
+| --- | --- | --- |
+| Connected | TeslaMate's tables are there, readable, and a tested version | Its odometer and charging costs are used for the cars it tracks |
+| Not configured | No TeslaMate in this database | Nothing is missing: everything comes from what you enter |
+| Untested | A newer TeslaMate than this release was tested with | Its figures are held back, as above |
+| Unavailable | Its tables can't be read (permissions, or a table that changed) | The same, with the error as the reason |
+
+Held-back figures are shown as *unavailable*, never as zero, and nothing else stops. When TeslaMate appears, is repaired or is upgraded past, the app notices within a minute, with no restart: it adds TeslaMate's cars, and rewrites the dashboard and the `garagebooks.ownership` view to match. GarageBooks only ever reads TeslaMate's `cars`, `positions` and `charging_processes` tables, and none of its own tables points at them, so TeslaMate can be removed, or delete a car, without touching your expenses.
 
 ## Logs
 

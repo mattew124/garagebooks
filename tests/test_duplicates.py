@@ -40,14 +40,13 @@ def test_the_window_is_14_days_either_side(admin):
 
 def test_a_different_amount_or_car_is_not_a_duplicate(admin):
     seed(admin, amount="1200.51")
-    admin.execute("INSERT INTO cars (id, eid, vid, vin, settings_id, name, inserted_at, updated_at) "
-                  "VALUES (2, 2, 2, 'OTHERVIN', 2, 'Other car', now(), now())")
+    admin.execute("INSERT INTO garagebooks.car (id, name) VALUES (2, 'Other car')")
     try:
         seed(admin, car=2)
         assert found(admin) == []
     finally:
         admin.execute("DELETE FROM garagebooks.expense WHERE car_id = 2")
-        admin.execute("DELETE FROM cars WHERE id = 2")
+        admin.execute("DELETE FROM garagebooks.car WHERE id = 2")
 
 
 def test_the_closest_match_comes_first_and_the_expense_being_edited_is_left_out(admin):

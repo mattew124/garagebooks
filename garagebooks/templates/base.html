@@ -20,6 +20,7 @@
       <nav>
         <a href="{{ url_for('index') }}"{{ at(endpoint == 'index') }}>All</a>
         <a href="{{ url_for('categories') }}"{{ at(endpoint == 'categories') }}>Categories</a>
+        <a href="{{ url_for('cars_page') }}"{{ at(endpoint.startswith(('car', 'reading'))) }}>Cars</a>
         {% if grafana_url %}<a href="{{ grafana_url }}" target="_blank" rel="noopener noreferrer"><img src="{{ url_for('provider_icon', name='grafana') }}" alt="" class="nav-icon">Dashboards</a>{% endif %}
         <a href="{{ url_for('storage_page') }}"{{ at(endpoint.startswith(('storage', 'onedrive', 'local', 'learned'))) }}>Invoice storage</a>
         <a href="{{ url_for('settings') }}"{{ at(endpoint == 'settings') }}>Settings</a>

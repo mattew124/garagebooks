@@ -65,8 +65,8 @@
         "multi": false,
         "options": [],
         "regex": "",
-        "query": "SELECT id AS __value, COALESCE(name, RIGHT(vin, 6)) AS __text FROM cars ORDER BY display_priority ASC, name ASC, vin ASC;",
-        "definition": "SELECT id AS __value, COALESCE(name, RIGHT(vin, 6)) AS __text FROM cars ORDER BY display_priority ASC, name ASC, vin ASC;",
+        "query": "SELECT id AS __value, name AS __text FROM garagebooks.car ORDER BY id;",
+        "definition": "SELECT id AS __value, name AS __text FROM garagebooks.car ORDER BY id;",
         "current": {}
       },
       {
@@ -82,8 +82,8 @@
         "multi": true,
         "options": [],
         "regex": "",
-        "query": "SELECT name FROM (SELECT name, sort_order AS s FROM garagebooks.category UNION ALL SELECT 'Charging', 1000) x ORDER BY s, name",
-        "definition": "SELECT name FROM (SELECT name, sort_order AS s FROM garagebooks.category UNION ALL SELECT 'Charging', 1000) x ORDER BY s, name",
+        "query": "SELECT name FROM (SELECT name, sort_order AS s FROM garagebooks.category UNION ALL SELECT 'Charging', 1000) x GROUP BY name ORDER BY min(s), name",
+        "definition": "SELECT name FROM (SELECT name, sort_order AS s FROM garagebooks.category UNION ALL SELECT 'Charging', 1000) x GROUP BY name ORDER BY min(s), name",
         "current": {
           "selected": true,
           "text": [
@@ -223,7 +223,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT ((SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'purchase' AND c.name IN ($category)) + (SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'running' AND c.name IN ($category)) + (SELECT CASE WHEN 'Charging' IN ($category) THEN charging_total ELSE 0 END FROM garagebooks.ownership WHERE car_id = $car_id))",
+          "rawSql": "SELECT ((SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'purchase' AND c.name IN ($category)) + (SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'running' AND c.name IN ($category)) + (SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'energy' AND c.name IN ($category)) + (SELECT CASE WHEN 'Charging' IN ($category) THEN teslamate_charging_total ELSE 0 END FROM garagebooks.ownership WHERE car_id = $car_id))",
           "refId": "A"
         }
       ]
@@ -354,7 +354,7 @@
       "id": 4,
       "type": "stat",
       "title": "Charging",
-      "description": "Sum of TeslaMate's charging_processes.cost. All-time (ignores the dashboard time range). Follows the Category filter.",
+      "description": "Charging and fuel: TeslaMate's charging costs for a car it tracks, plus what you entered in a charging or fuel category. All-time (ignores the dashboard time range). Follows the Category filter.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "TeslaMate"
@@ -406,7 +406,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT (SELECT CASE WHEN 'Charging' IN ($category) THEN charging_total ELSE 0 END FROM garagebooks.ownership WHERE car_id = $car_id)",
+          "rawSql": "SELECT ((SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'energy' AND c.name IN ($category)) + (SELECT CASE WHEN 'Charging' IN ($category) THEN teslamate_charging_total ELSE 0 END FROM garagebooks.ownership WHERE car_id = $car_id))",
           "refId": "A"
         }
       ]
@@ -588,7 +588,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT ((SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'purchase' AND c.name IN ($category)) + (SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'running' AND c.name IN ($category)) + (SELECT CASE WHEN 'Charging' IN ($category) THEN charging_total ELSE 0 END FROM garagebooks.ownership WHERE car_id = $car_id)) / NULLIF((SELECT distance_km FROM garagebooks.ownership WHERE car_id = $car_id), 0)",
+          "rawSql": "SELECT ((SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'purchase' AND c.name IN ($category)) + (SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'running' AND c.name IN ($category)) + (SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'energy' AND c.name IN ($category)) + (SELECT CASE WHEN 'Charging' IN ($category) THEN teslamate_charging_total ELSE 0 END FROM garagebooks.ownership WHERE car_id = $car_id)) / NULLIF((SELECT distance_km FROM garagebooks.ownership WHERE car_id = $car_id), 0)",
           "refId": "A"
         }
       ]
@@ -649,7 +649,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT ((SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'running' AND c.name IN ($category)) + (SELECT CASE WHEN 'Charging' IN ($category) THEN charging_total ELSE 0 END FROM garagebooks.ownership WHERE car_id = $car_id)) / NULLIF((SELECT distance_km FROM garagebooks.ownership WHERE car_id = $car_id), 0)",
+          "rawSql": "SELECT ((SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'running' AND c.name IN ($category)) + (SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'energy' AND c.name IN ($category)) + (SELECT CASE WHEN 'Charging' IN ($category) THEN teslamate_charging_total ELSE 0 END FROM garagebooks.ownership WHERE car_id = $car_id)) / NULLIF((SELECT distance_km FROM garagebooks.ownership WHERE car_id = $car_id), 0)",
           "refId": "A"
         }
       ]
@@ -710,7 +710,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT ((SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'running' AND c.name IN ($category)) + (SELECT CASE WHEN 'Charging' IN ($category) THEN charging_total ELSE 0 END FROM garagebooks.ownership WHERE car_id = $car_id)) / GREATEST(EXTRACT(EPOCH FROM now() - (SELECT owned_since FROM garagebooks.ownership WHERE car_id = $car_id)) / 2629746, 1)",
+          "rawSql": "SELECT ((SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'running' AND c.name IN ($category)) + (SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'energy' AND c.name IN ($category)) + (SELECT CASE WHEN 'Charging' IN ($category) THEN teslamate_charging_total ELSE 0 END FROM garagebooks.ownership WHERE car_id = $car_id)) / GREATEST(EXTRACT(EPOCH FROM now() - (SELECT owned_since FROM garagebooks.ownership WHERE car_id = $car_id)) / 2629746, 1)",
           "refId": "A"
         }
       ]
@@ -771,7 +771,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT ((SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'purchase' AND c.name IN ($category)) + (SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'running' AND c.name IN ($category)) + (SELECT CASE WHEN 'Charging' IN ($category) THEN charging_total ELSE 0 END FROM garagebooks.ownership WHERE car_id = $car_id)) / GREATEST(EXTRACT(EPOCH FROM now() - (SELECT owned_since FROM garagebooks.ownership WHERE car_id = $car_id)) / 2629746, 1)",
+          "rawSql": "SELECT ((SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'purchase' AND c.name IN ($category)) + (SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'running' AND c.name IN ($category)) + (SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'energy' AND c.name IN ($category)) + (SELECT CASE WHEN 'Charging' IN ($category) THEN teslamate_charging_total ELSE 0 END FROM garagebooks.ownership WHERE car_id = $car_id)) / GREATEST(EXTRACT(EPOCH FROM now() - (SELECT owned_since FROM garagebooks.ownership WHERE car_id = $car_id)) / 2629746, 1)",
           "refId": "A"
         }
       ]
@@ -832,7 +832,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT ((SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'running' AND c.name IN ($category)) + (SELECT CASE WHEN 'Charging' IN ($category) THEN charging_total ELSE 0 END FROM garagebooks.ownership WHERE car_id = $car_id)) / GREATEST(EXTRACT(EPOCH FROM now() - (SELECT owned_since FROM garagebooks.ownership WHERE car_id = $car_id)) / 86400, 1)",
+          "rawSql": "SELECT ((SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'running' AND c.name IN ($category)) + (SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'energy' AND c.name IN ($category)) + (SELECT CASE WHEN 'Charging' IN ($category) THEN teslamate_charging_total ELSE 0 END FROM garagebooks.ownership WHERE car_id = $car_id)) / GREATEST(EXTRACT(EPOCH FROM now() - (SELECT owned_since FROM garagebooks.ownership WHERE car_id = $car_id)) / 86400, 1)",
           "refId": "A"
         }
       ]
@@ -893,7 +893,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT ((SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'purchase' AND c.name IN ($category)) + (SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'running' AND c.name IN ($category)) + (SELECT CASE WHEN 'Charging' IN ($category) THEN charging_total ELSE 0 END FROM garagebooks.ownership WHERE car_id = $car_id)) / GREATEST(EXTRACT(EPOCH FROM now() - (SELECT owned_since FROM garagebooks.ownership WHERE car_id = $car_id)) / 86400, 1)",
+          "rawSql": "SELECT ((SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'purchase' AND c.name IN ($category)) + (SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'running' AND c.name IN ($category)) + (SELECT COALESCE(SUM(e.amount), 0) FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id WHERE e.car_id = $car_id AND c.kind = 'energy' AND c.name IN ($category)) + (SELECT CASE WHEN 'Charging' IN ($category) THEN teslamate_charging_total ELSE 0 END FROM garagebooks.ownership WHERE car_id = $car_id)) / GREATEST(EXTRACT(EPOCH FROM now() - (SELECT owned_since FROM garagebooks.ownership WHERE car_id = $car_id)) / 86400, 1)",
           "refId": "A"
         }
       ]
@@ -1135,7 +1135,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT c.name AS \"Category\", SUM(e.amount) AS \"Cost\"\nFROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id\nWHERE e.car_id = $car_id AND c.kind = 'running' AND $__timeFilter(e.occurred_at)\nGROUP BY c.name\nUNION ALL\nSELECT 'Charging', SUM(cp.cost) FROM charging_processes cp\nWHERE cp.car_id = $car_id AND $__timeFilter(cp.start_date)\nHAVING SUM(cp.cost) IS NOT NULL\nORDER BY 2 DESC",
+          "rawSql": "SELECT \"Category\", SUM(\"Cost\") AS \"Cost\" FROM (\n  SELECT c.name AS \"Category\", SUM(e.amount) AS \"Cost\"\n  FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id\n  WHERE e.car_id = $car_id AND c.kind IN ('running', 'energy') AND $__timeFilter(e.occurred_at)\n  GROUP BY c.name\n  /*teslamate*/ UNION ALL\n  SELECT 'Charging', SUM(cp.cost) FROM charging_processes cp\n  WHERE cp.car_id = (SELECT teslamate_car_id FROM garagebooks.car WHERE id = $car_id) AND $__timeFilter(cp.start_date)\n  HAVING SUM(cp.cost) IS NOT NULL /*end*/\n) x GROUP BY 1 ORDER BY 2 DESC",
           "refId": "A"
         }
       ]
@@ -1162,7 +1162,7 @@
           "custom": {
             "drawStyle": "bars",
             "fillOpacity": 85,
-        "gradientMode": "none",
+            "gradientMode": "none",
             "lineWidth": 1,
             "stacking": {
               "mode": "normal",
@@ -1318,7 +1318,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT date_trunc('$period', e.occurred_at AT TIME ZONE '$tz') AS time, c.name AS metric, SUM(e.amount) AS value\nFROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id\nWHERE e.car_id = $car_id AND c.kind = 'running' AND $__timeFilter(e.occurred_at)\nGROUP BY 1, 2\nUNION ALL\nSELECT date_trunc('$period', (cp.start_date AT TIME ZONE 'UTC') AT TIME ZONE '$tz'), 'Charging', SUM(cp.cost)\nFROM charging_processes cp\nWHERE cp.car_id = $car_id AND $__timeFilter(cp.start_date)\nGROUP BY 1 HAVING SUM(cp.cost) IS NOT NULL\nORDER BY 1",
+          "rawSql": "SELECT time, metric, SUM(value) AS value FROM (\n  SELECT date_trunc('$period', e.occurred_at AT TIME ZONE '$tz') AS time, c.name AS metric, SUM(e.amount) AS value\n  FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id\n  WHERE e.car_id = $car_id AND c.kind IN ('running', 'energy') AND $__timeFilter(e.occurred_at)\n  GROUP BY 1, 2\n  /*teslamate*/ UNION ALL\n  SELECT date_trunc('$period', (cp.start_date AT TIME ZONE 'UTC') AT TIME ZONE '$tz'), 'Charging', SUM(cp.cost)\n  FROM charging_processes cp\n  WHERE cp.car_id = (SELECT teslamate_car_id FROM garagebooks.car WHERE id = $car_id) AND $__timeFilter(cp.start_date)\n  GROUP BY 1 HAVING SUM(cp.cost) IS NOT NULL /*end*/\n) x GROUP BY 1, 2 ORDER BY 1",
           "refId": "A"
         }
       ]
@@ -1371,7 +1371,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "WITH m AS (\n  SELECT date_trunc('$period', e.occurred_at AT TIME ZONE '$tz') AS t, SUM(e.amount) AS a\n  FROM garagebooks.expense e WHERE e.car_id = $car_id GROUP BY 1\n  UNION ALL\n  SELECT date_trunc('$period', (cp.start_date AT TIME ZONE 'UTC') AT TIME ZONE '$tz'), SUM(cp.cost)\n  FROM charging_processes cp WHERE cp.car_id = $car_id GROUP BY 1\n)\nSELECT t AS time, SUM(SUM(a)) OVER (ORDER BY t) AS \"Cumulative cost\"\nFROM m WHERE a IS NOT NULL GROUP BY t ORDER BY t",
+          "rawSql": "WITH m AS (\n  SELECT date_trunc('$period', e.occurred_at AT TIME ZONE '$tz') AS t, SUM(e.amount) AS a\n  FROM garagebooks.expense e WHERE e.car_id = $car_id GROUP BY 1\n  /*teslamate*/ UNION ALL\n  SELECT date_trunc('$period', (cp.start_date AT TIME ZONE 'UTC') AT TIME ZONE '$tz'), SUM(cp.cost)\n  FROM charging_processes cp WHERE cp.car_id = (SELECT teslamate_car_id FROM garagebooks.car WHERE id = $car_id) GROUP BY 1 /*end*/\n)\nSELECT t AS time, SUM(SUM(a)) OVER (ORDER BY t) AS \"Cumulative cost\"\nFROM m WHERE a IS NOT NULL GROUP BY t ORDER BY t",
           "refId": "A"
         }
       ]

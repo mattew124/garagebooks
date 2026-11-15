@@ -12,11 +12,18 @@ All of them come from the `garagebooks.ownership` view (`garagebooks/schema.sql`
 
 | Figure | Definition |
 |---|---|
-| Total cost | purchase + running expenses + `charging_processes.cost` |
-| Distance | latest odometer − odometer on the purchase expense (else the first odometer TeslaMate saw) |
+| Total cost | purchase + running expenses + charging |
+| Charging | TeslaMate's `charging_processes.cost` for a car it tracks, plus expenses in a charging or fuel category (**Charging**, **Fuel**) |
+| Distance | latest odometer − odometer on the purchase expense (else the lowest odometer known). The odometer is TeslaMate's, a reading entered on the Cars page, or the one on an expense |
 | Cost per km — all-in | total cost ÷ distance |
 | Cost per km — running | (running + charging) ÷ distance, excludes the purchase price |
 | Per day and per month | running (or total) cost, or distance, ÷ the time since purchase (at least one day, or one month) |
+
+With no TeslaMate, the dashboard is written without TeslaMate's parts and counts what you entered.
+When TeslaMate is there but its figures are held back (an untested version, or tables that can't be
+read), a note at the top gives the reason, and the totals that need TeslaMate say *unavailable* for a
+car it tracks instead of showing a figure with the charging missing. See
+[Without TeslaMate](reference.md#without-teslamate).
 
 The headline panels are all-time. The charts, pie and table follow the dashboard's time range, which
 starts at your earliest data. Grafana has no "all time", so the app works the start out each time it

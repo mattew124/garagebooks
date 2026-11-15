@@ -71,9 +71,13 @@ see [Setup](https://mattew124.github.io/garagebooks/setup/).
 
 ## TeslaMate version
 
-Tested with TeslaMate 4.4.0. TeslaMate has no stable database schema, so the app stops on start
-if the database is from a newer TeslaMate than that, rather than showing wrong numbers
-(`ALLOW_UNTESTED_TESLAMATE=1` overrides it). A weekly check tests each new TeslaMate release.
+Tested with TeslaMate 4.4.0. TeslaMate has no stable database schema, so on a database from a
+newer TeslaMate than that the app leaves TeslaMate's odometer and charging figures out, and says
+so, rather than showing wrong numbers; everything you entered carries on
+(`ALLOW_UNTESTED_TESLAMATE=1` uses them anyway). A weekly check tests each new TeslaMate release.
+
+TeslaMate itself is optional: the app keeps its own list of cars, and a car TeslaMate doesn't
+track works from odometer readings and charging or fuel costs entered by hand.
 
 ## License
 

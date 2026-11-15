@@ -54,7 +54,7 @@ MIGRATE_LOCK = 7_265_171   # arbitrary; stops two workers starting at once from 
 
 def migrate(wait=60):
     """Create or update the `garagebooks` schema. schema.sql is idempotent, so this is safe on
-    every start. Waits for the database to come up (TeslaMate may start after us), but
+    every start. Waits for the database to come up, but
     gives up straight away on a permissions problem and says what to do about it."""
     deadline = time.monotonic() + wait
     while True:
@@ -120,8 +120,75 @@ def connect():
     return psycopg.connect(dsn(), row_factory=dict_row, connect_timeout=5)
 
 
+CAR_KINDS = {"BEV": "Battery electric", "ICE": "Petrol or diesel", "PHEV": "Plug-in hybrid", "HEV": "Hybrid"}
+
+
 def cars(conn):
-    return conn.execute("SELECT id, name FROM public.cars ORDER BY id").fetchall()
+    """The app's own car list: the cars TeslaMate tracks (sources.sync_cars adds them) and those added by hand."""
+    return conn.execute("SELECT id, name, kind, make, model, teslamate_car_id FROM garagebooks.car ORDER BY id").fetchall()
+
+
+def car_details(conn):
+    """The cars as the Cars page shows them: with how many expenses each has and its readings entered by hand."""
+    rows = conn.execute(
+        "SELECT c.id, c.name, c.kind, c.make, c.model, c.teslamate_car_id,"
+        " (SELECT count(*) FROM garagebooks.expense e WHERE e.car_id = c.id) AS expenses "
+        "FROM garagebooks.car c ORDER BY c.id").fetchall()
+    for row in rows:
+        row["readings"] = conn.execute(
+            "SELECT id, read_at, km FROM garagebooks.odometer_reading WHERE car_id = %s "
+            "ORDER BY read_at DESC LIMIT 5", (row["id"],)).fetchall()
+    return rows
+
+
+def add_car(conn, v):
+    """A car entered by hand. Returns its id."""
+    return conn.execute(
+        "INSERT INTO garagebooks.car (name, kind, make, model) VALUES (%(name)s, %(kind)s, %(make)s, %(model)s) "
+        "RETURNING id", v).fetchone()["id"]
+
+
+def update_car(conn, car_id, v):
+    """Returns False when there is no such car. A TeslaMate car renamed here keeps the new name."""
+    return conn.execute(
+        "UPDATE garagebooks.car SET kind = %(kind)s, make = %(make)s, model = %(model)s, "
+        "name_from_teslamate = name_from_teslamate AND name = %(name)s, name = %(name)s WHERE id = %(id)s",
+        {**v, "id": car_id}).rowcount == 1
+
+
+def delete_car(conn, car_id):
+    """Only a car added by hand that has no expenses. Returns whether it was deleted."""
+    return conn.execute(
+        "DELETE FROM garagebooks.car c WHERE c.id = %s AND c.teslamate_car_id IS NULL "
+        "AND NOT EXISTS (SELECT 1 FROM garagebooks.expense e WHERE e.car_id = c.id)", (car_id,)).rowcount == 1
+
+
+def add_reading(conn, car_id, read_at, km):
+    """An odometer reading entered by hand; one at the same moment is replaced."""
+    conn.execute("INSERT INTO garagebooks.odometer_reading (car_id, read_at, km) VALUES (%s, %s, %s) "
+                 "ON CONFLICT (car_id, read_at) DO UPDATE SET km = EXCLUDED.km", (car_id, read_at, km))
+
+
+def delete_reading(conn, car_id, reading_id):
+    return conn.execute("DELETE FROM garagebooks.odometer_reading WHERE id = %s AND car_id = %s",
+                        (reading_id, car_id)).rowcount == 1
+
+
+def has_schema(conn):
+    """Whether the schema is this release's (SKIP_MIGRATE=1 leaves that to scripts/provision-db.sh)."""
+    return conn.execute("SELECT to_regclass('garagebooks.setting') IS NULL "   # no schema at all: not ours to judge
+                        "OR to_regclass('garagebooks.car') IS NOT NULL AS ok").fetchone()["ok"]
+
+
+def build_ownership(conn, use_teslamate):
+    """Put the ownership view in the form that fits: with TeslaMate's figures or without. Returns
+    whether they are in it, or None when this database user may not rebuild it."""
+    try:
+        with conn.transaction():
+            return conn.execute("SELECT garagebooks.build_ownership(%s) AS tm", (use_teslamate,)).fetchone()["tm"]
+    except psycopg.Error as exc:
+        log.warning("the ownership view could not be rebuilt: %s", exc)
+        return None
 
 
 def get_settings(conn):
@@ -168,7 +235,7 @@ _SELECT = """
            cat.kind, e.occurred_at, e.amount, e.odometer_km, e.vendor, e.notes,
            e.invoice_url, e.invoice_path
     FROM garagebooks.expense e
-    JOIN public.cars c ON c.id = e.car_id
+    JOIN garagebooks.car c ON c.id = e.car_id
     JOIN garagebooks.category cat ON cat.id = e.category_id
 """
 
@@ -201,15 +268,6 @@ def totals(conn, category_id=None):
         f"SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS n FROM garagebooks.expense {where}",
         params,
     ).fetchone()
-
-
-def first_activity(conn):
-    """The earliest thing the dashboard can show: first expense (the purchase, usually) or TeslaMate position.
-    Reads only what the app may read, so it works with the least-privilege role too."""
-    return conn.execute(
-        "SELECT LEAST((SELECT MIN(date AT TIME ZONE 'UTC') FROM public.positions),"
-        " (SELECT MIN(occurred_at) FROM garagebooks.expense)) AS first"
-    ).fetchone()["first"]
 
 
 def get_expense(conn, expense_id):
@@ -324,22 +382,6 @@ def update_expense(conn, expense_id, v):
 
 def delete_expense(conn, expense_id):
     return conn.execute("DELETE FROM garagebooks.expense WHERE id = %s", (expense_id,)).rowcount == 1
-
-
-def odometer_at(conn, car_id, when):
-    """Odometer (km) from the last TeslaMate position at or before `when`.
-
-    positions.date is a naive UTC timestamp, so the aware `when` is converted
-    to UTC first — comparing it as local time would be off by the UTC offset.
-    Returns None when TeslaMate hadn't started tracking the car yet.
-    """
-    row = conn.execute(
-        "SELECT odometer FROM public.positions "
-        "WHERE car_id = %s AND odometer IS NOT NULL AND date <= (%s AT TIME ZONE 'UTC') "
-        "ORDER BY date DESC LIMIT 1",
-        (car_id, when),
-    ).fetchone()
-    return None if row is None else round(row["odometer"], 1)
 
 
 # ---- invoice storage -----------------------------------------------------------

@@ -159,6 +159,7 @@ def test_post_needs_same_origin(client, admin):
 
 # ---- odometer from TeslaMate, renaming, prefill --------------------------------------
 
+@pytest.mark.teslamate
 def test_missing_odometer_is_filled_from_teslamate(client, admin):
     # P3 is dated 2025-01-05 (file name) and its text has no odometer; TeslaMate does.
     admin.execute("INSERT INTO positions (latitude, longitude, date, odometer, car_id) VALUES "
@@ -167,12 +168,14 @@ def test_missing_odometer_is_filled_from_teslamate(client, admin):
     assert 'value="40000.5"' in page and "from TeslaMate" in page
 
 
+@pytest.mark.teslamate
 def test_a_pdf_odometer_beats_teslamate(client, admin):
     admin.execute("INSERT INTO positions (latitude, longitude, date, odometer, car_id) VALUES (0, 0, '2026-10-01', 1, 1)")
     page = client.get("/onedrive/import/1?sync=1").data.decode()
     assert 'value="45120"' in page          # the tyre invoice's own odometer
 
 
+@pytest.mark.teslamate
 def test_odometer_stays_blank_when_teslamate_has_nothing(client, admin):
     admin.execute("TRUNCATE positions CASCADE")   # CASCADE: real TeslaMate tables reference it
     assert 'name="odometer_km_2"' in client.get("/onedrive/import/1?sync=1").data.decode()

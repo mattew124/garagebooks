@@ -20,6 +20,20 @@ drops the old dashboard and its folder by itself. If you use the
 restricted database role (`SKIP_MIGRATE=1`), re-run `scripts/provision-db.sh` first: it does the same,
 and keeps your existing role when you set `GARAGEBOOKS_DB_USER` (or the old `EXPENSES_DB_USER`) to it.
 
+- **TeslaMate is optional.** GarageBooks now keeps its own list of cars (the new **Cars** page) and
+  runs with TeslaMate absent, unreadable or on an untested version. The cars TeslaMate tracks are added
+  automatically with the same ids, so no expense moves; any other car is added by hand, with odometer
+  readings entered on the Cars page and charging or fuel costs entered as expenses in the new
+  **Charging** and **Fuel** categories (counted with TeslaMate's charging costs on the dashboard).
+  The app no longer stops on a TeslaMate newer than it was tested with: it holds TeslaMate's figures
+  back, shows them as *unavailable* with the reason, and carries on. `ALLOW_UNTESTED_TESLAMATE=1`
+  still uses them anyway. The dashboard is written to match, and follows within a minute when
+  TeslaMate appears or changes. The app's tables no longer hold a foreign key onto TeslaMate's `cars`,
+  so TeslaMate can delete a car. If you use the restricted database role, re-running
+  `scripts/provision-db.sh` (already needed for this release) also lets it read
+  `charging_processes(car_id, start_date, cost)`. A grant you added yourself on the
+  `garagebooks.ownership` view needs granting again: the view is rebuilt once. The dashboard's car
+  list is now in id order.
 - **Schema:** `expenses` is now `garagebooks`. Grafana panels or queries of your own that name
   `expenses.` need the new name.
 - **Dashboard address:** the uid is now `garagebooks-tco` (was `tm-expenses-tco`), so its address is

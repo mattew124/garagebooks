@@ -7,7 +7,7 @@
 <ul class="plain category-list">
   {% for c in categories %}
   <li>
-    <span>{{ c.name }} <small>{{ 'capital cost' if c.kind == 'purchase' else 'running cost' }}</small></span>
+    <span>{{ c.name }} <small>{{ {'purchase': 'capital cost', 'energy': 'charging and fuel'}.get(c.kind, 'running cost') }}</small></span>
     {% if uploads_enabled %}
     <form method="post" action="{{ url_for('category_folder', category_id=c.id) }}" class="row">
       <label><small>{% if local_enabled %}Invoice subfolder{% else %}{{ mark() }} OneDrive folder{% endif %}</small>

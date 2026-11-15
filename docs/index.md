@@ -36,6 +36,17 @@ and rebates show in green, and the app follows your device's light or dark setti
 
 ![The expense list as tiles, with the sort and layout controls](images/expense-list-tiles.png)
 
+## Cars
+
+The **Cars** page lists your cars. The ones TeslaMate tracks are added by themselves and follow
+TeslaMate's name until you rename them here. Any other car, electric or not, is added by hand, with
+its type, make and model; TeslaMate isn't needed at all. Each car shows its latest odometer:
+TeslaMate's, or the latest reading you entered (add readings under **Odometer readings**; the
+odometer on an expense counts as one too). The page also says whether TeslaMate is connected, not
+configured, or unavailable and why.
+
+<!-- screenshot: cars-page - The Cars page, with a TeslaMate car and a car added by hand -->
+
 ## Adding an expense
 
 Category, date, time, amount, odometer, vendor, notes and the invoice. The odometer can be filled in

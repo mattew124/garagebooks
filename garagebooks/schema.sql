@@ -1,10 +1,12 @@
 -- GarageBooks schema. Idempotent: safe to re-run (scripts/provision-db.sh
--- does so on every deploy). Lives in its own `garagebooks` schema inside the
--- TeslaMate database so Grafana can join it to TeslaMate's own tables
--- (cars, positions, charging_processes) without a second datasource.
+-- does so on every deploy). Lives in its own `garagebooks` schema. Beside TeslaMate
+-- that is TeslaMate's database, so Grafana needs no second datasource; with no
+-- TeslaMate it is any PostgreSQL database. Nothing here needs TeslaMate's tables
+-- (cars, positions, charging_processes) to exist: where they do, they are read,
+-- never changed and never pointed at by a foreign key.
 --
 -- Run as the database superuser/owner, NOT as the app role: it creates the
--- schema, the foreign key onto public.cars and the reporting view.
+-- schema and the reporting view.
 
 -- Releases up to 0.4.0-rc1 called the schema `expenses`. Rename it, with everything in it, the
 -- first time this release starts. Only a schema that is ours (it has our `setting` table), and
@@ -23,9 +25,14 @@ CREATE SCHEMA IF NOT EXISTS garagebooks;
 CREATE TABLE IF NOT EXISTS garagebooks.category (
     id        smallserial PRIMARY KEY,
     name      text NOT NULL UNIQUE CHECK (btrim(name) <> ''),
-    kind      text NOT NULL DEFAULT 'running' CHECK (kind IN ('purchase', 'running')),
+    kind      text NOT NULL DEFAULT 'running' CHECK (kind IN ('purchase', 'running', 'energy')),
     sort_order integer NOT NULL DEFAULT 100
 );
+-- kind 'energy' = charging and fuel entered by hand: what TeslaMate's charging costs are for a
+-- car it tracks. Databases made before it existed get the wider check.
+ALTER TABLE garagebooks.category DROP CONSTRAINT IF EXISTS category_kind_check;
+ALTER TABLE garagebooks.category ADD CONSTRAINT category_kind_check
+    CHECK (kind IN ('purchase', 'running', 'energy'));
 
 INSERT INTO garagebooks.category (name, kind, sort_order) VALUES
     ('Initial purchase',  'purchase',  10),
@@ -35,8 +42,74 @@ INSERT INTO garagebooks.category (name, kind, sort_order) VALUES
     ('Cabin air filter',  'running',   50),
     ('Air filter',        'running',   60),
     ('Wheel alignment',   'running',   70),
-    ('Tyre rotation',     'running',   80)
+    ('Tyre rotation',     'running',   80),
+    ('Charging',          'energy',    90),
+    ('Fuel',              'energy',    95)
 ON CONFLICT (name) DO NOTHING;
+
+-- The cars. GarageBooks keeps its own list, so a car needs no TeslaMate: one added by hand has
+-- teslamate_car_id NULL. A car TeslaMate tracks is added by sync_teslamate_cars() below, with
+-- TeslaMate's own id where that is free (so nothing that was saved against it moves), and
+-- follows TeslaMate's name until it is renamed here (name_from_teslamate). The link is not a
+-- foreign key: TeslaMate may be absent, and may delete its car without asking us.
+--   kind: BEV (battery electric), ICE (petrol or diesel), PHEV (plug-in hybrid), HEV (hybrid)
+-- Cars added by hand are numbered from 1000, clear of TeslaMate's own small ids.
+CREATE SEQUENCE IF NOT EXISTS garagebooks.car_id_seq AS smallint START 1000 MINVALUE 1000;
+CREATE TABLE IF NOT EXISTS garagebooks.car (
+    id                  smallint PRIMARY KEY DEFAULT nextval('garagebooks.car_id_seq'),
+    name                text NOT NULL CHECK (btrim(name) <> '' AND length(name) <= 100),
+    kind                text NOT NULL DEFAULT 'BEV' CHECK (kind IN ('BEV', 'ICE', 'PHEV', 'HEV')),
+    make                text CHECK (make IS NULL OR (btrim(make) <> '' AND length(make) <= 60)),
+    model               text CHECK (model IS NULL OR (btrim(model) <> '' AND length(model) <= 60)),
+    teslamate_car_id    smallint UNIQUE,
+    name_from_teslamate boolean NOT NULL DEFAULT false,
+    created_at          timestamptz NOT NULL DEFAULT now()
+);
+
+-- Adds a row for each TeslaMate car that has none, and keeps the names of cars not renamed here
+-- in step. Returns how many it added. Does nothing when there is no TeslaMate. Run on every
+-- start and by the app from time to time, as whoever calls it (the app's role may read cars).
+CREATE OR REPLACE FUNCTION garagebooks.sync_teslamate_cars() RETURNS integer
+LANGUAGE plpgsql AS $fn$
+DECLARE
+    tm    record;
+    added integer := 0;
+BEGIN
+    IF to_regclass('public.cars') IS NULL THEN
+        RETURN 0;
+    END IF;
+    FOR tm IN
+        SELECT c.id, left(COALESCE(NULLIF(btrim(c.name), ''), NULLIF(right(c.vin, 6), ''), 'Car ' || c.id), 100) AS name,
+               NULLIF(left(btrim(c.model), 60), '') AS model
+        FROM public.cars c
+        WHERE NOT EXISTS (SELECT 1 FROM garagebooks.car g WHERE g.teslamate_car_id = c.id)
+        ORDER BY c.id
+    LOOP
+        INSERT INTO garagebooks.car (id, name, kind, make, model, teslamate_car_id, name_from_teslamate)
+        VALUES (CASE WHEN EXISTS (SELECT 1 FROM garagebooks.car g WHERE g.id = tm.id)
+                     THEN nextval('garagebooks.car_id_seq') ELSE tm.id END,
+                tm.name, 'BEV', 'Tesla', tm.model, tm.id, true);
+        added := added + 1;
+    END LOOP;
+    UPDATE garagebooks.car g
+       SET name = left(btrim(c.name), 100)
+      FROM public.cars c
+     WHERE g.teslamate_car_id = c.id AND g.name_from_teslamate
+       AND NULLIF(btrim(c.name), '') IS NOT NULL AND g.name <> left(btrim(c.name), 100);
+    RETURN added;
+END
+$fn$;
+SELECT garagebooks.sync_teslamate_cars();
+
+-- Odometer readings entered by hand: the odometer for a car TeslaMate doesn't track, and for
+-- any car while TeslaMate can't be read. An expense's own odometer counts as a reading too.
+CREATE TABLE IF NOT EXISTS garagebooks.odometer_reading (
+    id       bigserial PRIMARY KEY,
+    car_id   smallint NOT NULL REFERENCES garagebooks.car (id) ON DELETE CASCADE,
+    read_at  timestamptz NOT NULL,
+    km       numeric(9, 1) NOT NULL CHECK (km >= 0),
+    UNIQUE (car_id, read_at)
+);
 
 -- Subfolder of the car's OneDrive folder that this category's invoices are uploaded
 -- into (created on demand). NULL = a subfolder named after the category. The column
@@ -76,7 +149,7 @@ CREATE TABLE IF NOT EXISTS garagebooks.learned_vendor (
 -- offered. Keyed by the file's link (or its path, in the folder on the server), the same thing
 -- an imported expense stores.
 CREATE TABLE IF NOT EXISTS garagebooks.import_skip (
-    car_id smallint NOT NULL REFERENCES public.cars (id) ON DELETE CASCADE,
+    car_id smallint NOT NULL REFERENCES garagebooks.car (id) ON DELETE CASCADE,
     url    text NOT NULL CHECK (url <> ''),
     PRIMARY KEY (car_id, url)
 );
@@ -117,14 +190,13 @@ UPDATE garagebooks.setting SET grafana_url = replace(grafana_url, '/d/tm-expense
 
 CREATE TABLE IF NOT EXISTS garagebooks.expense (
     id           bigserial PRIMARY KEY,
-    car_id       smallint NOT NULL REFERENCES public.cars (id),
+    car_id       smallint NOT NULL REFERENCES garagebooks.car (id),
     category_id  smallint NOT NULL REFERENCES garagebooks.category (id),
     -- Moment the cost was incurred (timestamptz; the UI enters it in APP_TZ).
     occurred_at  timestamptz NOT NULL,
     -- Negative for a rebate or refund (it reduces the totals).
     amount       numeric(12, 2) NOT NULL,
-    -- Odometer in km at occurred_at. Optional: costs from before TeslaMate
-    -- started tracking the car have no position to look it up from.
+    -- Odometer in km at occurred_at. Optional: not every cost has a reading to go with it.
     odometer_km  numeric(9, 1) CHECK (odometer_km IS NULL OR odometer_km >= 0),
     vendor       text,
     notes        text,
@@ -148,7 +220,7 @@ CREATE INDEX IF NOT EXISTS expense_category_idx ON garagebooks.expense (category
 -- folder page. OneDrive uploads go by folder_id, so renaming or moving the folder in OneDrive
 -- doesn't break them; folder_path is only for showing where that is.
 CREATE TABLE IF NOT EXISTS garagebooks.car_folder (
-    car_id      smallint PRIMARY KEY REFERENCES public.cars (id) ON DELETE CASCADE,
+    car_id      smallint PRIMARY KEY REFERENCES garagebooks.car (id) ON DELETE CASCADE,
     folder_id   text NOT NULL CHECK (folder_id <> ''),
     folder_path text NOT NULL
 );
@@ -174,53 +246,149 @@ CREATE TABLE IF NOT EXISTS garagebooks.onedrive_account (
     updated_at      timestamptz NOT NULL DEFAULT now()
 );
 
+-- Up to 0.4.0 these three tables pointed at TeslaMate's public.cars. Point them at our own
+-- car table instead (every TeslaMate car has a row there with the same id by now, so nothing
+-- moves), which also stops our foreign key standing in the way of TeslaMate deleting a car.
+DO $$
+DECLARE
+    fk record;
+BEGIN
+    FOR fk IN
+        SELECT con.conname, con.conrelid::regclass AS tbl, con.confdeltype
+        FROM pg_constraint con
+        JOIN pg_class t   ON t.oid = con.conrelid    JOIN pg_namespace tn ON tn.oid = t.relnamespace
+        JOIN pg_class ref ON ref.oid = con.confrelid JOIN pg_namespace rn ON rn.oid = ref.relnamespace
+        WHERE con.contype = 'f' AND tn.nspname = 'garagebooks' AND rn.nspname = 'public' AND ref.relname = 'cars'
+    LOOP
+        EXECUTE format('ALTER TABLE %s DROP CONSTRAINT %I', fk.tbl, fk.conname);
+        EXECUTE format('ALTER TABLE %s ADD CONSTRAINT %I FOREIGN KEY (car_id) REFERENCES garagebooks.car (id)%s',
+                       fk.tbl, fk.conname, CASE fk.confdeltype WHEN 'c' THEN ' ON DELETE CASCADE' ELSE '' END);
+    END LOOP;
+END $$;
+
 -- One row per car: everything the TCO dashboard's headline panels need, so the
 -- definitions (what counts as "start odometer", what is charging) live in one
 -- place instead of being copy-pasted across panels.
---   start_km    odometer when you bought it (purchase expense), else the first
---               odometer TeslaMate ever recorded
---   owned_since purchase date, else first TeslaMate position
-CREATE OR REPLACE VIEW garagebooks.ownership AS
+--   charging_total            charging and fuel: TeslaMate's charging costs plus 'energy' expenses
+--   teslamate_charging_total  TeslaMate's part of that alone (0 for a car it doesn't track)
+--   start_km    odometer when you bought it (purchase expense), else the lowest odometer known
+--   current_km  the highest odometer known: TeslaMate's, a reading entered by hand, an expense's
+--   owned_since purchase date, else the earliest position, reading or expense
+--
+-- The view comes in two forms, built by build_ownership(): with TeslaMate's charging costs
+-- and positions, or without them (there is no TeslaMate, or the app is holding its figures
+-- back: it can't be read, or is a version the app wasn't tested with). Without them, a car
+-- that TeslaMate tracks has NULL where the answer needs TeslaMate (charging_total, tco),
+-- never a wrong zero; a car entered by hand is complete either way. The columns and their
+-- types are the same in both forms. Returns whether TeslaMate's tables are in the view.
+--
+-- SECURITY DEFINER, so the app's least-privilege role can switch forms as TeslaMate comes and
+-- goes; its only input is the boolean.
+CREATE OR REPLACE FUNCTION garagebooks.build_ownership(use_teslamate boolean DEFAULT true) RETURNS boolean
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $fn$
+DECLARE
+    tm       boolean := COALESCE(use_teslamate, false)
+                        AND to_regclass('public.charging_processes') IS NOT NULL
+                        AND to_regclass('public.positions') IS NOT NULL;
+    charging text;
+    odometer text;
+    body     text;
+BEGIN
+  LOOP
+    charging := 'CROSS JOIN (SELECT NULL::numeric AS charging_total) ch';
+    odometer := 'CROSS JOIN (SELECT NULL::double precision AS first_km, NULL::double precision AS last_km,
+                                    NULL::timestamptz AS first_at) pos';
+    IF tm THEN
+        charging := 'LEFT JOIN LATERAL (
+            SELECT SUM(cp.cost)::numeric AS charging_total
+            FROM public.charging_processes cp
+            WHERE cp.car_id = car.teslamate_car_id
+        ) ch ON true';
+        odometer := 'LEFT JOIN LATERAL (
+            SELECT MIN(p.odometer)::double precision AS first_km,
+                   MAX(p.odometer)::double precision AS last_km,
+                   MIN(p.date) AT TIME ZONE ''UTC''  AS first_at
+            FROM public.positions p
+            WHERE p.car_id = car.teslamate_car_id
+        ) pos ON true';
+    END IF;
+    body := format($view$
 SELECT
-    car.id                                         AS car_id,
-    car.name                                       AS car_name,
-    COALESCE(ex.purchase_total, 0)                 AS purchase_total,
-    COALESCE(ex.running_total, 0)                  AS running_total,
-    COALESCE(ch.charging_total, 0)                 AS charging_total,
-    COALESCE(ex.purchase_total, 0) + COALESCE(ex.running_total, 0)
-        + COALESCE(ch.charging_total, 0)           AS tco,
-    COALESCE(ex.purchase_km, pos.first_km)         AS start_km,
-    pos.last_km                                    AS current_km,
-    -- GREATEST() ignores NULLs, so guard explicitly: no positions => no distance, not 0.
-    CASE WHEN pos.last_km IS NULL THEN NULL
-         ELSE GREATEST(pos.last_km - COALESCE(ex.purchase_km, pos.first_km), 0)
-    END                                            AS distance_km,
-    COALESCE(ex.purchase_at, pos.first_at AT TIME ZONE 'UTC') AS owned_since
-FROM public.cars car
-LEFT JOIN LATERAL (
+    v.car_id, v.car_name, v.purchase_total, v.running_total, v.charging_total,
+    v.purchase_total + v.running_total + v.charging_total AS tco,
+    v.start_km, v.current_km,
+    -- No odometer known => no distance, not 0.
+    CASE WHEN v.current_km IS NULL THEN NULL
+         ELSE GREATEST(v.current_km - v.start_km, 0)
+    END AS distance_km,
+    v.owned_since, v.teslamate_charging_total
+FROM (
     SELECT
-        SUM(e.amount) FILTER (WHERE c.kind = 'purchase') AS purchase_total,
-        SUM(e.amount) FILTER (WHERE c.kind = 'running')  AS running_total,
-        (ARRAY_AGG(e.odometer_km ORDER BY e.occurred_at)
-            FILTER (WHERE c.kind = 'purchase' AND e.odometer_km IS NOT NULL))[1] AS purchase_km,
-        MIN(e.occurred_at) FILTER (WHERE c.kind = 'purchase') AS purchase_at
-    FROM garagebooks.expense e
-    JOIN garagebooks.category c ON c.id = e.category_id
-    WHERE e.car_id = car.id
-) ex ON true
-LEFT JOIN LATERAL (
-    SELECT SUM(cp.cost) AS charging_total
-    FROM public.charging_processes cp
-    WHERE cp.car_id = car.id
-) ch ON true
-LEFT JOIN LATERAL (
-    SELECT
-        MIN(p.odometer) AS first_km,
-        MAX(p.odometer) AS last_km,
-        MIN(p.date)     AS first_at
-    FROM public.positions p
-    WHERE p.car_id = car.id
-) pos ON true;
+        car.id                                         AS car_id,
+        car.name::text                                 AS car_name,
+        COALESCE(ex.purchase_total, 0)::numeric        AS purchase_total,
+        COALESCE(ex.running_total, 0)::numeric         AS running_total,
+        (tmc.total + COALESCE(ex.energy_total, 0))::numeric AS charging_total,
+        COALESCE(ex.purchase_km::double precision, LEAST(pos.first_km, man.first_km)) AS start_km,
+        GREATEST(pos.last_km, man.last_km)             AS current_km,
+        COALESCE(ex.purchase_at, LEAST(pos.first_at, man.first_at, ex.first_at)) AS owned_since,
+        tmc.total                                      AS teslamate_charging_total
+    FROM garagebooks.car car
+    LEFT JOIN LATERAL (
+        SELECT
+            SUM(e.amount) FILTER (WHERE c.kind = 'purchase') AS purchase_total,
+            SUM(e.amount) FILTER (WHERE c.kind = 'running')  AS running_total,
+            SUM(e.amount) FILTER (WHERE c.kind = 'energy')   AS energy_total,
+            (ARRAY_AGG(e.odometer_km ORDER BY e.occurred_at)
+                FILTER (WHERE c.kind = 'purchase' AND e.odometer_km IS NOT NULL))[1] AS purchase_km,
+            MIN(e.occurred_at) FILTER (WHERE c.kind = 'purchase') AS purchase_at,
+            MIN(e.occurred_at) AS first_at
+        FROM garagebooks.expense e
+        JOIN garagebooks.category c ON c.id = e.category_id
+        WHERE e.car_id = car.id
+    ) ex ON true
+    LEFT JOIN LATERAL (
+        SELECT MIN(r.km)::double precision AS first_km, MAX(r.km)::double precision AS last_km, MIN(r.at) AS first_at
+        FROM (
+            SELECT o.km, o.read_at AS at FROM garagebooks.odometer_reading o WHERE o.car_id = car.id
+            UNION ALL
+            SELECT e.odometer_km, e.occurred_at FROM garagebooks.expense e
+            WHERE e.car_id = car.id AND e.odometer_km IS NOT NULL
+        ) r
+    ) man ON true
+    %s
+    %s
+    -- TeslaMate's charging for this car: its total, 0 for a car it doesn't track, and NULL
+    -- (unknown) for a car it tracks while its tables are not in this view.
+    CROSS JOIN LATERAL (
+        SELECT CASE WHEN car.teslamate_car_id IS NULL THEN 0::numeric
+                    WHEN %L THEN COALESCE(ch.charging_total, 0)
+               END AS total
+    ) tmc
+) v$view$, charging, odometer, tm);
+    BEGIN
+        BEGIN
+            EXECUTE 'CREATE OR REPLACE VIEW garagebooks.ownership AS' || body;
+        EXCEPTION WHEN invalid_table_definition THEN
+            -- A view from an older release, whose columns took TeslaMate's types: make it afresh.
+            EXECUTE 'DROP VIEW garagebooks.ownership';
+            EXECUTE 'CREATE VIEW garagebooks.ownership AS' || body;
+        END;
+        RETURN tm;
+    EXCEPTION WHEN OTHERS THEN
+        -- TeslaMate's tables are not as expected (a column renamed, say): build the form without
+        -- them, so a TeslaMate that changed never stops GarageBooks starting.
+        IF NOT tm THEN
+            RAISE;
+        END IF;
+        RAISE WARNING 'garagebooks.ownership is built without TeslaMate: %', SQLERRM;
+        tm := false;
+    END;
+  END LOOP;
+END
+$fn$;
+REVOKE ALL ON FUNCTION garagebooks.build_ownership(boolean) FROM PUBLIC;
+SELECT garagebooks.build_ownership(true);
 
 -- Rebates and refunds are negative amounts. Databases made before that allowed them still carry
 -- the old CHECK (amount >= 0); drop it (a no-op once gone).
