@@ -461,3 +461,56 @@ SELECT garagebooks.build_ownership(true);
 -- Rebates and refunds are negative amounts. Databases made before that allowed them still carry
 -- the old CHECK (amount >= 0); drop it (a no-op once gone).
 ALTER TABLE garagebooks.expense DROP CONSTRAINT IF EXISTS expense_amount_check;
+
+-- Reminders (roadmap item 4): service and paperwork that fall due on a date, an odometer reading
+-- or whichever comes first. What is due is worked out when a page or the dashboard is viewed (the
+-- app's reminders.status() and the dashboard's Reminders panel share the lead times below), never
+-- stored. A resolved reminder is kept, with the expense that did the job; a recurring one makes
+-- the next when it is resolved, and previous_id links the chain back. edited_at is set when the owner
+-- changes a reminder, so un-resolving can tell an automatic next reminder from one they touched.
+CREATE TABLE IF NOT EXISTS garagebooks.reminder (
+    id                  serial PRIMARY KEY,
+    car_id              smallint NOT NULL REFERENCES garagebooks.car (id) ON DELETE CASCADE,
+    title               text NOT NULL CHECK (btrim(title) <> '' AND length(title) <= 100),
+    category_id         smallint REFERENCES garagebooks.category (id) ON DELETE SET NULL,
+    due_date            date,
+    due_km              numeric(9, 1) CHECK (due_km IS NULL OR due_km >= 0),
+    lead_days           integer NOT NULL DEFAULT 30 CHECK (lead_days BETWEEN 0 AND 3650),
+    lead_km             numeric(9, 1) NOT NULL DEFAULT 1000 CHECK (lead_km >= 0),
+    every_months        integer CHECK (every_months IS NULL OR every_months BETWEEN 1 AND 600),
+    every_km            numeric(9, 1) CHECK (every_km IS NULL OR every_km > 0),
+    notes               text CHECK (notes IS NULL OR length(notes) <= 2000),
+    resolved_at         timestamptz,
+    resolved_expense_id bigint REFERENCES garagebooks.expense (id) ON DELETE SET NULL,
+    resolved_km         numeric(9, 1),
+    previous_id         integer REFERENCES garagebooks.reminder (id) ON DELETE SET NULL,
+    edited_at           timestamptz,
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    CHECK (due_date IS NOT NULL OR due_km IS NOT NULL)
+);
+CREATE INDEX IF NOT EXISTS reminder_car_idx ON garagebooks.reminder (car_id) WHERE resolved_at IS NULL;
+CREATE INDEX IF NOT EXISTS reminder_previous_idx ON garagebooks.reminder (previous_id);
+
+-- Everything that is due, in one place for the app and Grafana: the open reminders, plus two derived
+-- from a car's current lease, so they follow the lease and can't drift from it (the lease that
+-- covers today, else the next to start): registration expiry, which is informational when the provider renews it,
+-- and the lease's end, with a longer lead time. reminder_id is NULL for a derived one.
+-- (Dates use the database's own day; the app works out "today" in APP_TZ for its pages.)
+CREATE OR REPLACE VIEW garagebooks.reminder_due AS
+SELECT 'reminder'::text AS kind, r.id AS reminder_id, r.car_id, r.title, r.category_id, r.due_date,
+       r.due_km, r.lead_days, r.lead_km, false AS informational
+FROM garagebooks.reminder r
+WHERE r.resolved_at IS NULL
+UNION ALL
+SELECT 'registration', NULL::integer, cl.car_id, 'Registration expires', NULL::smallint, cl.rego_expiry,
+       NULL::numeric(9, 1), 30, 0::numeric(9, 1), cl.rego_renewed_by_provider
+FROM garagebooks.lease cl
+WHERE cl.rego_expiry IS NOT NULL
+  AND cl.id = (SELECT l.id FROM garagebooks.lease l WHERE l.car_id = cl.car_id AND l.end_date >= CURRENT_DATE
+               ORDER BY l.start_date LIMIT 1)
+UNION ALL
+SELECT 'lease_end', NULL::integer, cl.car_id, 'Lease ends', NULL::smallint, cl.end_date,
+       NULL::numeric(9, 1), 90, 0::numeric(9, 1), false
+FROM garagebooks.lease cl
+WHERE cl.id = (SELECT l.id FROM garagebooks.lease l WHERE l.car_id = cl.car_id AND l.end_date >= CURRENT_DATE
+               ORDER BY l.start_date LIMIT 1);

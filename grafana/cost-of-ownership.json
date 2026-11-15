@@ -1377,6 +1377,132 @@
       ]
     },
     {
+      "id": 18,
+      "type": "table",
+      "title": "Reminders",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "TeslaMate"
+      },
+      "description": "What is open for this car, most urgent first. Add, edit and resolve reminders in GarageBooks (link at the top). The odometer is TeslaMate's or your latest reading; with none known, an odometer reminder says so.",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 31
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Due date"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 130
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Due km"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currency:financial: km:suffix"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Km left"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currency:financial: km:suffix"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Status"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 170
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "Overdue": {
+                        "color": "red",
+                        "index": 0
+                      },
+                      "Due soon": {
+                        "color": "orange",
+                        "index": 1
+                      },
+                      "Odometer unknown": {
+                        "color": "orange",
+                        "index": 2
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "TeslaMate"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH o AS (SELECT current_km FROM garagebooks.ownership WHERE car_id = $car_id),\nr AS (\n  SELECT d.title, d.due_date, d.due_km, d.lead_days, d.lead_km, d.informational,\n         (d.due_date - (now() AT TIME ZONE '$tz')::date) AS days_left,\n         d.due_km - o.current_km AS km_left\n  FROM garagebooks.reminder_due d LEFT JOIN o ON true\n  WHERE d.car_id = $car_id\n), s AS (\n  SELECT r.*,\n         LEAST(CASE WHEN days_left < 0 THEN 0 WHEN days_left <= lead_days THEN 1 WHEN days_left IS NOT NULL THEN 2 END,\n               CASE WHEN km_left <= 0 THEN 0 WHEN km_left <= lead_km THEN 1 WHEN km_left IS NOT NULL THEN 2 END) AS worst\n  FROM r\n)\nSELECT title AS \"Reminder\", to_char(due_date, 'DD Mon YYYY') AS \"Due date\", due_km AS \"Due km\", days_left AS \"Days left\", round(km_left::numeric, 0) AS \"Km left\",\n       CASE WHEN informational THEN 'Provider renews' WHEN worst = 0 THEN 'Overdue' WHEN worst = 1 THEN 'Due soon'\n            WHEN worst = 2 THEN 'Upcoming' ELSE 'Odometer unknown' END AS \"Status\"\nFROM s\nORDER BY CASE WHEN informational THEN 3 ELSE COALESCE(worst, 1) END, days_left NULLS LAST, km_left NULLS LAST, title",
+          "refId": "A"
+        }
+      ]
+    },
+    {
       "id": 14,
       "type": "table",
       "title": "Expenses",
@@ -1389,7 +1515,7 @@
         "h": 12,
         "w": 24,
         "x": 0,
-        "y": 31
+        "y": 39
       },
       "fieldConfig": {
         "defaults": {

@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% from "_reminder_fields.html" import fields %}
+{% block title %}Reminders{% endblock %}
+{% block main_attrs %} class="narrow"{% endblock %}
+{% set icons = {'overdue': '!', 'due_soon': '…', 'unknown': '?', 'upcoming': '–', 'info': 'i', 'resolved': '✓'} %}
+{% macro badge(st) %}<span class="badge status-{{ st.code }}"><span aria-hidden="true">{{ icons[st.code] }}</span> {{ st.label }}</span>{% endmacro %}
+{% block content %}
+<div class="page-head"><h1>Reminders</h1></div>
+{% if errors.get('new') %}<p class="notice bad" role="alert">Some details need another look: they are marked below.</p>{% endif %}
+<h2 class="card-title" id="open-heading">Open</h2>
+{% if items %}
+<ul class="reminder-list" aria-labelledby="open-heading">
+  {% for i in items %}{% set st = i.status %}{% set e = errors.get(i.reminder_id, {}) if i.reminder_id else {} %}{% set v = values.get(i.reminder_id) if i.reminder_id else None %}
+  <li class="reminder card" data-reminder-id="{{ i.reminder_id or '' }}" data-kind="{{ i.kind }}" data-status="{{ st.code }}" data-title="{{ i.title }}">
+    <div class="reminder-head"><strong>{{ i.title }}</strong> {{ badge(st) }}</div>
+    <p class="due">
+      {% if i.due_date %}{{ i.due_date.strftime('%d %b %Y') }}{% endif %}{% if i.due_date and i.due_km is not none %} or {% endif %}{% if i.due_km is not none %}at {{ i.due_km|km }}{% endif %}
+      <span class="left">· {{ st.describe|join(', ') }}</span></p>
+    <p class="meta"><small>{{ i.car_name }}{% if i.category %} · {{ i.category }}{% endif %}
+      · Odometer: {% if i.odometer %}{{ i.odometer.km|km }}
+        {% if i.odometer.source == 'teslamate' %}(from TeslaMate){% else %}(entered {{ i.odometer.at|day }}){% endif %}{% else %}not recorded{% endif %}
+      {% if i.every_months or i.every_km %}· Repeats every {% if i.every_months %}{{ i.every_months }} month{{ '' if i.every_months == 1 else 's' }}{% endif %}{% if i.every_months and i.every_km %} or {% endif %}{% if i.every_km %}{{ i.every_km|km }}{% endif %}{% endif %}</small></p>
+    {% if i.notes %}<p class="meta"><small>{{ i.notes }}</small></p>{% endif %}
+    {% if i.reminder_id %}
+    <div class="reminder-actions">
+      <details{{ ' open' if e }}><summary>Resolve</summary>
+        <form method="post" action="{{ url_for('reminder_resolve', reminder_id=i.reminder_id) }}" class="stack">
+          <label for="x-{{ i.reminder_id }}">Done by this expense
+            <select id="x-{{ i.reminder_id }}" name="expense_id" {% if e.expense_id %}aria-invalid="true" aria-describedby="e-x-{{ i.reminder_id }}"{% endif %}>
+              <option value="">No expense: enter the date below</option>
+              {% for x in choices.get(i.car_id, []) %}<option value="{{ x.id }}" {{ 'selected' if v and v.get('expense_id') == x.id|string }}>{{ x.occurred_at|day }} · {{ x.category }}{% if x.vendor %} · {{ x.vendor }}{% endif %} · {{ x.amount|money }}</option>{% endfor %}
+            </select>{% if e.expense_id %}<span class="error" id="e-x-{{ i.reminder_id }}">{{ e.expense_id }}</span>{% endif %}</label>
+          <div class="row">
+            <label for="d-{{ i.reminder_id }}">Date done <input id="d-{{ i.reminder_id }}" type="date" name="date" max="{{ today }}" value="{{ (v.get('date') if v else None) or today }}" {% if e.date %}aria-invalid="true" aria-describedby="e-d-{{ i.reminder_id }}"{% endif %}>
+              {% if e.date %}<span class="error" id="e-d-{{ i.reminder_id }}">{{ e.date }}</span>{% endif %}</label>
+            <label for="k-{{ i.reminder_id }}">Odometer (km, optional) <input id="k-{{ i.reminder_id }}" name="km" inputmode="decimal" autocomplete="off" value="{{ (v.get('km') if v else '') or '' }}" {% if e.km %}aria-invalid="true" aria-describedby="e-k-{{ i.reminder_id }}"{% endif %}>
+              {% if e.km %}<span class="error" id="e-k-{{ i.reminder_id }}">{{ e.km }}</span>{% endif %}</label>
+          </div>
+          <p><small>The date and odometer count only when no expense is chosen.</small></p>
+          <button type="submit" class="secondary">Resolve</button>
+        </form>
+      </details>
+      <a href="{{ url_for('reminder_edit', reminder_id=i.reminder_id) }}">Edit</a>
+      <form method="post" action="{{ url_for('reminder_delete', reminder_id=i.reminder_id) }}" data-confirm="Delete the reminder “{{ i.title }}”?">
+        <button type="submit" class="linklike">Delete</button></form>
+    </div>
+    {% else %}
+    <p class="meta"><small><a href="{{ url_for('car_lease', car_id=i.car_id) }}">Lease details</a>
+      {% if i.kind == 'registration' and i.informational %} · Registration is renewed by the provider; this is for your information.
+      {% else %} · From the car's lease: change the date there, and this follows.{% endif %}</small></p>
+    {% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="empty">No open reminders. Add one below, or enter a lease with a registration date and its end date.</p>
+{% endif %}
+
+<form method="post" action="{{ url_for('reminder_add') }}" class="card stack" id="add-reminder">
+  <h2>Add a reminder</h2>
+  {{ fields(values.get('new', {}), errors.get('new', {}), cars, categories, lead_days, lead_km) }}
+  <button type="submit" class="button">Add reminder</button>
+</form>
+
+<section id="resolved">
+  <h2 class="card-title">Resolved</h2>
+  {% if resolved %}
+  <ul class="reminder-list">
+    {% for r in resolved %}
+    <li class="reminder card" data-status="resolved" data-title="{{ r.title }}">
+      <div class="reminder-head"><strong>{{ r.title }}</strong> <span class="badge status-resolved"><span aria-hidden="true">✓</span> Resolved</span></div>
+      <p class="meta"><small>{{ r.car_name }} · {{ r.resolved_at|day }}{% if r.resolved_km is not none %} at {{ r.resolved_km|km }}{% endif %}</small></p>
+      <p class="meta"><small>{% if r.resolved_expense_id %}By <a href="{{ url_for('edit', expense_id=r.resolved_expense_id) }}">{{ r.expense_at|day }} · {{ r.expense_category }}{% if r.vendor %} · {{ r.vendor }}{% endif %} · {{ r.amount|money }}</a>
+        {% else %}Resolved without an expense.{% endif %}</small></p>
+      <form method="post" action="{{ url_for('reminder_unresolve', reminder_id=r.id) }}" data-confirm="Reopen the reminder “{{ r.title }}”?">
+        <button type="submit" class="linklike">Reopen (resolved by mistake)</button></form>
+    </li>
+    {% endfor %}
+  </ul>
+  {% if pages > 1 %}
+  <p class="pager"><small>Page {{ page }} of {{ pages }}
+    {% if page > 1 %}· <a href="{{ url_for('reminders_page', page=page - 1) }}#resolved">Newer</a>{% endif %}
+    {% if page < pages %}· <a href="{{ url_for('reminders_page', page=page + 1) }}#resolved">Older</a>{% endif %}</small></p>
+  {% endif %}
+  {% else %}
+  <p class="empty">Nothing resolved yet. Resolved reminders are kept here.</p>
+  {% endif %}
+</section>
+{% endblock %}

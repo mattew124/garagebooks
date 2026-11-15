@@ -30,3 +30,6 @@ GRANT SELECT ON public.schema_migrations TO :"app_role";
 GRANT SELECT (car_id, date, odometer) ON public.positions TO :"app_role";
 GRANT SELECT (car_id, start_date, cost) ON public.charging_processes TO :"app_role";
 \endif
+-- Reminders, and the view that adds the ones derived from a car's lease.
+GRANT SELECT, INSERT, UPDATE, DELETE ON garagebooks.reminder TO :"app_role";
+GRANT SELECT ON garagebooks.reminder_due TO :"app_role";

@@ -1,5 +1,11 @@
 {% extends "base.html" %}
 {% block content %}
+{% if reminder_attention and reminder_attention.total %}
+{% set later = reminder_attention.total - reminder_attention.overdue %}
+<p class="notice bad" id="reminder-notice" role="status"><strong>Reminders:</strong>
+  {% if reminder_attention.overdue %}{{ reminder_attention.overdue }} overdue{% endif %}{% if reminder_attention.overdue and later %}, {% endif %}{% if later %}{{ later }} due soon or to check{% endif %}.
+  <a href="{{ url_for('reminders_page') }}">See them</a></p>
+{% endif %}
 {% set filtered = categories|selectattr('id', 'equalto', category_id)|first %}
 <div class="page-head">
   <h1>{{ filtered.name if filtered else 'All expenses' }}</h1>

@@ -97,7 +97,7 @@ def test_standard_categories_start_with_a_pool(empty_db, monkeypatch):
 def test_an_upgrade_adds_the_pool_column_once_and_keeps_the_owners_choice(empty_db, monkeypatch):
     start(empty_db, monkeypatch)
     with connect(empty_db) as conn:   # a database as it was before this release
-        conn.execute("DROP TABLE garagebooks.lease_budget; DROP TABLE garagebooks.lease;"
+        conn.execute("DROP VIEW garagebooks.reminder_due; DROP TABLE garagebooks.lease_budget; DROP TABLE garagebooks.lease;"
                      " ALTER TABLE garagebooks.category DROP COLUMN budget_pool")
     start(empty_db, monkeypatch)
     with connect(empty_db) as conn:

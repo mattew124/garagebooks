@@ -895,6 +895,94 @@ def lease_checks(page):
     page.wait_for_url(re.compile(r"msg=car_deleted"))
 
 
+def test_reminders(page):
+    try:
+        reminder_checks(page)
+    finally:
+        remove_marked(page)       # takes the car, its reminders and the test expense with it
+
+
+def reminder_checks(page):
+    """A car added by hand with an odometer reading: add a repeating reminder that is nearly due, see it
+    on the page, the nav and the dashboard, resolve it from the expense that did the job, see the next one
+    made, then reopen it."""
+    title = f"{MARKER} tyre rotation"
+    page.goto(UI + "cars")
+    page.fill("#add-car input[name=name]", MARKER)
+    page.click("#add-car button[type=submit]")
+    page.wait_for_url(re.compile(r"msg=car_added"))
+    car = page.locator(".car", has_text=MARKER)
+    car_id = car.get_attribute("id").removeprefix("car-")
+    car.locator("summary", has_text="Odometer readings").click()
+    from datetime import date, timedelta
+    car.locator("input[name=date]").fill((date.today() - timedelta(days=3)).isoformat())   # before the expense below
+    car.locator("input[name=km]").fill("12,345")
+    car.get_by_role("button", name="Add reading").click()
+    page.wait_for_url(re.compile(r"msg=reading_added"))
+
+    page.goto(UI + "reminders")
+    page.select_option("#add-reminder select[name=car_id]", label=MARKER)
+    page.get_by_label("What is it for?").fill(title)
+    page.get_by_label("Category").select_option(label="Tyre rotation")
+    page.get_by_label("At this odometer reading (km)").fill("12800")
+    page.get_by_label("Every (km)").fill("10000")
+    page.get_by_label("Warn me this many days before").fill("-3")
+    page.get_by_role("button", name="Add reminder").click()
+    expect(page.locator("#e-lead_days")).to_contain_text("whole number")             # the error is beside the field...
+    assert page.get_by_label("What is it for?").input_value() == title               # ...and nothing typed is lost
+    page.get_by_label("Warn me this many days before").fill("30")
+    page.get_by_role("button", name="Add reminder").click()
+    page.wait_for_url(re.compile(r"msg=reminder_added"))
+    item = page.locator(".reminder", has_text=title).first
+    expect(item).to_have_attribute("data-status", "due_soon")
+    expect(item).to_contain_text("Due soon")                                          # a word, not only a colour
+    expect(item).to_contain_text("455 km to go")
+    expect(item).to_contain_text("12,345 km")                                         # the car's odometer, and where it is from
+    expect(item).to_contain_text("entered")
+    expect(page.locator("header nav a", has_text="Reminders").locator(".count")).to_be_visible()
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "sideways scroll on a phone"
+    shot(page, "reminders-phone")
+    page.goto(UI)
+    expect(page.locator("#reminder-notice")).to_contain_text("due soon")
+
+    wide = page.context.browser.new_context(viewport={"width": 1280, "height": 2200})   # Grafana only draws the panels in view
+    graf = wide.new_page()
+    graf.goto(GRAFANA + f"d/garagebooks-tco/cost-of-ownership?var-car_id={car_id}")
+    graf.wait_for_load_state("networkidle")
+    graf.wait_for_timeout(2000)
+    shot(graf, "reminders-dashboard")
+    expect(graf.get_by_text(title).first).to_be_visible(timeout=30000)
+    expect(graf.get_by_text("Due soon", exact=True).first).to_be_visible()
+    wide.close()
+
+    page.goto(UI + "new")                                                             # the job is done: an expense for it
+    page.select_option("select[name=car_id]", label=MARKER)
+    page.select_option("select[name=category_id]", label="Tyre rotation")
+    page.fill("input[name=amount]", "90")
+    page.fill("input[name=vendor]", MARKER)
+    page.fill("input[name=odometer_km]", "12,820")
+    page.click("button[type=submit].button")
+    page.wait_for_url(re.compile(r"/reminders\?msg=saved"))                           # the car has an open reminder: offered
+    expect(page.get_by_label(re.compile(title))).to_be_checked()                      # same category: ticked
+    shot(page, "reminders-offer-phone")
+    page.get_by_role("button", name="Resolve ticked").click()
+    page.wait_for_url(re.compile(r"msg=reminder_resolved_next"))
+    items = page.locator(".reminder[data-status=upcoming]", has_text=title)
+    expect(items).to_have_count(1)                                                    # the next one: 10,000 km on from 12,820
+    expect(items.first).to_contain_text("22,820 km")
+    resolved = page.locator("#resolved .reminder", has_text=title)
+    expect(resolved).to_have_count(1)
+    expect(resolved).to_contain_text(MARKER)                                          # the expense that did it
+    shot(page, "reminders-resolved-phone")
+
+    page.once("dialog", lambda d: d.accept())                                         # resolved by mistake: reopen it
+    resolved.get_by_role("button", name="Reopen").click()
+    page.wait_for_url(re.compile(r"msg=reminder_reopened"))
+    expect(page.locator(".reminder[data-status=upcoming]", has_text=title)).to_have_count(0)   # the next one went again
+    expect(page.locator(".reminder[data-status=overdue]", has_text=title)).to_have_count(1)    # 12,820 is past 12,800
+    expect(page.locator("#resolved .reminder", has_text=title)).to_have_count(0)
+
+
 def test_dashboard(page):
     add_expense(page, "62000", "Initial purchase")
     add_expense(page, "1500", "Tyres")
@@ -913,7 +1001,8 @@ def test_dashboard(page):
     assert not errors, errors
     assert page.locator("[data-testid='data-testid Panel status error']").count() == 0, "a panel shows an error"
     body = page.inner_text("body")
-    assert "No data" not in body.split("Expenses")[0], "a headline panel has no data"
+    assert "Reminders" in body, "the Reminders panel is missing"
+    assert "No data" not in body.split("Reminders")[0], "a headline panel has no data"
     assert MARKER in body, "expenses table did not list the test row"
     assert "$62,000.00" in body, "amounts must show in full, grouped, not rescaled"
     assert " Mm" not in body and not re.search(r"\$\d+(\.\d+)?K", body), "units were auto-scaled"
@@ -943,6 +1032,8 @@ def main():
         step("no sideways scroll on a phone", test_phone_layout_has_no_sideways_scroll, page)
         step("cars: TeslaMate's are listed, one is added by hand, read and deleted", test_cars_page, page)
         step("lease: add from a statement, see the figures, edit, delete", test_lease_page, page)
+        step("reminders: add, see them due, resolve from an expense, next one made, reopen",
+             test_reminders, page)
         step("header stays tidy on a phone", test_header_stays_tidy_on_a_phone, page)
         step("phone list shows amount, invoice and edit", test_list_shows_key_fields_on_a_phone, page)
         step("a likely duplicate is asked about, then saved anyway", test_duplicate_is_asked_about_before_saving, page)
