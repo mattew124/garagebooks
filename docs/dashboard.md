@@ -29,6 +29,18 @@ The headline panels are all-time. The charts, pie and table follow the dashboard
 starts at your earliest data. Grafana has no "all time", so the app works the start out each time it
 starts; a back-dated expense older than that needs the range widened by hand.
 
+## Reminders
+
+The **Reminders** table, above the expenses, lists what is open for the selected car, most urgent
+first: the title, due date and due odometer reading, **Days left**, **Km left** and **Status**
+(Overdue, Due soon, Upcoming, Odometer unknown, or Provider renews for a registration the lease provider
+looks after). The rules are the same as in the app: see [Reminders](reminders.md#what-the-statuses-mean).
+It needs no TeslaMate table, so it is there with or without TeslaMate. The odometer it counts from is the
+car's latest known one (the same as **Distance** above). With none known, a reminder due by odometer says
+*Odometer unknown* and its **Km left** is empty. A reminder due today or later is *Due soon* inside its lead time; the days
+left count from today in the dashboard's time zone. It shows open reminders only, whatever the time range,
+and includes the registration and lease end from the car's [lease](leases.md).
+
 ## Rebates and refunds
 
 A rebate or refund (a state EV rebate, an insurance refund for ending a policy early) is an expense
