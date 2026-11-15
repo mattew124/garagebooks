@@ -36,6 +36,7 @@
     {% elif c.teslamate_car_id is not none and teslamate.state not in ("ok", "absent") %}<strong>unavailable</strong>
     {% else %}<strong>not recorded</strong>{% endif %}
     · {{ c.expenses }} expense{{ '' if c.expenses == 1 else 's' }}</p>
+  <p class="car-lease"><a href="{{ url_for('car_lease', car_id=c.id) }}">Lease{% if c.leases %} <small>({{ c.leases }} recorded)</small>{% else %} <small>(none recorded)</small>{% endif %}</a></p>
   <details{{ ' open' if e and not (e.km or e.date) }}>
     <summary>Edit</summary>
     <form method="post" action="{{ url_for('car_update', car_id=c.id) }}" class="stack">

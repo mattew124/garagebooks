@@ -132,7 +132,8 @@ def car_details(conn):
     """The cars as the Cars page shows them: with how many expenses each has and its readings entered by hand."""
     rows = conn.execute(
         "SELECT c.id, c.name, c.kind, c.make, c.model, c.teslamate_car_id,"
-        " (SELECT count(*) FROM garagebooks.expense e WHERE e.car_id = c.id) AS expenses "
+        " (SELECT count(*) FROM garagebooks.expense e WHERE e.car_id = c.id) AS expenses,"
+        " (SELECT count(*) FROM garagebooks.lease l WHERE l.car_id = c.id) AS leases "
         "FROM garagebooks.car c ORDER BY c.id").fetchall()
     for row in rows:
         row["readings"] = conn.execute(
@@ -206,7 +207,7 @@ def save_settings(conn, app_url, grafana_url, invoice_date_format, invoice_name_
 
 def categories(conn):
     return conn.execute(
-        "SELECT id, name, kind, upload_folder FROM garagebooks.category ORDER BY sort_order, name"
+        "SELECT id, name, kind, upload_folder, budget_pool FROM garagebooks.category ORDER BY sort_order, name"
     ).fetchall()
 
 
@@ -423,3 +424,93 @@ def save_onedrive_account(conn, **fields):
         f"ON CONFLICT (id) DO UPDATE SET {sets}, updated_at = now()",
         fields)
 
+
+
+# ---- leases (roadmap L1) -------------------------------------------------------------
+
+LEASE_FIELDS = ("package_name", "financier", "start_date", "end_date", "refinance_date", "term_months",
+                "pay_frequency", "pretax_payment", "posttax_payment", "admin_fee", "car_cost",
+                "residual_amount", "residual_percent", "fbt_base_value", "fbt_method", "statutory_percent",
+                "ev_exempt", "tax_treatment", "tax_treatment_note", "estimated_km_per_year",
+                "rego_expiry", "rego_renewed_by_provider")
+
+
+def car_leases(conn, car_id):
+    """Every lease of a car, newest first. A row per lease with all its columns."""
+    return conn.execute("SELECT * FROM garagebooks.lease WHERE car_id = %s ORDER BY start_date DESC, id DESC",
+                        (car_id,)).fetchall()
+
+
+def get_lease(conn, lease_id, car_id=None):
+    """One lease, or None. With `car_id`, only if it is that car's."""
+    return conn.execute("SELECT * FROM garagebooks.lease WHERE id = %s AND (%s::smallint IS NULL OR car_id = %s)",
+                        (lease_id, car_id, car_id)).fetchone()
+
+
+def current_lease(conn, car_id, on):
+    """The lease that covers the date `on` (both ends included), else the next one to start, else
+    None. At most one lease of a car covers a day: the app refuses overlapping ranges."""
+    return conn.execute(
+        "SELECT * FROM garagebooks.lease WHERE car_id = %(car)s AND end_date >= %(on)s "
+        "ORDER BY start_date LIMIT 1", {"car": car_id, "on": on}).fetchone()
+
+
+def lease_budgets(conn, lease_id):
+    """Every yearly budget of a lease: rows of pool, yearly_amount, effective_from (earliest first).
+    A later re-budget is another row for the pool; lease.budget_on() picks the one in force on a date."""
+    return conn.execute("SELECT pool, yearly_amount, effective_from FROM garagebooks.lease_budget "
+                        "WHERE lease_id = %s ORDER BY effective_from, pool", (lease_id,)).fetchall()
+
+
+def overlapping_lease(conn, car_id, start, end, exclude_id=None):
+    """A lease of this car whose dates share a day with start..end, or None."""
+    return conn.execute(
+        "SELECT * FROM garagebooks.lease WHERE car_id = %(car)s AND start_date <= %(end)s AND end_date >= %(start)s "
+        "AND (%(skip)s::integer IS NULL OR id <> %(skip)s) ORDER BY start_date LIMIT 1",
+        {"car": car_id, "start": start, "end": end, "skip": exclude_id}).fetchone()
+
+
+def _save_budgets(conn, lease_id, start, budgets):
+    for pool, amount in budgets.items():
+        conn.execute("INSERT INTO garagebooks.lease_budget (lease_id, pool, yearly_amount, effective_from) "
+                     "VALUES (%s, %s, %s, %s)", (lease_id, pool, amount, start))
+
+
+def add_lease(conn, car_id, v):
+    """Add a lease with its first budgets (effective from its start). Returns its id, or None when its dates
+    overlap another lease of the car (checked while the car's row is held, so two at once can't both pass)."""
+    conn.execute("SELECT id FROM garagebooks.car WHERE id = %s FOR UPDATE", (car_id,))
+    if overlapping_lease(conn, car_id, v["start_date"], v["end_date"]):
+        return None
+    cols = ", ".join(LEASE_FIELDS)
+    marks = ", ".join(f"%({f})s" for f in LEASE_FIELDS)
+    lease_id = conn.execute(f"INSERT INTO garagebooks.lease (car_id, {cols}) VALUES (%(car_id)s, {marks}) RETURNING id",
+                            {**v, "car_id": car_id}).fetchone()["id"]
+    _save_budgets(conn, lease_id, v["start_date"], v["budgets"])
+    return lease_id
+
+
+def update_lease(conn, car_id, lease_id, v):
+    """Change a lease and its first budgets (the rows effective from its start; a later re-budget stays).
+    Returns "missing" (no such lease for this car), "overlap" or "ok"."""
+    conn.execute("SELECT id FROM garagebooks.car WHERE id = %s FOR UPDATE", (car_id,))
+    old = get_lease(conn, lease_id, car_id)
+    if old is None:
+        return "missing"
+    if overlapping_lease(conn, car_id, v["start_date"], v["end_date"], exclude_id=lease_id):
+        return "overlap"
+    sets = ", ".join(f"{f} = %({f})s" for f in LEASE_FIELDS)
+    conn.execute(f"UPDATE garagebooks.lease SET {sets} WHERE id = %(id)s", {**v, "id": lease_id})
+    conn.execute("DELETE FROM garagebooks.lease_budget WHERE lease_id = %s AND effective_from = %s",
+                 (lease_id, old["start_date"]))
+    _save_budgets(conn, lease_id, v["start_date"], v["budgets"])
+    return "ok"
+
+
+def delete_lease(conn, car_id, lease_id):
+    return conn.execute("DELETE FROM garagebooks.lease WHERE id = %s AND car_id = %s", (lease_id, car_id)).rowcount == 1
+
+
+def set_budget_pool(conn, category_id, pool):
+    """Which of the provider's budget pools a category's expenses come from (None: none). False if no such category."""
+    return conn.execute("UPDATE garagebooks.category SET budget_pool = %s WHERE id = %s", (pool, category_id)).rowcount == 1

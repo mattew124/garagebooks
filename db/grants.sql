@@ -7,7 +7,9 @@ GRANT USAGE ON SCHEMA garagebooks TO :"app_role";
 GRANT SELECT, INSERT, UPDATE, DELETE ON garagebooks.expense TO :"app_role";
 GRANT SELECT, UPDATE ON garagebooks.setting TO :"app_role";
 GRANT SELECT, INSERT ON garagebooks.category TO :"app_role";
-GRANT UPDATE (upload_folder) ON garagebooks.category TO :"app_role";
+GRANT UPDATE (upload_folder, budget_pool) ON garagebooks.category TO :"app_role";
+-- Lease details and budgets per car.
+GRANT SELECT, INSERT, UPDATE, DELETE ON garagebooks.lease, garagebooks.lease_budget TO :"app_role";
 GRANT SELECT, INSERT, UPDATE, DELETE ON garagebooks.car_folder, garagebooks.onedrive_account TO :"app_role";
 GRANT SELECT, INSERT, UPDATE, DELETE ON garagebooks.learned_label, garagebooks.learned_vendor, garagebooks.import_skip TO :"app_role";
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA garagebooks TO :"app_role";

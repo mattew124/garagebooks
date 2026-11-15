@@ -111,6 +111,74 @@ CREATE TABLE IF NOT EXISTS garagebooks.odometer_reading (
     UNIQUE (car_id, read_at)
 );
 
+-- Novated leases (roadmap L1): what the provider's statement says about the lease behind a car.
+-- A car can have several over time (a refinance starts a new one from its date); the app keeps
+-- their date ranges from overlapping. Dates are plain dates. Money is dollars. Nothing personal is
+-- stored here (no names, employer, payroll or bank numbers). The statutory percentage is data,
+-- never a constant in code that calculates.
+CREATE TABLE IF NOT EXISTS garagebooks.lease (
+    id                      serial PRIMARY KEY,
+    car_id                  smallint NOT NULL REFERENCES garagebooks.car (id) ON DELETE CASCADE,
+    package_name            text CHECK (package_name IS NULL OR (btrim(package_name) <> '' AND length(package_name) <= 100)),
+    financier               text NOT NULL CHECK (btrim(financier) <> '' AND length(financier) <= 100),
+    start_date              date NOT NULL,
+    end_date                date NOT NULL,
+    refinance_date          date,
+    term_months             smallint NOT NULL CHECK (term_months BETWEEN 1 AND 120),
+    pay_frequency           text NOT NULL CHECK (pay_frequency IN ('weekly', 'fortnightly', 'monthly')),
+    pretax_payment          numeric(12, 2) NOT NULL DEFAULT 0 CHECK (pretax_payment >= 0),
+    posttax_payment         numeric(12, 2) NOT NULL DEFAULT 0 CHECK (posttax_payment >= 0),
+    admin_fee               numeric(12, 2) NOT NULL DEFAULT 0 CHECK (admin_fee >= 0),
+    car_cost                numeric(12, 2) CHECK (car_cost IS NULL OR car_cost >= 0),
+    residual_amount         numeric(12, 2) CHECK (residual_amount IS NULL OR residual_amount >= 0),
+    residual_percent        numeric(6, 3) CHECK (residual_percent IS NULL OR residual_percent BETWEEN 0 AND 100),
+    fbt_base_value          numeric(12, 2) CHECK (fbt_base_value IS NULL OR fbt_base_value >= 0),
+    fbt_method              text NOT NULL DEFAULT 'statutory' CHECK (fbt_method IN ('statutory', 'operating_cost')),
+    statutory_percent       numeric(5, 2) NOT NULL DEFAULT 20 CHECK (statutory_percent BETWEEN 0 AND 100),
+    ev_exempt               boolean NOT NULL DEFAULT false,
+    tax_treatment           text CHECK (tax_treatment IS NULL OR tax_treatment IN ('employee_contribution', 'other')),
+    tax_treatment_note      text CHECK (tax_treatment_note IS NULL OR (btrim(tax_treatment_note) <> '' AND length(tax_treatment_note) <= 100)),
+    estimated_km_per_year   integer CHECK (estimated_km_per_year IS NULL OR estimated_km_per_year BETWEEN 0 AND 1000000),
+    rego_expiry             date,
+    rego_renewed_by_provider boolean NOT NULL DEFAULT false,
+    created_at              timestamptz NOT NULL DEFAULT now(),
+    CHECK (end_date > start_date),
+    CHECK (refinance_date IS NULL OR (refinance_date >= start_date AND refinance_date <= end_date))
+);
+CREATE INDEX IF NOT EXISTS lease_car_idx ON garagebooks.lease (car_id, start_date);
+
+-- The provider's yearly budget for each running cost (a "pool"). Each row holds from its date until
+-- a later row for the same pool: a re-budget adds a row, so earlier periods are never rewritten.
+-- Entering a lease adds the first set, effective from the lease's start date.
+--   pool: lease, fuel_charging (fuel or charging), insurance, registration (and CTP), maintenance,
+--         tyres, other (other running costs)
+CREATE TABLE IF NOT EXISTS garagebooks.lease_budget (
+    lease_id       integer NOT NULL REFERENCES garagebooks.lease (id) ON DELETE CASCADE,
+    pool           text NOT NULL CHECK (pool IN ('lease', 'fuel_charging', 'insurance', 'registration',
+                                                 'maintenance', 'tyres', 'other')),
+    yearly_amount  numeric(12, 2) NOT NULL CHECK (yearly_amount >= 0),
+    effective_from date NOT NULL,
+    PRIMARY KEY (lease_id, pool, effective_from)
+);
+
+-- The pool each category's expenses are paid from, or NULL for none. Added once, with defaults for
+-- the standard categories; after that the owner's edits (on the Categories page) are never overwritten.
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_schema = 'garagebooks' AND table_name = 'category'
+                     AND column_name = 'budget_pool') THEN
+        ALTER TABLE garagebooks.category ADD COLUMN budget_pool text
+            CHECK (budget_pool IS NULL OR budget_pool IN ('lease', 'fuel_charging', 'insurance', 'registration',
+                                                          'maintenance', 'tyres', 'other'));
+        UPDATE garagebooks.category SET budget_pool = 'insurance' WHERE name = 'Insurance';
+        UPDATE garagebooks.category SET budget_pool = 'registration' WHERE name = 'Registration';
+        UPDATE garagebooks.category SET budget_pool = 'tyres' WHERE name IN ('Tyres', 'Wheel alignment', 'Tyre rotation');
+        UPDATE garagebooks.category SET budget_pool = 'maintenance' WHERE name IN ('Cabin air filter', 'Air filter');
+        UPDATE garagebooks.category SET budget_pool = 'fuel_charging' WHERE name IN ('Charging', 'Fuel');
+    END IF;
+END $$;
+
 -- Subfolder of the car's OneDrive folder that this category's invoices are uploaded
 -- into (created on demand). NULL = a subfolder named after the category. The column
 -- is added once, with sensible defaults for the standard categories; after that the

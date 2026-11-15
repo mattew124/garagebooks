@@ -829,6 +829,72 @@ def test_cars_page(page):
     expect(page.locator(".car", has_text=MARKER)).to_have_count(0)
 
 
+def test_lease_page(page):
+    try:
+        lease_checks(page)
+    finally:
+        remove_marked(page)       # a failed run leaves no car behind to confuse the next checks
+
+
+def lease_checks(page):
+    """A lease for a car added by hand: enter it from a statement, see the figures worked out, edit it,
+    delete it. The car is deleted at the end, which takes anything left with it."""
+    from datetime import date, timedelta
+    today = date.today()
+    page.goto(UI + "cars")
+    page.fill("#add-car input[name=name]", MARKER)
+    page.click("#add-car button[type=submit]")
+    page.wait_for_url(re.compile(r"msg=car_added"))
+    car = page.locator(".car", has_text=MARKER)
+    car.get_by_role("link", name="Lease").click()
+    expect(page.locator("#no-lease")).to_be_visible()
+    page.get_by_role("link", name="Add a lease").click()
+    page.get_by_label("Financier").fill("Example Finance")
+    page.get_by_label("Lease start").fill((today - timedelta(days=30)).isoformat())
+    page.get_by_label("Lease end").fill((today + timedelta(days=1065)).isoformat())
+    page.get_by_label("Term (months)").fill("36")
+    page.get_by_label("Car's cost or financed amount").fill("60000")
+    page.get_by_label("Residual percentage of cost").fill("46.875")
+    page.get_by_label("Paid").select_option("fortnightly")
+    page.get_by_label("Pre-tax part, per pay").fill("300")
+    page.get_by_label("Post-tax part, per pay").fill("20")
+    page.get_by_label("Provider's admin fee, per pay").fill("-5")
+    page.get_by_role("button", name="Add lease").click()
+    expect(page.locator("#e-admin_fee")).to_contain_text("negative")         # the error is beside the field...
+    assert page.get_by_label("Financier").input_value() == "Example Finance"  # ...and nothing typed is lost
+    page.get_by_label("Provider's admin fee, per pay").fill("5")
+    page.get_by_label("Pre-tax part, per pay").fill("300")
+    page.get_by_label("Lease payments").fill("8450")
+    page.get_by_label("Tyres").fill("400")
+    page.get_by_role("button", name="Add lease").click()
+    page.wait_for_url(re.compile(r"msg=lease_added"))
+    body = page.inner_text("body")
+    for shown in ("Example Finance", "$325.00", "$8,450.00", "$28,125.00", "46.875%", "not tax advice"):
+        assert shown in body, f"{shown!r} is not on the lease page"
+    assert re.search(r"10(64|65|66) days remaining", body), "days remaining is not shown"   # the app's date is Brisbane's
+    expect(page.locator("[id^=residual-check]")).to_contain_text("meets it")
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "sideways scroll on a phone"
+    shot(page, "lease-phone")
+    page.get_by_role("link", name="Edit").click()
+    page.get_by_label("Financier").fill("Another Finance")
+    page.get_by_role("button", name="Save lease").click()
+    page.wait_for_url(re.compile(r"msg=lease_saved"))
+    expect(page.locator(".lease")).to_contain_text("Another Finance")
+    page.once("dialog", lambda d: d.dismiss())                                # asked first: No keeps it
+    page.get_by_role("button", name="Delete").click()
+    expect(page.locator(".lease")).to_contain_text("Another Finance")
+    page.once("dialog", lambda d: d.accept())
+    page.get_by_role("button", name="Delete").click()
+    page.wait_for_url(re.compile(r"msg=lease_deleted"))
+    expect(page.locator("#no-lease")).to_be_visible()
+    page.goto(UI + "cars")
+    car = page.locator(".car", has_text=MARKER)
+    car.locator("summary", has_text="Edit").click()
+    page.once("dialog", lambda d: d.accept())
+    car.get_by_role("button", name="Delete car").click()
+    page.wait_for_url(re.compile(r"msg=car_deleted"))
+
+
 def test_dashboard(page):
     add_expense(page, "62000", "Initial purchase")
     add_expense(page, "1500", "Tyres")
@@ -876,6 +942,7 @@ def main():
         step("rows on a phone show whole dates, categories and amounts", test_rows_on_a_phone_show_whole_values, page)
         step("no sideways scroll on a phone", test_phone_layout_has_no_sideways_scroll, page)
         step("cars: TeslaMate's are listed, one is added by hand, read and deleted", test_cars_page, page)
+        step("lease: add from a statement, see the figures, edit, delete", test_lease_page, page)
         step("header stays tidy on a phone", test_header_stays_tidy_on_a_phone, page)
         step("phone list shows amount, invoice and edit", test_list_shows_key_fields_on_a_phone, page)
         step("a likely duplicate is asked about, then saved anyway", test_duplicate_is_asked_about_before_saving, page)

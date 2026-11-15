@@ -287,3 +287,19 @@ form.import { display: grid; gap: 1rem; }
 .import-table label.inline input[type=checkbox] { flex: none; width: auto; padding: 0; margin: .15rem 0 0; }
 /* A long folder path wraps inside its card instead of running past the edge on a phone. */
 .card code { overflow-wrap: anywhere; }
+
+/* ---- a car's lease ---- */
+.lease h3 { font-size: .75rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; margin: .5rem 0 0; }
+dl.facts { display: grid; gap: .4rem 1.5rem; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); margin: 0; }
+dl.facts > div { display: grid; gap: .1rem; }
+dl.facts dt { color: var(--muted); font-size: .85rem; }
+dl.facts dd { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+dl.facts dd.derived { font-weight: 600; }
+.lease .actions { justify-content: flex-start; align-items: center; }
+.lease .actions form { margin: 0; }
+.lease button.danger { margin-top: 0; }
+a.secondary-link { background: var(--surface); color: var(--text); border: 1px solid var(--line); }
+.lease-form fieldset { min-width: 0; margin: 0 0 1rem; }
+.lease-form legend { font-weight: 700; padding: 0 .4rem; }
+.lease-form label.check { display: flex; align-items: center; gap: .5rem; }
+.lease-form label.check input { flex: none; }

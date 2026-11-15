@@ -16,11 +16,20 @@
       {% if folder_error and folder_error[0] == c.id %}<span class="error">{{ folder_error[1] }}</span>{% endif %}
     </form>
     {% endif %}
+    <form method="post" action="{{ url_for('category_pool', category_id=c.id) }}" class="row">
+      <label><small>Lease budget pool</small>
+        <select name="budget_pool">
+          <option value="">None</option>
+          {% for key, label in pools.items() %}<option value="{{ key }}" {{ 'selected' if c.budget_pool == key }}>{{ label }}</option>{% endfor %}
+        </select></label>
+      <button type="submit" class="secondary">Save</button>
+    </form>
   </li>
   {% endfor %}
 </ul>
 {% if uploads_enabled %}<p><small>Uploaded invoices go into this subfolder of the car's {{ 'folder' if local_enabled else 'OneDrive folder' }}, made when first
   needed. Leave it blank to use a folder named after the category, e.g. Tyres and Wheel alignment can both use “Maintenance”.</small></p>{% endif %}
+<p><small>A car on a novated lease has a yearly budget for each pool. Choose the pool each category's expenses are paid from, or None when the category isn't part of the package.</small></p>
 <form method="post" class="card stack">
   <label>New category <input name="name" maxlength="60" required placeholder="e.g. Servicing">
     {% if error %}<span class="error">{{ error }}</span>{% endif %}</label>

@@ -21,7 +21,7 @@ from flask import Flask, abort, g, jsonify, make_response, redirect, render_temp
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from . import dashboard, db, docinfo, icons, invoices, logs, onedrive, sources, storage, updates, validation
+from . import dashboard, db, docinfo, icons, invoices, lease, logs, onedrive, sources, storage, updates, validation
 
 log = logging.getLogger("garagebooks.app")
 
@@ -45,6 +45,10 @@ MESSAGES = {
     "car_deleted": "Car deleted.",
     "reading_added": "Odometer reading saved.",
     "reading_deleted": "Odometer reading deleted.",
+    "lease_added": "Lease added.",
+    "lease_saved": "Lease saved.",
+    "lease_deleted": "Lease deleted.",
+    "category_pool": "Budget pool saved.",
     "settings": "Settings saved.",
     "folders": "Folders saved.",
     "connected": "OneDrive connected.",
@@ -235,6 +239,10 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
     @app.template_filter("km")
     def km(value):
         return "—" if value is None else f"{float(value):,.0f} km"
+
+    @app.template_filter("percent")
+    def percent(value):
+        return "—" if value is None else f"{Decimal(value).normalize():f}%"
 
     @app.template_filter("when")
     def when(value):
@@ -659,7 +667,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 error = str(exc)
         with connect() as conn:
             cats = db.categories(conn)
-        return render_template("categories.html", categories=cats, error=error,
+        return render_template("categories.html", categories=cats, error=error, pools=lease.POOLS,
                                message=MESSAGES.get(request.args.get("msg", ""))), (400 if error else 200)
 
     # ---- cars ----------------------------------------------------------------
@@ -744,6 +752,127 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 abort(404)
         return redirect(url_for("cars_page", msg="reading_deleted"), 303)
 
+    # ---- leases (roadmap L1) -------------------------------------------------------
+
+    def today_here():
+        return datetime.now(ZoneInfo(tz)).date()
+
+    def lease_context(car, **extra):
+        return dict(car=car, pools=lease.POOLS, frequencies={k: v[0] for k, v in lease.FREQUENCIES.items()},
+                    fbt_methods=lease.FBT_METHODS, tax_treatments=lease.TAX_TREATMENTS,
+                    message=MESSAGES.get(request.args.get("msg", "")), **extra)
+
+    def lease_view(conn, row, today):
+        """A lease with its budgets and the read-only figures worked out from them."""
+        budgets = db.lease_budgets(conn, row["id"])
+        return {**row, "budgets": {b["pool"]: b["yearly_amount"] for b in lease.initial_budgets(row, budgets)},
+                "later_budgets": [b for b in budgets if b["effective_from"] != row["start_date"]],
+                "figures": lease.derived(row, budgets, today)}
+
+    def render_lease(car, status=200):
+        today = today_here()
+        with connect() as conn:
+            current = db.current_lease(conn, car["id"], today)
+            views = [lease_view(conn, row, today) for row in db.car_leases(conn, car["id"])]
+        shown = next((v for v in views if current and v["id"] == current["id"]), None)
+        others = [v for v in views if v is not shown]
+        return render_template("lease.html", **lease_context(car, shown=shown, others=others, today=today)), status
+
+    def render_lease_form(car, lease_id, values, errors, status=200):
+        return render_template("lease_form.html", **lease_context(car, lease_id=lease_id, values=values, errors=errors)), status
+
+    def lease_form_values(row, budgets):
+        """A saved lease as the form's text fields."""
+        values = {k: ("" if v is None else v) for k, v in row.items()}
+        for pool, amount in budgets.items():
+            values[f"budget_{pool}"] = amount
+        return values
+
+    def parse_lease(car_id, lease_id=None):
+        values, errors = validation.parse_lease_form(request.form, lease.POOLS, lease.FREQUENCIES,
+                                                     lease.FBT_METHODS, lease.TAX_TREATMENTS)
+        if not errors:
+            with connect() as conn:
+                clash = db.overlapping_lease(conn, car_id, values["start_date"], values["end_date"], lease_id)
+            if clash:
+                errors["start_date"] = (f"These dates overlap the lease from {clash['start_date']:%d %b %Y} "
+                                        f"to {clash['end_date']:%d %b %Y}. A car has one current lease: "
+                                        "end that one first, or change these dates.")
+        return values, errors
+
+    @app.get("/cars/<int:car_id>/lease")
+    def car_lease(car_id):
+        return render_lease(car_or_404(car_id))
+
+    @app.get("/cars/<int:car_id>/lease/new")
+    def car_lease_new(car_id):
+        car = car_or_404(car_id)
+        return render_lease_form(car, None, {"fbt_method": "statutory", "statutory_percent": "20",
+                                             "tax_treatment": "employee_contribution", "start_date": today_here().isoformat()}, {})
+
+    @app.post("/cars/<int:car_id>/lease/new")
+    def car_lease_create(car_id):
+        car = car_or_404(car_id)
+        values, errors = parse_lease(car_id)
+        if errors:
+            return render_lease_form(car, None, request.form, errors, 400)
+        with connect() as conn:
+            lease_id = db.add_lease(conn, car_id, values)
+        if lease_id is None:      # another lease was added between the check and the save
+            return render_lease_form(car, None, request.form, {"start_date": "These dates overlap another lease of this car."}, 400)
+        log.info("lease %s added to car %s", lease_id, car_id)
+        return redirect(url_for("car_lease", car_id=car_id, msg="lease_added"), 303)
+
+    def lease_or_404(car_id, lease_id):
+        with connect() as conn:
+            row = db.get_lease(conn, lease_id, car_id)
+            budgets = db.lease_budgets(conn, lease_id) if row else []
+        if row is None:
+            abort(404)
+        return row, lease.initial_budgets(row, budgets)
+
+    @app.get("/cars/<int:car_id>/lease/<int:lease_id>/edit")
+    def car_lease_edit(car_id, lease_id):
+        car = car_or_404(car_id)
+        row, first = lease_or_404(car_id, lease_id)
+        values = lease_form_values(row, {b["pool"]: b["yearly_amount"] for b in first})
+        return render_lease_form(car, lease_id, values, {})
+
+    @app.post("/cars/<int:car_id>/lease/<int:lease_id>/edit")
+    def car_lease_update(car_id, lease_id):
+        car = car_or_404(car_id)
+        lease_or_404(car_id, lease_id)
+        values, errors = parse_lease(car_id, lease_id)
+        if errors:
+            return render_lease_form(car, lease_id, request.form, errors, 400)
+        with connect() as conn:
+            outcome = db.update_lease(conn, car_id, lease_id, values)
+        if outcome == "missing":
+            abort(404)
+        if outcome == "overlap":
+            return render_lease_form(car, lease_id, request.form, {"start_date": "These dates overlap another lease of this car."}, 400)
+        log.info("lease %s of car %s updated", lease_id, car_id)
+        return redirect(url_for("car_lease", car_id=car_id, msg="lease_saved"), 303)
+
+    @app.post("/cars/<int:car_id>/lease/<int:lease_id>/delete")
+    def car_lease_delete(car_id, lease_id):
+        car_or_404(car_id)
+        with connect() as conn:
+            if not db.delete_lease(conn, car_id, lease_id):
+                abort(404)
+        log.info("lease %s of car %s deleted", lease_id, car_id)
+        return redirect(url_for("car_lease", car_id=car_id, msg="lease_deleted"), 303)
+
+    @app.post("/categories/<int:category_id>/pool")
+    def category_pool(category_id):
+        pool = (request.form.get("budget_pool") or "").strip() or None
+        if pool is not None and pool not in lease.POOLS:
+            abort(400)
+        with connect() as conn:
+            if not db.set_budget_pool(conn, category_id, pool):
+                abort(404)
+        return redirect(url_for("categories", msg="category_pool"), 303)
+
     @app.get("/learned")
     def learned_page():
         with connect() as conn:
@@ -770,7 +899,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         except ValueError as exc:
             with connect() as conn:
                 cats = db.categories(conn)
-            return render_template("categories.html", categories=cats, error=None,
+            return render_template("categories.html", categories=cats, error=None, pools=lease.POOLS,
                                    folder_error=(category_id, str(exc)), message=None), 400
         with connect() as conn:
             if not db.set_upload_folder(conn, category_id, folder):

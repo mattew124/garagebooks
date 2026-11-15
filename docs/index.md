@@ -47,6 +47,9 @@ configured, or unavailable and why.
 
 <!-- screenshot: cars-page - The Cars page, with a TeslaMate car and a car added by hand -->
 
+A car paid for through a novated lease has a **Lease** link: the details from the provider's
+statement, its yearly budgets and a few checks on them. See [Leases](leases.md).
+
 ## Adding an expense
 
 Category, date, time, amount, odometer, vendor, notes and the invoice. The odometer can be filled in

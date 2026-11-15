@@ -365,3 +365,143 @@ def parse_expense_form(form, tz, valid_car_ids, valid_category_ids):
     except ValueError as exc:
         errors["date"] = str(exc)
     return values, errors
+
+
+# ---- a lease (roadmap L1) ----------------------------------------------------------
+
+MAX_LEASE_TEXT_LEN = 100
+
+
+def _non_negative_money(raw, label):
+    """Blank -> None. Otherwise dollars, never negative."""
+    if not (raw or "").strip():
+        return None
+    value = parse_amount(raw)
+    if value < 0:
+        raise ValueError(f"{label[0].upper() + label[1:]} can't be negative.")
+    return value
+
+
+def _percent(raw, label, places):
+    """Blank -> None. Otherwise 0 to 100, as typed ('20', '46.875%')."""
+    cleaned = (raw or "").replace("%", "").replace(",", "").strip()
+    if not cleaned:
+        return None
+    try:
+        value = Decimal(cleaned)
+    except InvalidOperation:
+        raise ValueError(f"{label} must be a number, e.g. 20.") from None
+    if not value.is_finite() or value < 0 or value > 100:
+        raise ValueError(f"{label} must be between 0 and 100.")
+    return value.quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP)
+
+
+def parse_lease_form(form, pools, frequencies, fbt_methods, tax_treatments):
+    """A lease as typed from the provider's statement. -> (values, errors); `values` holds the lease
+    columns plus `budgets` ({pool: yearly amount}, blanks left out). Whether it overlaps another lease
+    of the car is for the caller to check: it needs the database."""
+    values, errors = {}, {}
+
+    def attempt(field, fn, *args):
+        try:
+            values[field] = fn(*args)
+        except ValueError as exc:
+            errors[field] = str(exc)
+
+    def text(field, label, required=False):
+        raw = " ".join((form.get(field) or "").split())
+        if len(raw) > MAX_LEASE_TEXT_LEN:
+            errors[field] = f"{label} is too long (max {MAX_LEASE_TEXT_LEN} characters)."
+        elif required and not raw:
+            errors[field] = f"Enter {label[0].lower() + label[1:]}."
+        values[field] = raw or None
+
+    def choice(field, options, message, default=None):
+        raw = (form.get(field) or "").strip() or default
+        if raw is None or raw in options:
+            values[field] = raw
+        else:
+            errors[field] = message
+
+    def required_date(field, label):
+        attempt(field, parse_optional_date, form.get(field))
+        if values.get(field) is None and field not in errors:
+            errors[field] = f"Enter the {label}."
+
+    def money(field, label):
+        attempt(field, _non_negative_money, form.get(field), label)
+
+    text("package_name", "The package name")
+    text("financier", "The financier", required=True)
+    required_date("start_date", "start date")
+    required_date("end_date", "end date")
+    attempt("refinance_date", parse_optional_date, form.get("refinance_date"))
+    start, end, refi = values.get("start_date"), values.get("end_date"), values.get("refinance_date")
+    if start and end and end <= start:
+        errors["end_date"] = "The end date must be after the start date."
+    if refi and start and end and not (start <= refi <= end):
+        errors["refinance_date"] = "The refinance date must fall within the lease."
+
+    try:
+        term = int((form.get("term_months") or "").strip())
+        if not 1 <= term <= 120:
+            raise ValueError
+        values["term_months"] = term
+    except ValueError:
+        errors["term_months"] = "Enter the term in months, from 1 to 120."
+
+    choice("pay_frequency", frequencies, "Choose how often the lease is paid.")
+    if values.get("pay_frequency") is None and "pay_frequency" not in errors:
+        errors["pay_frequency"] = "Choose how often the lease is paid."
+    for field, label in (("pretax_payment", "the pre-tax payment"), ("posttax_payment", "the post-tax payment"),
+                         ("admin_fee", "the admin fee")):
+        money(field, label)
+        values[field] = values[field] if values.get(field) is not None else Decimal("0.00")
+    if not errors.keys() & {"pretax_payment", "posttax_payment"} \
+            and not (values["pretax_payment"] or values["posttax_payment"]):
+        errors["pretax_payment"] = "Enter the payment, pre-tax or post-tax."
+
+    money("car_cost", "the car's cost")
+    money("residual_amount", "the residual amount")
+    attempt("residual_percent", _percent, form.get("residual_percent"), "The residual percentage", 3)
+    cost, amount, percent = values.get("car_cost"), values.get("residual_amount"), values.get("residual_percent")
+    if cost is not None and amount is not None and amount > cost:
+        errors["residual_amount"] = "The residual can't be more than the car's cost."
+    elif cost and amount is not None and percent is not None and abs(cost * percent / 100 - amount) > Decimal("1.00"):
+        errors["residual_percent"] = "The residual amount and percentage don't match for this cost."
+
+    money("fbt_base_value", "the FBT base value")
+    choice("fbt_method", fbt_methods, "Choose the valuation method.", default="statutory")
+    attempt("statutory_percent", _percent, form.get("statutory_percent"), "The statutory percentage", 2)
+    if values.get("statutory_percent") is None and "statutory_percent" not in errors:
+        values["statutory_percent"] = Decimal("20.00")
+    values["ev_exempt"] = form.get("ev_exempt") == "on"
+    choice("tax_treatment", tax_treatments, "Choose the tax treatment.")
+    text("tax_treatment_note", "The note")
+    if values.get("tax_treatment") != "other":
+        values["tax_treatment_note"] = None
+
+    km_raw = (form.get("estimated_km_per_year") or "").replace(",", "").replace("km", "").strip()
+    values["estimated_km_per_year"] = None
+    if km_raw:
+        try:
+            km = int(km_raw)
+            if not 0 <= km <= 1_000_000:
+                raise ValueError
+            values["estimated_km_per_year"] = km
+        except ValueError:
+            errors["estimated_km_per_year"] = "Enter the estimated km per year as a whole number."
+    attempt("rego_expiry", parse_optional_date, form.get("rego_expiry"))
+    values["rego_renewed_by_provider"] = form.get("rego_renewed_by_provider") == "on"
+
+    budgets = {}
+    for pool in pools:
+        try:
+            amount_ = _non_negative_money(form.get(f"budget_{pool}"), "the yearly budget")
+        except ValueError as exc:
+            errors[f"budget_{pool}"] = str(exc)
+            continue
+        if amount_ is not None:
+            budgets[pool] = amount_
+    values["budgets"] = budgets
+    return values, errors

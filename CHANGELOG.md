@@ -34,6 +34,16 @@ and keeps your existing role when you set `GARAGEBOOKS_DB_USER` (or the old `EXP
   `charging_processes(car_id, start_date, cost)`. A grant you added yourself on the
   `garagebooks.ownership` view needs granting again: the view is rebuilt once. The dashboard's car
   list is now in id order.
+- **Lease details per car.** Each car on the **Cars** page has a **Lease** link: the novated lease
+  behind it, entered from the provider's statement (financier, dates, term, payments split pre-tax and
+  post-tax, residual, FBT details, the provider's estimated km, registration, and a yearly budget for
+  each running cost), with add, edit and delete, and past leases kept. The page shows figures worked
+  out from what you entered (total per pay, yearly payments, budgets against payments, the residual
+  against the ATO's minimum, days remaining) so a typing mistake stands out. Each category can be
+  given the budget pool it is paid from, on the **Categories** page. It records the statement and is
+  not tax advice; no personal details are stored. See [Leases](docs/leases.md). The app adds the new
+  `garagebooks.lease` and `garagebooks.lease_budget` tables and `category.budget_pool` on start; with
+  the restricted database role, re-run `scripts/provision-db.sh` first.
 - **Schema:** `expenses` is now `garagebooks`. Grafana panels or queries of your own that name
   `expenses.` need the new name.
 - **Dashboard address:** the uid is now `garagebooks-tco` (was `tm-expenses-tco`), so its address is

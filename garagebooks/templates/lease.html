@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}Lease · {{ car.name }}{% endblock %}
+{% block main_attrs %} class="narrow"{% endblock %}
+{% macro dash(x) %}{{ x if x not in (none, '') else '—' }}{% endmacro %}
+{% macro money_or_dash(x) %}{{ x|money if x is not none else '—' }}{% endmacro %}
+{% macro pct(x) %}{{ x|percent }}{% endmacro %}
+{% macro lease_card(l, heading) %}
+<section class="card stack lease" id="lease-{{ l.id }}" aria-labelledby="lease-title-{{ l.id }}">
+  <h2 id="lease-title-{{ l.id }}">{{ heading }}</h2>
+  {% set f = l.figures %}
+  <p class="lease-status" data-status="{{ f.status }}">
+    {% if f.status == 'upcoming' %}Starts in {{ f.days_to_start }} day{{ '' if f.days_to_start == 1 else 's' }}
+    {% elif f.status == 'current' %}<strong>{{ f.days_remaining }}</strong> day{{ '' if f.days_remaining == 1 else 's' }} remaining
+    {% else %}Ended {{ -f.days_remaining }} day{{ '' if f.days_remaining == -1 else 's' }} ago{% endif %}
+    · {{ l.start_date.strftime('%d %b %Y') }} to {{ l.end_date.strftime('%d %b %Y') }}</p>
+
+  <h3>Finance</h3>
+  <dl class="facts">
+    <div><dt>Financier</dt><dd>{{ l.financier }}</dd></div>
+    {% if l.package_name %}<div><dt>Package</dt><dd>{{ l.package_name }}</dd></div>{% endif %}
+    <div><dt>Start</dt><dd>{{ l.start_date.strftime('%d %b %Y') }}</dd></div>
+    <div><dt>End</dt><dd>{{ l.end_date.strftime('%d %b %Y') }}</dd></div>
+    <div><dt>Refinanced</dt><dd>{{ l.refinance_date.strftime('%d %b %Y') if l.refinance_date else '—' }}</dd></div>
+    <div><dt>Term</dt><dd>{{ l.term_months }} months</dd></div>
+    <div><dt>Car's cost</dt><dd>{{ money_or_dash(l.car_cost) }}</dd></div>
+    <div><dt>Residual</dt><dd class="residual">{{ money_or_dash(f.residual_amount) }} <small>({{ pct(f.residual_percent) }} of cost)</small></dd></div>
+  </dl>
+  {% if f.minimum_residual_percent is not none %}
+  <p class="{{ 'error' if f.residual_below_minimum else '' }}" id="residual-check-{{ l.id }}"><small>ATO minimum residual for {{ l.term_months // 12 }} year{{ '' if l.term_months == 12 else 's' }}:
+    {{ pct(f.minimum_residual_percent) }}.
+    {% if f.residual_percent is none %}Enter the car's cost and residual to compare.
+    {% elif f.residual_below_minimum %}The residual entered is below it: check the statement.
+    {% else %}The residual entered meets it.{% endif %}</small></p>
+  {% endif %}
+
+  <h3>Payments</h3>
+  <dl class="facts">
+    <div><dt>Paid</dt><dd>{{ frequencies[l.pay_frequency] }}</dd></div>
+    <div><dt>Pre-tax</dt><dd>{{ l.pretax_payment|money }}</dd></div>
+    <div><dt>Post-tax</dt><dd>{{ l.posttax_payment|money }}</dd></div>
+    <div><dt>Provider's admin fee</dt><dd>{{ l.admin_fee|money }}</dd></div>
+    <div><dt>Total per pay</dt><dd class="derived">{{ f.total_per_pay|money }}</dd></div>
+    <div><dt>Pays per year</dt><dd class="derived">{{ f.pays_per_year }}</dd></div>
+    <div><dt>Yearly payments</dt><dd class="derived">{{ f.yearly_payments|money }}</dd></div>
+  </dl>
+
+  <h3>Fringe benefits tax</h3>
+  <dl class="facts">
+    <div><dt>FBT base value</dt><dd>{{ money_or_dash(l.fbt_base_value) }}</dd></div>
+    <div><dt>Valuation method</dt><dd>{{ fbt_methods[l.fbt_method] }}</dd></div>
+    <div><dt>Statutory percentage</dt><dd>{{ pct(l.statutory_percent) }}</dd></div>
+    <div><dt>Exempt electric car</dt><dd>{{ 'Yes' if l.ev_exempt else 'No' }}</dd></div>
+    <div><dt>Tax treatment</dt><dd>{% if l.tax_treatment == 'other' %}{{ l.tax_treatment_note or 'Other' }}{% elif l.tax_treatment %}{{ tax_treatments[l.tax_treatment] }}{% else %}—{% endif %}</dd></div>
+    <div><dt>Estimated km per year</dt><dd>{{ (l.estimated_km_per_year|km) if l.estimated_km_per_year is not none else '—' }}</dd></div>
+  </dl>
+
+  <h3>Yearly budgets</h3>
+  {% if l.budgets %}
+  <dl class="facts">
+    {% for key, label in pools.items() %}{% if key in l.budgets %}
+    <div><dt>{{ label }}</dt><dd>{{ l.budgets[key]|money }}</dd></div>
+    {% endif %}{% endfor %}
+    <div><dt>Total of budgets</dt><dd class="derived">{{ f.budget_total|money }}</dd></div>
+  </dl>
+  <p class="budget-check" id="budget-check-{{ l.id }}"><small>The pre-tax and post-tax payments come to {{ f.yearly_before_admin|money }} a year, before the admin fee.
+    {% if f.budget_gap == 0 %}The budgets add up to exactly that.
+    {% else %}The budgets differ from that by {{ (f.budget_gap|abs)|money }} ({{ 'more' if f.budget_gap > 0 else 'less' }}): check them against the statement.{% endif %}</small></p>
+  {% else %}<p class="empty">No budgets entered.</p>{% endif %}
+  {% if l.later_budgets %}<p><small>Later budget changes: {{ l.later_budgets|length }}.</small></p>{% endif %}
+
+  <h3>Registration</h3>
+  <dl class="facts">
+    <div><dt>Registration expires</dt><dd>{{ l.rego_expiry.strftime('%d %b %Y') if l.rego_expiry else '—' }}</dd></div>
+    <div><dt>Provider renews it</dt><dd>{{ 'Yes' if l.rego_renewed_by_provider else 'No' }}</dd></div>
+  </dl>
+
+  <div class="row actions">
+    <a class="button secondary-link" href="{{ url_for('car_lease_edit', car_id=car.id, lease_id=l.id) }}">Edit</a>
+    <form method="post" action="{{ url_for('car_lease_delete', car_id=car.id, lease_id=l.id) }}"
+          data-confirm="Delete this lease and its budgets?">
+      <button type="submit" class="secondary danger">Delete</button>
+    </form>
+  </div>
+</section>
+{% endmacro %}
+{% block content %}
+<h1>Lease: {{ car.name }}</h1>
+<p><a href="{{ url_for('cars_page') }}">← Cars</a></p>
+{% if shown %}
+{{ lease_card(shown, 'Current lease' if shown.figures.status == 'current' else 'Next lease') }}
+{% else %}
+<p class="empty" id="no-lease">No lease recorded for this car.</p>
+{% endif %}
+{% if others %}
+<h2>{{ 'Other leases' if shown else 'Leases' }}</h2>
+{% for l in others %}
+{{ lease_card(l, (l.package_name or l.financier) ~ ' · ' ~ l.start_date.strftime('%b %Y') ~ ' to ' ~ l.end_date.strftime('%b %Y')) }}
+{% endfor %}
+{% endif %}
+<p><a class="button" href="{{ url_for('car_lease_new', car_id=car.id) }}">Add a lease</a></p>
+<p><small>This records what the provider's statement says. It is not tax advice. The bold totals are
+  worked out from what you entered, shown so a typing mistake is easy to spot. No personal
+  details are stored.</small></p>
+{% endblock %}
