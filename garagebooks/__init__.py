@@ -250,6 +250,18 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                                text="Invoice PDF is too large (max 20 MB). Go back and choose a smaller file."), 413
 
     @app.before_request
+    def refuse_nul_bytes():
+        """Postgres text can't hold a NUL (and the file system won't take one in a path), so one in any
+        field or query value is refused here with a 400, rather than failing later as a server error."""
+        for source in (request.args, request.form):
+            if any("\x00" in key or "\x00" in value for key, value in source.items(multi=True)):
+                text = "That request contains a character the app can't store. Go back and remove it."
+                if request.path.startswith("/api/"):
+                    return jsonify(error=text), 400
+                return render_template("error.html", title="Invalid request", text=text), 400
+        return None
+
+    @app.before_request
     def same_origin_posts():
         """CSRF guard: a state-changing request must come from this site's own
         pages. Behind a forward-auth gate the browser's cookies are sent

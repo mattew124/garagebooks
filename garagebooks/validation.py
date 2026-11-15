@@ -36,7 +36,7 @@ def parse_amount(raw):
     if not value.is_finite():
         raise ValueError("Amount must be a number, e.g. 1234.56.")
     # Negative amounts are rebates and refunds: they reduce the total.
-    if abs(value) > MAX_AMOUNT:  # before quantize(), which overflows on huge exponents
+    if value.copy_abs() > MAX_AMOUNT:  # before quantize(), which overflows on huge exponents; abs() overflows too
         raise ValueError("Amount is too large.")
     value = value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     if abs(value) > MAX_AMOUNT:

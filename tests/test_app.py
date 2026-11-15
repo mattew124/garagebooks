@@ -70,6 +70,17 @@ def test_invoice_link_is_rendered_safely(client, admin):
     assert 'href="https://1drv.ms/b/abc" target="_blank" rel="noopener noreferrer"' in html
 
 
+@pytest.mark.parametrize("path,kind", [("/new", "form"), ("/categories", "form"), ("/settings", "form"),
+                                       ("/learned/vendor/delete", "form"), ("/api/duplicates", "query"), ("/", "query")])
+def test_a_nul_character_is_a_400_not_a_server_error(client, admin, path, kind):
+    """Postgres text can't hold NUL: found by test_properties_routes.py, where it was a 500."""
+    bad = form(admin, vendor="Tyre\x00Shop", name="a\x00b", app_url="http://x\x00", category="1\x002")
+    resp = (client.post(path, data=bad, headers=ORIGIN) if kind == "form"
+            else client.get(path, query_string=bad))
+    assert resp.status_code == 400 and b"can" in resp.data
+    assert rows(admin) == []
+
+
 def test_javascript_link_is_refused(client, admin):
     resp = client.post("/new", data=form(admin, invoice_url="javascript:alert(1)"), headers=ORIGIN)
     assert resp.status_code == 400 and b"https://" in resp.data

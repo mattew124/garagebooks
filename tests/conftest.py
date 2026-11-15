@@ -18,11 +18,19 @@ from pathlib import Path
 
 import psycopg
 import pytest
+from hypothesis import settings
 from psycopg.rows import dict_row
 
 from garagebooks import compat
 
-ROOT = Path(__file__).resolve().parent.parent
+# Property-based tests (tests/test_properties*.py). `default` keeps a local run quick; CI sets
+# HYPOTHESIS_PROFILE=ci for more examples. deadline=None everywhere: some properties go through
+# the throwaway Postgres, and a slow example is not a failing one.
+settings.register_profile("default", max_examples=50, deadline=None)
+settings.register_profile("ci", max_examples=200, deadline=None, print_blob=True)
+settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE", "default"))
+
+ROOT =Path(__file__).resolve().parent.parent
 IMAGE = os.environ.get("TEST_PG_IMAGE", "postgres:18-trixie")
 
 TESLAMATE_IMAGE = os.environ.get("TEST_TESLAMATE_IMAGE") or f"teslamate/teslamate:{compat.TESTED_TESLAMATE}"
