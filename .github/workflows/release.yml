@@ -16,6 +16,8 @@ jobs:
   image:
     needs: test
     runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
     permissions:
       contents: read
       packages: write
@@ -79,16 +81,37 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   # The release notes the app links to: the tag's changelog entry, then the merged pull requests in groups. A tag with a hyphen (v0.3.0-rc1) is marked a pre-release, which
-  # GitHub keeps out of "latest". Runs only once the image is published.
+  # GitHub keeps out of "latest". Runs only once the image is published, and attaches the image's
+  # software bill of materials (SPDX, one per platform) to the release.
   notes:
     needs: image
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      packages: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # Trivy, the scanner the release already uses, lists what is in the published image (by digest, so
+      # it is what was pushed) as SPDX JSON. The same pinned version as the vulnerability scan above.
+      - name: Software bill of materials (Trivy, SPDX)
+        env:
+          IMAGE: ghcr.io/${{ github.repository }}@${{ needs.image.outputs.digest }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          mkdir "$RUNNER_TEMP/sbom"
+          for arch in amd64 arm64; do
+            docker run --rm -v "$HOME/.docker/config.json:/root/.docker/config.json:ro" \
+              -v "$RUNNER_TEMP/sbom:/out" ghcr.io/aquasecurity/trivy:0.76.2 image --quiet \
+              --platform "linux/$arch" --format spdx-json --output "/out/garagebooks-$TAG-$arch.spdx.json" "$IMAGE"
+          done
+          ls -l "$RUNNER_TEMP/sbom"
       - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -100,4 +123,4 @@ jobs:
           # installer must do); GitHub then appends the merged pull requests in groups (.github/release.yml).
           scripts/changelog-entry.sh "$TAG" > "$RUNNER_TEMP/notes.md"
           gh release create "$TAG" --verify-tag --notes-file "$RUNNER_TEMP/notes.md" --generate-notes \
-            --title "$TAG" "$flag"
+            --title "$TAG" "$flag" "$RUNNER_TEMP"/sbom/*.spdx.json
