@@ -20,6 +20,10 @@ drops the old dashboard and its folder by itself. If you use the
 restricted database role (`SKIP_MIGRATE=1`), re-run `scripts/provision-db.sh` first: it does the same,
 and keeps your existing role when you set `GARAGEBOOKS_DB_USER` (or the old `EXPENSES_DB_USER`) to it.
 
+- **Backup and restore:** a new guide ([Backup and restore](https://mattew124.github.io/garagebooks/backup/)) and
+  `scripts/backup.sh`, which dumps and restores only the `garagebooks` schema, and checks whether an existing
+  TeslaMate backup includes it. It never writes to the database except for `restore`, which refuses to replace a
+  schema that has tables unless you add `--replace`. Nothing to do to upgrade.
 - **Schema:** `expenses` is now `garagebooks`. Grafana panels or queries of your own that name
   `expenses.` need the new name.
 - **Dashboard address:** the uid is now `garagebooks-tco` (was `tm-expenses-tco`), so its address is

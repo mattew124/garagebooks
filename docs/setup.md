@@ -15,7 +15,8 @@
     on this server instead, see [Invoice folder on the server](local-folder.md).
 
 2. **Back up TeslaMate's database.** The first start adds the `garagebooks` schema to it and changes
-    nothing else, but take a backup first, as for any upgrade that touches the database.
+    nothing else, but take a backup first, as for any upgrade that touches the database. What to back up, and how
+    to check that your backup includes the app's schema, is in [Backup and restore](backup.md).
 
 3. **Run it.** Set `GARAGEBOOKS_IMAGE` to a released image, or leave it unset to build locally. Follow
     a release channel with `:rc` or `:latest`, or pin one version (see [RELEASING.md](https://github.com/mattew124/garagebooks/blob/main/RELEASING.md)).

@@ -200,3 +200,14 @@ def test_unknown_commands_print_usage(pg, blank_db, tmp_path):
 
 def test_the_script_does_not_read_the_encryption_key():
     assert "ENCRYPTION_KEY" not in SCRIPT.read_text()
+
+
+def test_rows_that_look_like_sql_do_not_confuse_the_checks(pg, blank_db, second_db, tmp_path):
+    install(blank_db, vendor="CREATE TABLE public.x")
+    with psycopg.connect(blank_db, autocommit=True) as conn:
+        conn.execute("UPDATE garagebooks.category SET name = E'\\\\evil' WHERE name = 'Tyres'")
+    out = tmp_path / "backup.sql"
+    assert run(pg, "dump", str(out), db=db_name(blank_db), cwd=tmp_path).returncode == 0
+    result = run(pg, "restore", str(out), db=db_name(second_db), cwd=tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert expenses(second_db) == [("CREATE TABLE public.x", Decimal("321.50"))]

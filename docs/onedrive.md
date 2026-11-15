@@ -16,7 +16,7 @@ account (OneDrive Personal). To keep the PDFs on your own server instead, see
 
     The key encrypts the client secret and the saved sign-in (a refresh token for your whole
     OneDrive) before they go into the database, so a database dump or backup on its own can't
-    open the drive. Keep the key out of those backups. If you lose or change it, enter the
+    open the drive. Keep the key out of those backups (see [Backup and restore](backup.md)). If you lose or change it, enter the
     secret and connect again. Up to 0.4.0-rc1 the key was called `EXPENSES_ENCRYPTION_KEY`; that
     name still works.
 
