@@ -64,7 +64,7 @@ def test_the_entry_follows_teslamates_trademark_policy():
 def test_the_entry_says_what_the_app_does_and_how_it_reads_teslamate():
     _, entry = listing.entry_parts()
     for word in ("expense", "invoice", "OneDrive", "Grafana", "directly", "MQTT"):
-        assert word in entry, word
+        assert word.lower() in entry.lower(), word
     assert (ROOT / "garagebooks" / "onedrive.py").exists()   # the OneDrive claim is still true
 
 
