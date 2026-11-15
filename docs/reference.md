@@ -48,6 +48,28 @@ Each release is tested against one TeslaMate release (named in the README and in
 
 `docker logs` shows gunicorn's request lines plus the app's own events. `LOG_LEVEL` (`debug`, `info` the default, `warning`, `error`; set in `.env`, restart to change) sets both. `info` records startup, the update check's result, schema changes, expenses saved, updated or deleted, OneDrive sign-in and upload results, and anything the invoice folder on the server refuses (a missing folder, no permission). `debug` adds detail such as retries. Tokens, secrets, vendors, notes and amounts are never logged, except that file names, which can contain a vendor, appear at `debug`.
 
+## Change history
+
+A trigger in the `garagebooks` schema writes a row to `garagebooks.change_log` for every insert, update
+and delete of an expense or a category, with the time, the whole row before and after (as JSON) and who
+made the change. Because it is in the database, changes made by other tools straight in the database
+are recorded too. An update that changes nothing (saving a form untouched) is not recorded. The log is
+append-only: a second trigger refuses any update, delete or truncate of it, and the restricted database
+role from `scripts/provision-db.sh` is granted only `SELECT` and `INSERT` on it. Nothing is recorded for
+changes made before this version first started. The **History** page shows 50 entries at a time, in
+`APP_TZ`.
+
+The log holds the same vendors, notes and amounts as the expenses, so a database backup holds them too.
+Deleting an expense does not remove its history.
+
+**Who** comes from `AUTH_USER_HEADER`, the name of the request header your forward-auth gate sets to the
+signed-in user (`X-authentik-email` for Authentik, `Cf-Access-Authenticated-User-Email` for Cloudflare
+Access). Set it in `.env` and restart. It is unset by default, and then every change shows as *unknown*.
+Set it **only** when the proxy removes that header from requests it receives from clients and
+sets it itself, as the gates above do: otherwise anyone who can reach the app can put any name in the
+log. The value is trimmed to 200 characters, with control characters dropped. Changes made outside the
+app have no name either way.
+
 ## Timezone
 
 Date and time are entered in `APP_TZ` and stored as `timestamptz`. TeslaMate's `positions.date` is naive UTC; the odometer lookup converts before comparing.
