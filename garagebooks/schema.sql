@@ -225,3 +225,56 @@ LEFT JOIN LATERAL (
 -- Rebates and refunds are negative amounts. Databases made before that allowed them still carry
 -- the old CHECK (amount >= 0); drop it (a no-op once gone).
 ALTER TABLE garagebooks.expense DROP CONSTRAINT IF EXISTS expense_amount_check;
+
+-- Change history: an append-only log of every add, edit and delete of an expense or a category,
+-- written by triggers, so changes made by other tools straight in the database are caught too.
+--   actor      who, from the identity header the sign-in gate sets (AUTH_USER_HEADER); NULL = unknown
+--   row_id     the changed row's id; before_row / after_row are the whole row as jsonb
+-- Only the history before this release is missing: nothing is invented for it.
+CREATE TABLE IF NOT EXISTS garagebooks.change_log (
+    id         bigserial PRIMARY KEY,
+    changed_at timestamptz NOT NULL DEFAULT now(),
+    actor      text,
+    table_name text NOT NULL CHECK (table_name IN ('expense', 'category')),
+    row_id     bigint NOT NULL,
+    operation  text NOT NULL CHECK (operation IN ('insert', 'update', 'delete')),
+    before_row jsonb,
+    after_row  jsonb
+);
+CREATE INDEX IF NOT EXISTS change_log_time_idx ON garagebooks.change_log (changed_at DESC, id DESC);
+
+CREATE OR REPLACE FUNCTION garagebooks.log_change() RETURNS trigger LANGUAGE plpgsql AS $fn$
+DECLARE
+    old_row jsonb := CASE WHEN TG_OP = 'INSERT' THEN NULL ELSE to_jsonb(OLD) END;
+    new_row jsonb := CASE WHEN TG_OP = 'DELETE' THEN NULL ELSE to_jsonb(NEW) END;
+BEGIN
+    -- The app stamps updated_at on every save: an edit that changes nothing else is not a change.
+    IF TG_OP = 'UPDATE' AND (old_row - 'updated_at') = (new_row - 'updated_at') THEN
+        RETURN NULL;
+    END IF;
+    INSERT INTO garagebooks.change_log (actor, table_name, row_id, operation, before_row, after_row)
+    VALUES (NULLIF(left(btrim(current_setting('garagebooks.actor', true)), 200), ''), TG_TABLE_NAME,
+            (COALESCE(new_row, old_row) ->> 'id')::bigint, lower(TG_OP), old_row, new_row);
+    RETURN NULL;
+END
+$fn$;
+
+DROP TRIGGER IF EXISTS log_change ON garagebooks.expense;
+CREATE TRIGGER log_change AFTER INSERT OR UPDATE OR DELETE ON garagebooks.expense
+    FOR EACH ROW EXECUTE FUNCTION garagebooks.log_change();
+DROP TRIGGER IF EXISTS log_change ON garagebooks.category;
+CREATE TRIGGER log_change AFTER INSERT OR UPDATE OR DELETE ON garagebooks.category
+    FOR EACH ROW EXECUTE FUNCTION garagebooks.log_change();
+
+CREATE OR REPLACE FUNCTION garagebooks.change_log_append_only() RETURNS trigger LANGUAGE plpgsql AS $fn$
+BEGIN
+    RAISE EXCEPTION 'garagebooks.change_log is append-only';
+END
+$fn$;
+
+DROP TRIGGER IF EXISTS append_only ON garagebooks.change_log;
+CREATE TRIGGER append_only BEFORE UPDATE OR DELETE ON garagebooks.change_log
+    FOR EACH ROW EXECUTE FUNCTION garagebooks.change_log_append_only();
+DROP TRIGGER IF EXISTS append_only_truncate ON garagebooks.change_log;
+CREATE TRIGGER append_only_truncate BEFORE TRUNCATE ON garagebooks.change_log
+    FOR EACH STATEMENT EXECUTE FUNCTION garagebooks.change_log_append_only();

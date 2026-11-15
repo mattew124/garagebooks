@@ -17,3 +17,5 @@ GRANT SELECT ON public.cars TO :"app_role";
 -- The newest migration says which TeslaMate this is; the app refuses to run on an untested one.
 GRANT SELECT ON public.schema_migrations TO :"app_role";
 GRANT SELECT (car_id, date, odometer) ON public.positions TO :"app_role";
+-- The change history: the app adds to it (through the triggers) and reads it, never rewrites it.
+GRANT SELECT, INSERT ON garagebooks.change_log TO :"app_role";

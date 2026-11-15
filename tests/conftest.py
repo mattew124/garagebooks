@@ -107,6 +107,10 @@ def admin(pg):
                      " garagebooks.learned_label, garagebooks.learned_vendor, garagebooks.import_skip,"
                      " positions, charging_processes RESTART IDENTITY CASCADE")   # CASCADE: real TeslaMate tables (drives...) reference them
         conn.execute("DELETE FROM garagebooks.category WHERE sort_order = 100")
+        # The history is append-only, even for us: lift the guard just to start each test empty.
+        conn.execute("ALTER TABLE garagebooks.change_log DISABLE TRIGGER USER;"
+                     " TRUNCATE garagebooks.change_log RESTART IDENTITY;"
+                     " ALTER TABLE garagebooks.change_log ENABLE TRIGGER USER")
         conn.execute("UPDATE garagebooks.setting SET invoice_date_format = NULL, invoice_name_format = NULL, multi_amount = NULL")
         yield conn
 
