@@ -381,3 +381,34 @@ def save_onedrive_account(conn, **fields):
         f"ON CONFLICT (id) DO UPDATE SET {sets}, updated_at = now()",
         fields)
 
+
+
+# ---- change history ------------------------------------------------------------
+
+HISTORY_PAGE = 50
+HISTORY_TABLES = ("expense", "category")
+HISTORY_OPERATIONS = ("insert", "update", "delete")
+
+
+def history(conn, car_id=None, table=None, operation=None, page=1):
+    """One page of the change log, newest first, filtered. -> (entries, page, pages). A car filter
+    means that car's expenses (a category belongs to no car). The page is clamped to the last one."""
+    where, params = [], {}
+    if car_id:
+        where.append("table_name = 'expense' AND COALESCE(after_row, before_row) ->> 'car_id' = %(car)s")
+        params["car"] = str(car_id)
+    if table in HISTORY_TABLES:
+        where.append("table_name = %(table)s")
+        params["table"] = table
+    if operation in HISTORY_OPERATIONS:
+        where.append("operation = %(operation)s")
+        params["operation"] = operation
+    clause = ("WHERE " + " AND ".join(where)) if where else ""
+    total = conn.execute(f"SELECT count(*) AS n FROM garagebooks.change_log {clause}", params).fetchone()["n"]
+    pages = max(1, -(-total // HISTORY_PAGE))
+    page = min(max(page, 1), pages)
+    entries = conn.execute(
+        f"SELECT id, changed_at, actor, table_name, row_id, operation, before_row, after_row "
+        f"FROM garagebooks.change_log {clause} ORDER BY changed_at DESC, id DESC LIMIT %(limit)s OFFSET %(offset)s",
+        {**params, "limit": HISTORY_PAGE, "offset": (page - 1) * HISTORY_PAGE}).fetchall()
+    return entries, page, pages

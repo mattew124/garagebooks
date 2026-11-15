@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}History{% endblock %}
+{% block main_attrs %} class="narrow"{% endblock %}
+{% block content %}
+<h1>Change history</h1>
+<p><small>Every add, edit and delete of an expense or category, newest first, including changes made outside this app. It is
+  read-only: to undo a change, enter the old values again.</small></p>
+<form class="filter card" method="get">
+  <label><span class="label">Car</span>
+    <select name="car" data-autosubmit>
+      <option value="">All cars</option>
+      {% for c in cars %}<option value="{{ c.id }}" {{ 'selected' if c.id == filters.get('car') }}>{{ c.name }}</option>{% endfor %}
+    </select>
+  </label>
+  <label><span class="label">What</span>
+    <select name="table" data-autosubmit>
+      <option value="">Everything</option>
+      <option value="expense" {{ 'selected' if filters.get('table') == 'expense' }}>Expenses</option>
+      <option value="category" {{ 'selected' if filters.get('table') == 'category' }}>Categories</option>
+    </select>
+  </label>
+  <label><span class="label">Change</span>
+    <select name="operation" data-autosubmit>
+      <option value="">All changes</option>
+      <option value="insert" {{ 'selected' if filters.get('operation') == 'insert' }}>Added</option>
+      <option value="update" {{ 'selected' if filters.get('operation') == 'update' }}>Edited</option>
+      <option value="delete" {{ 'selected' if filters.get('operation') == 'delete' }}>Deleted</option>
+    </select>
+  </label>
+  <noscript><button>Apply</button></noscript>
+</form>
+{% if entries %}
+<ol class="plain history">
+  {% for e in entries %}
+  <li class="change card">
+    <div class="change-head">
+      <span class="op op-{{ e.operation }}">{{ e.label }}</span>
+      <strong>{{ e.title }}</strong>
+    </div>
+    <p class="change-meta"><small>{{ e.when|when }} · {{ e.actor or 'unknown' }} · {{ e.table }} #{{ e.row_id }}</small></p>
+    {% if e.fields %}
+    <dl class="change-fields">
+      {% for label, old, new in e.fields %}
+      <dt>{{ label }}</dt>
+      <dd>{% if old is not none %}<span class="was">{{ old }}</span> → {% endif %}<span class="now">{{ new }}</span></dd>
+      {% endfor %}
+    </dl>
+    {% endif %}
+  </li>
+  {% endfor %}
+</ol>
+{% if pages > 1 %}
+<div class="pager" role="navigation" aria-label="Pages">
+  {% if page > 1 %}<a href="{{ page_link(page - 1) }}">← Newer</a>{% endif %}
+  <span>Page {{ page }} of {{ pages }}</span>
+  {% if page < pages %}<a href="{{ page_link(page + 1) }}">Older →</a>{% endif %}
+</div>
+{% endif %}
+{% else %}
+<p class="card">No changes recorded{% if filters %} for this filter{% endif %}. Changes are recorded from the moment
+  this version first started.</p>
+{% endif %}
+{% endblock %}

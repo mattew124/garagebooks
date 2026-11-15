@@ -400,6 +400,41 @@ def remove_marked(page):
         page.wait_for_url(re.compile(r"msg=deleted"))
 
 
+def test_history_page(page):
+    """Add, edit and delete an expense, then see all three on the History page, newest first, with
+    the edit shown as old -> new. (The log is append-only: these test entries stay in the dev stack.)"""
+    add_expense(page)
+    page.locator(f"tr:has-text('{MARKER}') a:has-text('Edit')").first.click()
+    page.fill("input[name=amount]", "200")
+    page.click("button[type=submit].button")
+    page.wait_for_url(re.compile(r"msg=updated"))
+    remove_marked(page)
+    page.click("header nav a:has-text('History')")
+    expect(page.locator("h1")).to_have_text("Change history")
+    first = page.locator("li.change").first
+    expect(first).to_contain_text("Deleted")
+    expect(first).to_contain_text(MARKER)
+    mine = page.locator(f"li.change:has-text('{MARKER}')")
+    expect(mine.nth(1)).to_contain_text("$123.45 \u2192 $200.00")
+    expect(mine.nth(2)).to_contain_text("Added")
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "sideways scroll"
+    shot(page, "history-phone")
+    page.select_option("select[name=operation]", "delete")
+    page.wait_for_url(re.compile(r"operation=delete"))
+    expect(page.locator("li.change:has-text('Edited')")).to_have_count(0)
+
+
+def test_history_desktop(page):
+    """The History page at desktop width, light and dark, for looking at (entries come from the step before)."""
+    for scheme in ("light", "dark"):
+        page.emulate_media(color_scheme=scheme)
+        page.goto(UI + "history")
+        expect(page.locator("li.change").first).to_be_visible()
+        assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+        shot(page, f"history-desktop-{scheme}")
+    page.emulate_media(color_scheme="light")
+
+
 def test_form(page):
     page.goto(UI + "new")
     shot(page, "form-phone")
@@ -835,6 +870,7 @@ def main():
         step("no sideways scroll on a phone", test_phone_layout_has_no_sideways_scroll, page)
         step("header stays tidy on a phone", test_header_stays_tidy_on_a_phone, page)
         step("phone list shows amount, invoice and edit", test_list_shows_key_fields_on_a_phone, page)
+        step("history page lists an add, an edit and a delete", test_history_page, page)
         step("a likely duplicate is asked about, then saved anyway", test_duplicate_is_asked_about_before_saving, page)
         step("the duplicate warning can be dismissed", test_duplicate_warning_can_be_dismissed, page)
         step("a PDF over 500 KB uploads (read-only container)", test_large_pdf_is_accepted, page)
@@ -858,6 +894,7 @@ def main():
         desktop = browser.new_context(viewport={"width": 1280, "height": 900}, device_scale_factor=2)
         dash_page = desktop.new_page()
         step("dashboard renders with data and invoice links", test_dashboard, dash_page)
+        step("history page at desktop width, light and dark", test_history_desktop, desktop.new_page())
         step("header is one row on a desktop", test_header_on_a_desktop, desktop.new_page())
         step("desktop list and form, light and dark", test_desktop_look, desktop.new_page())
         step("column widths can be dragged, are remembered, and reset", test_column_widths_can_be_dragged, desktop.new_page())
