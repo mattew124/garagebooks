@@ -598,6 +598,79 @@ def test_amount_calculator(page):
     remove_marked(page)
 
 
+def fill_part(page, n, face, mode="paid", value=""):
+    """Fill row n (from 0) of the payment calculator, adding rows as needed."""
+    rows = page.locator("#pay-calc .pay-row")
+    while rows.count() <= n:
+        page.click("#pay-add")
+    row = rows.nth(n)
+    row.locator("[data-part=face]").fill(face)
+    row.locator("[data-part=mode]").select_option(mode)
+    if mode != "cash":
+        row.locator("[data-part=value]").fill(value)
+
+
+def test_payment_calculator(page):
+    page.goto(UI + "new")
+    calc = page.locator("#pay-calc")
+    expect(calc.locator(".pay-row").first).to_be_hidden()          # closed until asked for
+    calc.locator("summary").click()
+    expect(page.locator("#pay-use")).to_be_disabled()               # nothing to use yet
+    # A $100 gift card bought for $95 (5% off) plus $42.50 cash: covers $142.50, really cost $137.50.
+    fill_part(page, 0, "100", "off", "5")
+    fill_part(page, 1, "42.50", "cash")
+    expect(page.locator("#pay-covered")).to_have_text("$142.50")
+    expect(page.locator("#pay-cost")).to_have_text("$137.50")
+    expect(page.locator("#pay-saved")).to_contain_text("$5.00")
+    # Amount paid mode, and cents rounding half up: 33.33 at 12.5% off is 29.16375, so 29.16.
+    fill_part(page, 0, "100", "paid", "95")
+    expect(page.locator("#pay-cost")).to_have_text("$137.50")
+    fill_part(page, 0, "33.33", "off", "12.5")
+    fill_part(page, 1, "0.10", "cash")
+    expect(page.locator("#pay-cost")).to_have_text("$29.26")
+    expect(page.locator("#pay-covered")).to_have_text("$33.43")
+    # No floating-point slips: 0.1 + 0.2 face is exactly 0.30.
+    fill_part(page, 0, "0.1", "cash")
+    fill_part(page, 1, "0.2", "cash")
+    expect(page.locator("#pay-covered")).to_have_text("$0.30")
+    # A half-filled or invalid row stops it, and says why; empty rows are ignored.
+    fill_part(page, 1, "20", "off", "150")
+    expect(page.locator("#pay-use")).to_be_disabled()
+    expect(page.locator("#pay-calc [role=alert]")).to_contain_text("Check")
+    page.click("#pay-calc .pay-row >> nth=1 >> [data-part=remove]")
+    fill_part(page, 0, "100", "off", "5")
+    expect(page.locator("#pay-calc [role=alert]")).to_have_text("")
+    assert page.locator("#pay-calc .pay-row").count() == 1
+    fill_part(page, 1, "42.50", "cash")
+    fill_part(page, 2, "", "cash")                                  # an empty row counts for nothing
+    expect(page.locator("#pay-cost")).to_have_text("$137.50")
+    shot(page, "payment-calculator")
+    # Use this amount puts the true cost in the field, and the form posts only the amount.
+    sent = []
+    page.on("request", lambda r: sent.append(r.post_data or "") if r.method == "POST" else None)
+    page.click("#pay-use")
+    expect(page.locator("input[name=amount]")).to_have_value("137.50")
+    page.select_option("select[name=category_id]", label="Tyres")
+    page.fill("input[name=vendor]", MARKER)
+    page.click("button[type=submit].button")
+    page.wait_for_url(re.compile(r"msg=saved"))
+    posted = "".join(sent)
+    names = set(re.findall(r'name="([^"]+)"', posted))
+    assert {"amount", "vendor", "category_id"} <= names, names
+    assert not any(re.search(r"face|part|pay|mode|discount", n) for n in names), names
+    assert "137.50" in posted and "42.50" not in posted, posted
+    expect(page.locator(f"tr:has-text('{MARKER}')")).to_contain_text("$137.50")
+    remove_marked(page)
+
+
+def test_payment_calculator_on_a_desktop(page):
+    page.goto(UI + "new")
+    page.locator("#pay-calc summary").click()
+    fill_part(page, 0, "100", "off", "5")
+    fill_part(page, 1, "42.50", "cash")
+    shot(page, "payment-calculator-desktop")
+
+
 def test_list_toggle_sort_and_return(page):
     add_expense(page, "10.00", "Tyres")
     add_expense(page, "30.00", "Insurance")
@@ -1143,6 +1216,7 @@ def main():
         step("add, list, invoice link, edit, delete", test_add_list_edit_delete, page)
         step("delete can be cancelled", test_delete_can_be_cancelled, page)
         step("amount field works out sums", test_amount_calculator, page)
+        step("payment calculator works out the true cost", test_payment_calculator, page)
         step("list: tiles or rows, sorting, and back to the same view", test_list_toggle_sort_and_return, page)
         step("rows on a phone show whole dates, categories and amounts", test_rows_on_a_phone_show_whole_values, page)
         step("no sideways scroll on a phone", test_phone_layout_has_no_sideways_scroll, page)
@@ -1178,6 +1252,7 @@ def main():
         dash_page = desktop.new_page()
         step("dashboard renders with data and invoice links", test_dashboard, dash_page)
         step("history page at desktop width, light and dark", test_history_desktop, desktop.new_page())
+        step("payment calculator on a desktop", test_payment_calculator_on_a_desktop, desktop.new_page())
         step("header is one row on a desktop", test_header_on_a_desktop, desktop.new_page())
         step("desktop list and form, light and dark", test_desktop_look, desktop.new_page())
         step("column widths can be dragged, are remembered, and reset", test_column_widths_can_be_dragged, desktop.new_page())

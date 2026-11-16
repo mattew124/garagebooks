@@ -85,6 +85,24 @@ looking at.
 
 <!-- screenshot: amount-calculator - The amount field with a sum typed in and its result -->
 
+### Payment calculator
+
+When a payment is made of several parts, open **Payment calculator** under the amount field to
+work out what it really cost. A $100 gift card bought for $95, plus $42.50 in cash, covers a $142.50
+invoice for a true cost of $137.50.
+
+1. Add a part for each payment. Enter its face value, then choose how it cost you: **an amount paid**
+   (the $95 you paid for the gift card), **a percentage off** (5% off), or **the full value (cash)**.
+2. The calculator shows the invoice total covered, the true cost and the saving. Empty parts are
+   ignored. A part that doesn't make sense, such as a discount over 100%, is outlined and stops the
+   total until you fix or remove it.
+3. Press **Use this amount** to put the true cost in the amount field, then save as usual.
+
+Working is in whole cents and rounds to the nearest cent. The parts are not saved or sent anywhere:
+only the amount you use is recorded, and the face value is not kept.
+
+<!-- screenshot: payment-calculator - The Payment calculator open under the amount field, with a discounted gift card and a cash part -->
+
 Choosing the invoice PDF fills in what can be read from it. With
 [OneDrive uploads](onedrive.md) on, the PDF goes into that car's OneDrive folder (choose it, or drop
 it onto the invoice box) and the link is filled in for you. Or keep them on your own

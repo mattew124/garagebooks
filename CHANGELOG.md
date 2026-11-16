@@ -15,6 +15,8 @@ gate sets with the signed-in user (and the gate removes it from incoming request
 *unknown*. Nothing is recorded for changes made before this version. **To upgrade:** pull the new image.
 If you use the restricted database role (`SKIP_MIGRATE=1`), re-run `scripts/provision-db.sh` first: it
 creates the log and grants the role `SELECT` and `INSERT` on it.
+A payment calculator on the Add and Edit form's amount field works out the true cost of a payment made of several
+parts, such as a discounted gift card plus cash. Only the amount you choose to use is saved. Nothing to do on upgrade.
 
 The rename to GarageBooks reaches the last places the old name was kept: the database schema, the
 dashboard's address and the settings. The app upgrades your database itself on its first start, and

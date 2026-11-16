@@ -365,3 +365,19 @@ label.check { display: flex; align-items: center; gap: .5rem; font-weight: 500; 
 .change-fields dd { margin: 0; overflow-wrap: anywhere; }
 .change-fields .was { text-decoration: line-through; color: var(--muted); }
 .pager { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin: 1rem 0; }
+/* Payment calculator on the Add form. */
+.pay-calc { border: 1px solid var(--line); border-radius: var(--r-small); padding: .75rem 1rem; background: var(--surface); }
+.pay-calc > summary { margin-bottom: 0; }
+.pay-calc[open] > summary { margin-bottom: .5rem; }
+.pay-row { display: flex; flex-wrap: wrap; gap: .6rem 1rem; align-items: end; border: 1px solid var(--line);
+  border-radius: var(--r-small); padding: .6rem .75rem .75rem; margin: 0 0 .6rem; min-width: 0; }
+.pay-row > label { flex: 1 1 7rem; }
+.pay-row > label[hidden] { display: none; }
+.pay-legend { font-weight: 600; font-size: .85rem; padding: 0 .3rem; color: var(--muted); }
+.pay-row input[aria-invalid=true] { outline: 2px solid var(--bad); }
+.pay-totals { display: grid; grid-template-columns: 1fr auto; gap: .2rem 1rem; margin: .5rem 0; max-width: 20rem; }
+.pay-totals dt { color: var(--muted); }
+.pay-totals dd { margin: 0; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+#pay-cost { font-size: 1.1rem; }
+.pay-problem { color: var(--bad); margin: .25rem 0; }
+.pay-problem:empty { display: none; }
