@@ -55,7 +55,7 @@ class World:
         for row in self.folders:        # the standard categories' upload folders, which a property may have changed
             self.db.execute("UPDATE garagebooks.category SET upload_folder = %s WHERE id = %s", (row["upload_folder"], row["id"]))
         self.db.execute("UPDATE garagebooks.setting SET app_url = NULL, grafana_url = NULL, invoice_date_format = NULL,"
-                        " invoice_name_format = NULL, multi_amount = NULL")
+                        " invoice_name_format = NULL, multi_amount = NULL, notify_url = NULL, notify_format = NULL")
 
     def prepare(self):
         """A clean database, a signed-in OneDrive and a chosen folder for car 1 in each store."""
@@ -107,7 +107,8 @@ def world(pg, tmp_path_factory):
         mp.setenv("APP_TZ", "Australia/Brisbane")
         mp.setenv("INVOICES_DIR", str(root))
         mp.setenv("GARAGEBOOKS_ENCRYPTION_KEY", od.KEY)
-        app = create_app(connect=lambda: psycopg.connect(pg.app_url, row_factory=dict_row), onedrive_transport=ms)
+        app = create_app(connect=lambda: psycopg.connect(pg.app_url, row_factory=dict_row), onedrive_transport=ms,
+                         notify_send=lambda *args, **kw: None)       # no request ever leaves a test
         app.testing = True
         w = World(pg, app, ms, root)
         try:
@@ -284,6 +285,41 @@ def test_settings_save_only_what_validates(world, form):
     else:
         assert row["app_url"] is None and row["invoice_name_format"] is None
     assert client.get("/settings").status_code == 200       # whatever is saved, the page still draws
+
+
+notify_form = st.fixed_dictionaries({}, optional={
+    "notify_url": st.one_of(text, st.just("https://ntfy.example.invalid/zq7-secret"), st.just("http://127.0.0.1:8080/t"),
+                            st.just("ftp://x.example.invalid/t")),
+    "notify_format": st.one_of(text, st.sampled_from(["ntfy", "json", "NTFY", ""])),
+    "notify_clear": st.sampled_from(["", "1"])})
+
+
+@EXAMPLES
+@given(notify_form)
+def test_notification_settings_save_only_what_validates(world, form):
+    client = world.prepare() if world.client is None else world.client
+    world.reset()
+    resp = client.post("/settings/notifications", data=form, headers=ORIGIN)
+    assert resp.status_code in OK
+    row = world.db.execute("SELECT notify_url, notify_format FROM garagebooks.setting").fetchone()
+    if resp.status_code == 303:
+        assert v.parse_notify_url(row["notify_url"]) == row["notify_url"]
+        assert row["notify_format"] in v.NOTIFY_FORMATS
+        assert (row["notify_url"] is None) == (not form.get("notify_url", "").strip() or bool(form.get("notify_clear")))
+    else:
+        assert row["notify_url"] is None and row["notify_format"] is None
+    html = client.get("/settings").data.decode()
+    assert "zq7-secret" not in html and "http://127.0.0.1:8080/t" not in html   # never echoed back
+
+
+@EXAMPLES
+@given(st.sampled_from(["https://ntfy.example.invalid/zq7-secret", "http://[::1]:1/zq7-secret", ""]))
+def test_the_test_notice_button_answers_whatever_is_saved(world, address):
+    client = world.prepare() if world.client is None else world.client
+    world.reset()
+    world.db.execute("UPDATE garagebooks.setting SET notify_url = %s", (address or None,))
+    resp = client.post("/settings/notifications/test", headers=ORIGIN)   # the app was made with a stand-in sender: no network
+    assert resp.status_code == 200 and "zq7-secret" not in resp.data.decode()
 
 
 # ---- the JSON endpoints ------------------------------------------------------------------------

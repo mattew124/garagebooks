@@ -242,6 +242,17 @@ def get_settings(conn):
                    "invoice_name_format": None, "multi_amount": None, "lease_budgets": False}
 
 
+def get_notify(conn):
+    """The notification address and format (Settings), or None and 'ntfy'. Only the notifications job and
+    the test button read the address; a page shows notify.host_of(address), never the address."""
+    row = conn.execute("SELECT notify_url, notify_format FROM garagebooks.setting WHERE id = 1").fetchone()
+    return (row["notify_url"], row["notify_format"] or "ntfy") if row else (None, "ntfy")
+
+
+def save_notify(conn, url, fmt):
+    conn.execute("UPDATE garagebooks.setting SET notify_url = %s, notify_format = %s WHERE id = 1", (url, fmt))
+
+
 def lease_budgets_on(conn):
     """Whether the owner tracks the provider's yearly budget pools (Settings). Off unless turned on."""
     return bool(get_settings(conn)["lease_budgets"])
@@ -473,6 +484,13 @@ def save_onedrive_account(conn, **fields):
         f"ON CONFLICT (id) DO UPDATE SET {sets}, updated_at = now()",
         fields)
 
+
+
+def note_signin_lost(conn):
+    """Microsoft refused the saved sign-in: remember when it was first noticed (the notifications job tells
+    the owner once). Cleared by connecting again, new credentials, disconnecting or a refresh that works."""
+    conn.execute("UPDATE garagebooks.onedrive_account SET signin_lost_at = COALESCE(signin_lost_at, now()), "
+                 "signin_checked_at = now() WHERE refresh_token IS NOT NULL")
 
 
 # ---- leases (roadmap L1) -------------------------------------------------------------

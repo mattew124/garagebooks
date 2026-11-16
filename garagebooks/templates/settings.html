@@ -46,6 +46,36 @@
       budgets already entered are kept.</small></span></label>
   <button type="submit" class="button">Save</button>
 </form>
+<h2 id="notifications">Notifications</h2>
+<form method="post" action="{{ url_for('notifications_save') }}" class="card stack">
+  <p>Push a notice to your phone when a reminder comes due, the OneDrive client secret is nearing its expiry date, or the
+    OneDrive sign-in is lost. Each is sent once. Leave the address empty to keep notifications off.</p>
+  <label>Notification address
+    <input type="password" name="notify_url" maxlength="500" autocomplete="off" spellcheck="false"
+           placeholder="{{ 'Saved: ' ~ notify.host ~ ' (leave blank to keep it)' if notify.host else 'https://ntfy.example/your-topic' }}">
+    {% if notify.errors.notify_url %}<span class="error">{{ notify.errors.notify_url }}</span>{% endif %}
+    <small>Treat it as a password: for most services the address is the secret, so it is never shown here again.
+      {% if notify.host %}Sending to <strong>{{ notify.host }}</strong>.{% endif %}</small></label>
+  {% if notify.host %}<label class="check" for="notify-clear"><input id="notify-clear" type="checkbox" name="notify_clear" value="1">
+    <span>Remove the saved address (turns notifications off)</span></label>{% endif %}
+  <label>Format
+    <select name="notify_format">
+      {% for key, text in notify.formats.items() %}<option value="{{ key }}" {{ 'selected' if notify.format == key }}>{{ text }}</option>
+      {% endfor %}
+    </select>
+    {% if notify.errors.notify_format %}<span class="error">{{ notify.errors.notify_format }}</span>{% endif %}
+    <small>ntfy sends the message as plain text. JSON sends <code>title</code>, <code>message</code> and <code>body</code>.</small></label>
+  <small>Examples (use your own): ntfy <code>https://ntfy.example/your-topic</code>; an Apprise API
+    <code>https://apprise.example/notify/your-key</code> with JSON; a Home Assistant webhook
+    <code>https://homeassistant.example/api/webhook/your-webhook-id</code> with JSON.
+    http:// and https:// addresses on your own network work too.</small>
+  <button type="submit" class="button">Save notifications</button>
+</form>
+<form method="post" action="{{ url_for('notifications_test') }}" class="card stack">
+  <button type="submit" class="button secondary">Send a test notice</button>
+  <small>Sends one notice now to the saved address. Save first if you have just changed it.</small>
+  {% if notify.test %}<p class="{{ 'notice' if notify.test.ok else 'error' }}" role="status">{{ notify.test.text }}</p>{% endif %}
+</form>
 <p><small>Grafana logo: <a href="{{ icon_credit.url }}" target="_blank" rel="noopener noreferrer">{{ icon_credit.text }}</a>,
   <a href="{{ icon_credit.licence_url }}" target="_blank" rel="noopener noreferrer">{{ icon_credit.licence }}</a>.
   Grafana is a trademark of Grafana Labs.</small></p>

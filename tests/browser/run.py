@@ -539,6 +539,45 @@ def test_header_stays_tidy_on_a_phone(page):
     shot(page, "header-phone")
 
 
+def test_notifications_settings(page):
+    """The Notifications section: the address is never shown back, a bad one is refused, and the test button
+    says how it went. The address is a closed port on the app's own container (nothing leaves the stack),
+    and is removed again afterwards."""
+    topic = "browser-test-secret-topic"
+    address = f"http://127.0.0.1:9/{topic}"
+    page.goto(UI + "settings")
+    section = page.locator("form[action$='/settings/notifications']")
+    try:
+        page.locator("form[action$='/settings/notifications/test'] button").click()
+        expect(page.locator("main")).to_contain_text("Save an address first")
+        section = page.locator("form[action$='/settings/notifications']")
+        section.locator("input[name=notify_url]").fill("ftp://example.invalid/topic")
+        section.locator("button[type=submit]").click()
+        expect(page.locator(".error", has_text="Enter a full address")).to_be_visible()
+        section = page.locator("form[action$='/settings/notifications']")
+        section.locator("input[name=notify_url]").fill(address)
+        section.locator("select[name=notify_format]").select_option("json")
+        section.locator("button[type=submit]").click()
+        expect(page.locator(".notice")).to_contain_text("Notification settings saved")
+        html = page.content()
+        assert topic not in html, "the saved address was shown back"
+        expect(page.locator("form[action$='/settings/notifications'] small", has_text="Sending to")).to_contain_text("127.0.0.1:9")
+        assert page.locator("input[name=notify_url]").get_attribute("type") == "password"
+        page.locator("form[action$='/settings/notifications/test'] button").click()
+        expect(page.locator("form[action$='/settings/notifications/test'] .error")).to_contain_text("could not be reached")
+        assert topic not in page.content()
+        shot(page, "settings-notifications")
+    finally:
+        page.goto(UI + "settings")
+        section = page.locator("form[action$='/settings/notifications']")
+        if section.locator("input[name=notify_clear]").count():
+            section.locator("input[name=notify_clear]").check()
+            section.locator("button[type=submit]").click()
+            expect(page.locator(".notice")).to_contain_text("Notification settings saved")
+    page.goto(UI + "settings")
+    expect(page.locator("input[name=notify_clear]")).to_have_count(0)
+
+
 def test_header_on_a_desktop(page):
     """One row: title then links on the left, Add on the right."""
     page.goto(UI)
@@ -1550,6 +1589,7 @@ def main():
         step("FBT year report: taxable value, costs by pool, year links", test_fbt_report, page)
         step("header stays tidy on a phone", test_header_stays_tidy_on_a_phone, page)
         step("phone list shows amount, invoice and edit", test_list_shows_key_fields_on_a_phone, page)
+        step("settings: notifications address is kept secret, refused when bad, tested", test_notifications_settings, page)
         step("history page lists an add, an edit and a delete", test_history_page, page)
         step("a likely duplicate is asked about, then saved anyway", test_duplicate_is_asked_about_before_saving, page)
         step("the duplicate warning can be dismissed", test_duplicate_warning_can_be_dismissed, page)

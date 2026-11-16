@@ -160,7 +160,9 @@ def admin(pg):
         conn.execute("ALTER TABLE garagebooks.change_log DISABLE TRIGGER USER;"
                      " TRUNCATE garagebooks.change_log RESTART IDENTITY;"
                      " ALTER TABLE garagebooks.change_log ENABLE TRIGGER USER")
-        conn.execute("UPDATE garagebooks.setting SET invoice_date_format = NULL, invoice_name_format = NULL, multi_amount = NULL, lease_budgets = false")
+        conn.execute("UPDATE garagebooks.setting SET invoice_date_format = NULL, invoice_name_format = NULL, multi_amount = NULL, lease_budgets = false,"
+                     " notify_url = NULL, notify_format = NULL")
+        conn.execute("TRUNCATE garagebooks.notification")
         yield conn
 
 
