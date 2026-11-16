@@ -533,3 +533,102 @@ def parse_lease_form(form, pools, frequencies, fbt_methods, tax_treatments):
             budgets[pool] = amount_
     values["budgets"] = budgets
     return values, errors
+
+
+# ---- reminders (roadmap item 4) -----------------------------------------------------
+
+MAX_REMINDER_TITLE_LEN = 100
+
+
+def _whole(raw, lo, hi, message, default=None):
+    """Blank -> `default`. Otherwise a whole number from lo to hi, else ValueError(message)."""
+    text = (raw or "").strip()
+    if not text:
+        return default
+    if not text.isdigit() or not lo <= int(text) <= hi:
+        raise ValueError(message)
+    return int(text)
+
+
+def _km_figure(raw, message):
+    """Blank -> None. A distance in km, 0 or more, else ValueError(message)."""
+    try:
+        return parse_odometer(raw)
+    except ValueError:
+        raise ValueError(message) from None
+
+
+def parse_reminder_form(form, car_ids, category_ids, car_id=None):
+    """A reminder as typed: a title, a due date and/or odometer reading, lead times, and how often it
+    repeats. `car_id` fixes the car (editing); otherwise the form's own must be one of `car_ids`.
+    -> (values, errors); `values` has every column of the reminder, blank lead times at their defaults."""
+    values, errors = {}, {}
+
+    def attempt(field, fn, *args):
+        try:
+            values[field] = fn(*args)
+        except ValueError as exc:
+            errors[field] = str(exc)
+            values[field] = None
+
+    if car_id is None:
+        raw = (form.get("car_id") or "").strip()
+        car_id = int(raw) if raw.isdigit() and int(raw) in car_ids else None
+        if car_id is None:
+            errors["car_id"] = "Choose the car."
+    values["car_id"] = car_id
+    title = " ".join((form.get("title") or "").split())
+    if not title:
+        errors["title"] = "Enter what the reminder is for, such as Tyre rotation."
+    elif len(title) > MAX_REMINDER_TITLE_LEN:
+        errors["title"] = f"The title is too long (max {MAX_REMINDER_TITLE_LEN} characters)."
+    values["title"] = title
+    raw = (form.get("category_id") or "").strip()
+    if raw and not (raw.isdigit() and int(raw) in category_ids):
+        errors["category_id"] = "Choose a category from the list."
+    values["category_id"] = int(raw) if raw.isdigit() and int(raw) in category_ids else None
+    attempt("due_date", parse_optional_date, form.get("due_date"))
+    attempt("due_km", parse_odometer, form.get("due_km"))
+    if "due_date" not in errors and "due_km" not in errors and values["due_date"] is None and values["due_km"] is None:
+        errors["due_date"] = "Enter a due date, an odometer reading or both."
+    attempt("lead_days", _whole, form.get("lead_days"), 0, 3650,
+            "The lead time must be a whole number of days, 0 to 3650.", 30)
+    attempt("lead_km", _km_figure, form.get("lead_km"), "The lead distance must be a number of km, 0 or more.")
+    if values["lead_km"] is None and "lead_km" not in errors:
+        values["lead_km"] = 1000
+    attempt("every_months", _whole, form.get("every_months"), 1, 600,
+            "Repeat must be a whole number of months, 1 to 600.")
+    attempt("every_km", _km_figure, form.get("every_km"), "Repeat must be a number of km, more than 0.")
+    if values["every_km"] is not None and values["every_km"] <= 0:
+        errors["every_km"] = "Repeat must be a number of km, more than 0."
+    notes = (form.get("notes") or "").strip()
+    if len(notes) > MAX_NOTES_LEN:
+        errors["notes"] = f"The notes are too long (max {MAX_NOTES_LEN} characters)."
+    values["notes"] = notes or None
+    return values, errors
+
+
+def parse_resolve_form(form, today):
+    """How a reminder was dealt with: the expense that did it (`expense_id`), or, without one, the date
+    and optionally the odometer. -> (values, errors) with expense_id, date, km."""
+    values, errors = {"expense_id": None, "date": None, "km": None}, {}
+    raw = (form.get("expense_id") or "").strip()
+    if raw:
+        if raw.isdigit() and int(raw) < 2 ** 63:
+            values["expense_id"] = int(raw)
+        else:
+            errors["expense_id"] = "Choose one of this car's expenses."
+        return values, errors
+    try:
+        values["date"] = parse_optional_date(form.get("date"))
+        if values["date"] is None:
+            errors["date"] = "Enter the date it was done, or choose the expense that did it."
+        elif values["date"] > today:
+            errors["date"] = "That date is in the future."
+    except ValueError as exc:
+        errors["date"] = str(exc)
+    try:
+        values["km"] = parse_odometer(form.get("km"))
+    except ValueError as exc:
+        errors["km"] = str(exc)
+    return values, errors

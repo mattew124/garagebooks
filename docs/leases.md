@@ -100,6 +100,11 @@ on the **Categories** page; your choice is kept when the app is upgraded.
 
 <!-- screenshot: category-pools - The Categories page, with the lease budget pool beside each category -->
 
+## Reminders for registration and the end of the lease
+
+The registration date and the lease's end date become [reminders](reminders.md#registration-and-lease-end)
+by themselves. Change a date here and the reminder follows; delete the lease and they go.
+
 ## Upgrading
 
 The app adds its lease tables and the new column on categories itself when it starts. If you use the

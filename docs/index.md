@@ -66,6 +66,13 @@ tile. See [What the dashboard counts](dashboard.md).
 
 <!-- screenshot: cars-sold - A car marked as sold on the Cars page, with its sale date and price -->
 
+## Reminders
+
+The **Reminders** page keeps track of what a car needs next: service that falls due on a date, an
+odometer reading or whichever comes first, repeating ones such as a tyre rotation every 10,000 km, and
+the registration and lease end from a car's lease. Resolve one by linking the expense that did the
+job. See [Reminders](reminders.md).
+
 ## Adding an expense
 
 Category, date, time, amount, odometer, vendor, notes and the invoice. The odometer can be filled in

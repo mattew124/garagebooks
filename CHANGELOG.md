@@ -58,6 +58,16 @@ and keeps your existing role when you set `GARAGEBOOKS_DB_USER` (or the old `EXP
   new **Running costs per FBT year** panel, and the database a `garagebooks.fbt_year(date)` function. It is not
   tax advice. See [Leases](docs/leases.md). The app adds the function on start; with the restricted database
   role, re-run `scripts/provision-db.sh` first.
+- **Reminders.** A new **Reminders** page (and a count in the header when something is overdue or due
+  soon) keeps track of what a car needs next: a reminder falls due on a date, an odometer reading
+  (TeslaMate's, or your latest reading) or whichever comes first, with a lead time in days and km.
+  Repeating ones (a tyre rotation every 10,000 km) make the next when resolved, and are resolved by
+  linking the expense that did the job, from the reminder or after saving the expense. Resolved
+  reminders are kept, and can be reopened. A lease's registration date and end date appear as reminders
+  by themselves. The dashboard has a **Reminders** table for the selected car. Due-ness is worked out
+  when a page or the dashboard is viewed; nothing is sent. See [Reminders](docs/reminders.md). The app
+  adds the new `garagebooks.reminder` table and `garagebooks.reminder_due` view on start; with the
+  restricted database role, re-run `scripts/provision-db.sh` first.
 - **Schema:** `expenses` is now `garagebooks`. Grafana panels or queries of your own that name
   `expenses.` need the new name.
 - **Dashboard address:** the uid is now `garagebooks-tco` (was `tm-expenses-tco`), so its address is

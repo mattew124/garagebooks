@@ -130,7 +130,7 @@ def admin(pg):
     with pg.admin() as conn:
         conn.execute("TRUNCATE garagebooks.expense, garagebooks.car_folder, garagebooks.onedrive_account,"
                      " garagebooks.learned_label, garagebooks.learned_vendor, garagebooks.import_skip,"
-                     " garagebooks.odometer_reading RESTART IDENTITY CASCADE")
+                     " garagebooks.odometer_reading, garagebooks.reminder RESTART IDENTITY CASCADE")
         if TESLAMATE:
             conn.execute("TRUNCATE positions, charging_processes RESTART IDENTITY CASCADE")   # CASCADE: real TeslaMate tables (drives...) reference them
         conn.execute("DELETE FROM garagebooks.car WHERE id <> 1")

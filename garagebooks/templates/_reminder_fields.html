@@ -1,0 +1,39 @@
+{% macro bad(e, name) %}{% if e.get(name) %}aria-invalid="true" aria-describedby="e-{{ name }}"{% endif %}{% endmacro %}
+{% macro note(e, name) %}{% if e.get(name) %}<span class="error" id="e-{{ name }}">{{ e[name] }}</span>{% endif %}{% endmacro %}
+{# The fields of a reminder, for the add form and the edit page. `v` is what to show, `e` the errors by field. #}
+{% macro fields(v, e, cars, categories, lead_days, lead_km, fixed_car=None) %}
+  {% if not fixed_car %}
+  <label for="f-car_id">Car
+    <select id="f-car_id" name="car_id" required {{ bad(e, 'car_id') }}>
+      {% if cars|length != 1 %}<option value="">Choose…</option>{% endif %}
+      {% for c in cars %}<option value="{{ c.id }}" {{ 'selected' if v.get('car_id')|string == c.id|string or cars|length == 1 }}>{{ c.name }}</option>{% endfor %}
+    </select>{{ note(e, 'car_id') }}</label>
+  {% endif %}
+  <label for="f-title">What is it for?
+    <input id="f-title" name="title" maxlength="100" required value="{{ v.get('title', '') }}" autocomplete="off"
+      placeholder="Tyre rotation" {{ bad(e, 'title') }}>{{ note(e, 'title') }}</label>
+  <label for="f-category_id">Category <small>(optional: an expense in it is offered to resolve this)</small>
+    <select id="f-category_id" name="category_id" {{ bad(e, 'category_id') }}>
+      <option value="">None</option>
+      {% for c in categories %}<option value="{{ c.id }}" {{ 'selected' if v.get('category_id')|string == c.id|string }}>{{ c.name }}</option>{% endfor %}
+    </select>{{ note(e, 'category_id') }}</label>
+  <fieldset class="due-fields"><legend>Due</legend>
+    <p><small>Enter a date, an odometer reading or both: it falls due on whichever comes first.</small></p>
+    <div class="row">
+      <label for="f-due_date">On this date <input id="f-due_date" name="due_date" type="date" value="{{ v.get('due_date', '') }}" {{ bad(e, 'due_date') }}>{{ note(e, 'due_date') }}</label>
+      <label for="f-due_km">At this odometer reading (km) <input id="f-due_km" name="due_km" inputmode="decimal" value="{{ v.get('due_km', '') }}" autocomplete="off" {{ bad(e, 'due_km') }}>{{ note(e, 'due_km') }}</label>
+    </div>
+    <div class="row">
+      <label for="f-lead_days">Warn me this many days before <input id="f-lead_days" name="lead_days" inputmode="numeric" value="{{ v.get('lead_days', lead_days) }}" autocomplete="off" {{ bad(e, 'lead_days') }}>{{ note(e, 'lead_days') }}</label>
+      <label for="f-lead_km">Warn me this many km before <input id="f-lead_km" name="lead_km" inputmode="decimal" value="{{ v.get('lead_km', lead_km) }}" autocomplete="off" {{ bad(e, 'lead_km') }}>{{ note(e, 'lead_km') }}</label>
+    </div>
+  </fieldset>
+  <fieldset class="due-fields"><legend>Repeats</legend>
+    <p><small>Leave both empty for a one-off. Resolving a repeating reminder adds the next one.</small></p>
+    <div class="row">
+      <label for="f-every_months">Every (months) <input id="f-every_months" name="every_months" inputmode="numeric" value="{{ v.get('every_months', '') }}" autocomplete="off" {{ bad(e, 'every_months') }}>{{ note(e, 'every_months') }}</label>
+      <label for="f-every_km">Every (km) <input id="f-every_km" name="every_km" inputmode="decimal" value="{{ v.get('every_km', '') }}" autocomplete="off" {{ bad(e, 'every_km') }}>{{ note(e, 'every_km') }}</label>
+    </div>
+  </fieldset>
+  <label for="f-notes">Notes <textarea id="f-notes" name="notes" rows="2" maxlength="2000" {{ bad(e, 'notes') }}>{{ v.get('notes', '') }}</textarea>{{ note(e, 'notes') }}</label>
+{% endmacro %}

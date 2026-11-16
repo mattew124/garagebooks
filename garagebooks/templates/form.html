@@ -5,6 +5,7 @@
 {% block main_attrs %} class="narrow"{% endblock %}
 {% block content %}
 <h1>{{ 'Edit expense' if expense_id else 'Add expense' }}</h1>
+{% if expense_id and reminder_offer %}<p><a href="{{ url_for('expense_reminders', expense_id=expense_id) }}">Resolve a reminder with this expense</a></p>{% endif %}
 {% if errors %}<p class="notice bad">Please fix the highlighted fields.</p>{% endif %}
 {% if not expense_id %}
 <div id="duplicate-warning" class="notice bad" role="alert" {{ '' if duplicates else 'hidden' }}>

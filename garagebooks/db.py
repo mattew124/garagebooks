@@ -543,3 +543,90 @@ def fbt_years_with_expenses(conn, car_id, tz):
 def set_budget_pool(conn, category_id, pool):
     """Which of the provider's budget pools a category's expenses come from (None: none). False if no such category."""
     return conn.execute("UPDATE garagebooks.category SET budget_pool = %s WHERE id = %s", (pool, category_id)).rowcount == 1
+
+
+# ---- reminders (roadmap item 4) --------------------------------------------------------
+
+REMINDER_FIELDS = ("car_id", "title", "category_id", "due_date", "due_km", "lead_days", "lead_km",
+                   "every_months", "every_km", "notes")
+
+
+def open_reminders(conn, car_id=None):
+    """Every open reminder, stored and derived from a lease (see the reminder_due view), with the car's
+    name, the category's name and, for a stored one, its notes and recurrence. Not sorted."""
+    return conn.execute(
+        "SELECT d.*, c.name AS car_name, cat.name AS category, r.notes, r.every_months, r.every_km, "
+        "       r.edited_at, NULL::timestamptz AS resolved_at "
+        "FROM garagebooks.reminder_due d JOIN garagebooks.car c ON c.id = d.car_id "
+        "LEFT JOIN garagebooks.category cat ON cat.id = d.category_id "
+        "LEFT JOIN garagebooks.reminder r ON r.id = d.reminder_id "
+        "WHERE (%(car)s::smallint IS NULL OR d.car_id = %(car)s)", {"car": car_id}).fetchall()
+
+
+def get_reminder(conn, reminder_id, lock=False):
+    """One stored reminder, or None. lock=True holds it until commit, so two resolutions at once can't both succeed."""
+    return conn.execute("SELECT * FROM garagebooks.reminder WHERE id = %s" + (" FOR UPDATE" if lock else ""),
+                        (reminder_id,)).fetchone()
+
+
+def add_reminder(conn, v):
+    """Add a reminder. `v` has the REMINDER_FIELDS (and optionally previous_id). Returns its id."""
+    cols = REMINDER_FIELDS + ("previous_id",)
+    return conn.execute(
+        f"INSERT INTO garagebooks.reminder ({', '.join(cols)}) VALUES ({', '.join('%(' + c + ')s' for c in cols)}) RETURNING id",
+        {"previous_id": None, **v}).fetchone()["id"]
+
+
+def update_reminder(conn, reminder_id, v):
+    """Change an open reminder (its car stays). False if there is none."""
+    sets = ", ".join(f"{f} = %({f})s" for f in REMINDER_FIELDS if f != "car_id")
+    return conn.execute(f"UPDATE garagebooks.reminder SET {sets}, edited_at = now() "
+                        "WHERE id = %(id)s AND resolved_at IS NULL", {**v, "id": reminder_id}).rowcount == 1
+
+
+def delete_reminder(conn, reminder_id):
+    """Delete a reminder that is still open: a resolved one is kept. False if there is none."""
+    return conn.execute("DELETE FROM garagebooks.reminder WHERE id = %s AND resolved_at IS NULL",
+                        (reminder_id,)).rowcount == 1
+
+
+def mark_resolved(conn, reminder_id, resolved_at, expense_id, km):
+    conn.execute("UPDATE garagebooks.reminder SET resolved_at = %s, resolved_expense_id = %s, resolved_km = %s WHERE id = %s",
+                 (resolved_at, expense_id, km, reminder_id))
+
+
+def mark_open(conn, reminder_id):
+    conn.execute("UPDATE garagebooks.reminder SET resolved_at = NULL, resolved_expense_id = NULL, resolved_km = NULL "
+                 "WHERE id = %s", (reminder_id,))
+
+
+def following_reminder(conn, reminder_id):
+    """The reminder created when this one was resolved, or None."""
+    return conn.execute("SELECT * FROM garagebooks.reminder WHERE previous_id = %s ORDER BY id LIMIT 1",
+                        (reminder_id,)).fetchone()
+
+
+def resolved_reminders(conn, limit, offset=0):
+    """-> (rows, total): resolved reminders, newest resolution first, with the expense that did the job."""
+    rows = conn.execute(
+        "SELECT r.id, r.title, r.car_id, c.name AS car_name, r.resolved_at, r.resolved_km, r.resolved_expense_id, "
+        "       e.occurred_at AS expense_at, e.vendor, e.amount, cat.name AS expense_category "
+        "FROM garagebooks.reminder r JOIN garagebooks.car c ON c.id = r.car_id "
+        "LEFT JOIN garagebooks.expense e ON e.id = r.resolved_expense_id "
+        "LEFT JOIN garagebooks.category cat ON cat.id = e.category_id "
+        "WHERE r.resolved_at IS NOT NULL ORDER BY r.resolved_at DESC, r.id DESC LIMIT %s OFFSET %s", (limit, offset)).fetchall()
+    total = conn.execute("SELECT count(*) AS n FROM garagebooks.reminder WHERE resolved_at IS NOT NULL").fetchone()["n"]
+    return rows, total
+
+
+def stored_open_reminders(conn, car_id):
+    """A car's open reminders that can be resolved (not the ones derived from its lease)."""
+    return conn.execute("SELECT r.id, r.title, r.category_id, r.due_date, r.due_km FROM garagebooks.reminder r "
+                        "WHERE r.car_id = %s AND r.resolved_at IS NULL ORDER BY r.due_date NULLS LAST, r.id",
+                        (car_id,)).fetchall()
+
+
+def recent_expenses(conn, car_id, limit=20):
+    """A car's latest expenses, for choosing the one that resolves a reminder."""
+    return conn.execute(f"{_SELECT} WHERE e.car_id = %s ORDER BY e.occurred_at DESC, e.id DESC LIMIT %s",
+                        (car_id, limit)).fetchall()

@@ -21,7 +21,7 @@ from flask import Flask, abort, g, jsonify, make_response, redirect, render_temp
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from . import dashboard, db, docinfo, icons, invoices, lease, logs, onedrive, sources, storage, updates, validation
+from . import dashboard, db, docinfo, icons, invoices, lease, logs, onedrive, reminders, sources, storage, updates, validation
 
 log = logging.getLogger("garagebooks.app")
 
@@ -51,6 +51,16 @@ MESSAGES = {
     "lease_added": "Lease added.",
     "lease_saved": "Lease saved.",
     "lease_deleted": "Lease deleted.",
+    "reminder_added": "Reminder added.",
+    "reminder_saved": "Reminder saved.",
+    "reminder_deleted": "Reminder deleted.",
+    "reminder_resolved": "Reminder resolved.",
+    "reminder_resolved_next": "Reminder resolved, and the next one is added.",
+    "reminder_resolved_exists": "Reminder resolved. The next one already exists, so no other was added.",
+    "reminder_resolved_no_odometer": "Reminder resolved. No odometer is known to count the next one from, so it "
+                                     "wasn't created: add it yourself.",
+    "reminder_reopened": "Reminder reopened. The next one it had added was removed.",
+    "reminder_reopened_kept": "Reminder reopened. The next one had been edited or resolved, so it was left as it is.",
     "category_pool": "Budget pool saved.",
     "settings": "Settings saved.",
     "folders": "Folders saved.",
@@ -614,6 +624,10 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             expense_id = db.insert_expense(conn, values)
         refresh_dashboard()
         log.info("expense %s saved (car %s, category %s)", expense_id, values["car_id"], values["category_id"])
+        with connect() as conn:
+            offer = bool(db.stored_open_reminders(conn, values["car_id"]))
+        if offer:       # the car has open reminders: offer to resolve them with this expense
+            return redirect(url_for("expense_reminders", expense_id=expense_id, msg=saved_msg("saved")), 303)
         return redirect(url_for("index", **list_view(), msg=saved_msg("saved")), 303)
 
     def load_or_404(conn, expense_id):
@@ -635,7 +649,9 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             "vendor": row["vendor"] or "", "notes": row["notes"] or "",
             "invoice_url": row["invoice_url"] or "", "invoice_path": row["invoice_path"] or "",
         }
-        return render_template("form.html", **form_context(values, expense_id=expense_id))
+        with connect() as conn:
+            offer = bool(db.stored_open_reminders(conn, row["car_id"]))
+        return render_template("form.html", **form_context(values, expense_id=expense_id), reminder_offer=offer)
 
     @app.post("/<int:expense_id>/edit")
     def update(expense_id):
@@ -920,6 +936,165 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         return render_template("fbt.html", car=car, report=report, today=today, frequencies={k: v[0] for k, v in lease.FREQUENCIES.items()},
                                previous=earlier[-1] if earlier else None, following=later[0] if later else None,
                                label=lease.fbt_label)
+    # ---- reminders (roadmap item 4) ------------------------------------------------
+
+    def open_items(conn, car_id=None):
+        """Every open reminder with its status. Worked out when asked, once per request for all cars."""
+        if car_id is None and "reminder_items" in g:
+            return g.reminder_items
+        now = datetime.now(ZoneInfo(tz))
+        items = reminders.due_items(conn, teslamate(conn), now.date(), now, car_id)
+        if car_id is None:
+            g.reminder_items = items
+        return items
+
+    @app.context_processor
+    def reminder_badge():
+        """What the header's Reminders link and the list's notice say: how many are overdue or need a look.
+        A failure to work it out must not take the page down."""
+        try:
+            with connect() as conn:
+                overdue, attention = reminders.attention(open_items(conn))
+        except Exception:      # noqa: BLE001 - the page itself will say the database is down
+            return {"reminder_attention": None}
+        return {"reminder_attention": {"overdue": overdue, "total": attention}}
+
+    def reminder_form_context(conn):
+        return dict(cars=db.cars(conn), categories=db.categories(conn), lead_days=reminders.DEFAULT_LEAD_DAYS,
+                    lead_km=reminders.DEFAULT_LEAD_KM)
+
+    def render_reminders(errors=None, values=None, status=200):
+        page = max(request.args.get("page", 1, type=int) or 1, 1)
+        with connect() as conn:
+            items = open_items(conn)
+            done, total = db.resolved_reminders(conn, reminders.RESOLVED_PAGE, (page - 1) * reminders.RESOLVED_PAGE)
+            choices = {i["car_id"]: db.recent_expenses(conn, i["car_id"]) for i in items if i["reminder_id"]}
+            ctx = reminder_form_context(conn)
+        return render_template("reminders.html", items=items, resolved=done, page=page,
+                               pages=-(-total // reminders.RESOLVED_PAGE) or 1, resolved_total=total, choices=choices,
+                               errors=errors or {}, values=values or {}, today=today_here().isoformat(),
+                               message=MESSAGES.get(request.args.get("msg", "")), **ctx), status
+
+    @app.get("/reminders")
+    def reminders_page():
+        return render_reminders()
+
+    def parse_reminder(car_id=None):
+        with connect() as conn:
+            car_ids = {c["id"] for c in db.cars(conn)}
+            category_ids = {c["id"] for c in db.categories(conn)}
+        return validation.parse_reminder_form(request.form, car_ids, category_ids, car_id)
+
+    @app.post("/reminders")
+    def reminder_add():
+        values, errors = parse_reminder()
+        if errors:
+            return render_reminders({"new": errors}, {"new": request.form}, 400)
+        with connect() as conn:
+            reminder_id = db.add_reminder(conn, values)
+        log.info("reminder %s added to car %s", reminder_id, values["car_id"])
+        return redirect(url_for("reminders_page", msg="reminder_added"), 303)
+
+    def open_reminder_or_404(reminder_id):
+        with connect() as conn:
+            row = db.get_reminder(conn, reminder_id)
+        if row is None or row["resolved_at"] is not None:
+            abort(404)
+        return row
+
+    def render_reminder_edit(row, values, errors, status=200):
+        with connect() as conn:
+            ctx = reminder_form_context(conn)
+        car = next(c for c in ctx["cars"] if c["id"] == row["car_id"])
+        return render_template("reminder_edit.html", reminder=row, car=car, values=values, errors=errors, **ctx), status
+
+    @app.get("/reminders/<int:reminder_id>/edit")
+    def reminder_edit(reminder_id):
+        row = open_reminder_or_404(reminder_id)
+        values = {k: ("" if v is None else v) for k, v in row.items()}
+        return render_reminder_edit(row, values, {})
+
+    @app.post("/reminders/<int:reminder_id>/edit")
+    def reminder_update(reminder_id):
+        row = open_reminder_or_404(reminder_id)
+        values, errors = parse_reminder(row["car_id"])
+        if errors:
+            return render_reminder_edit(row, request.form, errors, 400)
+        with connect() as conn:
+            if not db.update_reminder(conn, reminder_id, values):
+                abort(404)
+        log.info("reminder %s updated", reminder_id)
+        return redirect(url_for("reminders_page", msg="reminder_saved"), 303)
+
+    @app.post("/reminders/<int:reminder_id>/delete")
+    def reminder_delete(reminder_id):
+        with connect() as conn:
+            if not db.delete_reminder(conn, reminder_id):
+                abort(404)
+        log.info("reminder %s deleted", reminder_id)
+        return redirect(url_for("reminders_page", msg="reminder_deleted"), 303)
+
+    def resolved_message(results):
+        if any(r.next_id for r in results):
+            return "reminder_resolved_next"
+        notes = sorted({r.next_note for r in results if r.next_note})
+        return f"reminder_resolved_{notes[0]}" if notes else "reminder_resolved"
+
+    @app.post("/reminders/<int:reminder_id>/resolve")
+    def reminder_resolve(reminder_id):
+        row = open_reminder_or_404(reminder_id)
+        now = datetime.now(ZoneInfo(tz))
+        values, errors = validation.parse_resolve_form(request.form, now.date())
+        expense = None
+        if values["expense_id"] is not None:
+            with connect() as conn:
+                expense = db.get_expense(conn, values["expense_id"])
+            if expense is None or expense["car_id"] != row["car_id"]:
+                errors["expense_id"] = "That expense is not one of this car's."
+        if errors:
+            return render_reminders({reminder_id: errors}, {reminder_id: request.form}, 400)
+        moment = None if expense else reminders.resolution_moment(values["date"], ZoneInfo(tz), now)
+        with connect() as conn:
+            result = reminders.resolve(conn, teslamate(conn), reminder_id, ZoneInfo(tz), expense, moment, values["km"])
+        if result.outcome != "resolved":      # resolved by someone else meanwhile
+            abort(404)
+        log.info("reminder %s resolved%s", reminder_id, f", next {result.next_id}" if result.next_id else "")
+        return redirect(url_for("reminders_page", msg=resolved_message([result])), 303)
+
+    @app.post("/reminders/<int:reminder_id>/unresolve")
+    def reminder_unresolve(reminder_id):
+        with connect() as conn:
+            outcome = reminders.unresolve(conn, reminder_id)
+        if outcome is None:
+            abort(404)
+        log.info("reminder %s reopened", reminder_id)
+        return redirect(url_for("reminders_page", msg="reminder_reopened_kept" if outcome[1] else "reminder_reopened"), 303)
+
+    def render_expense_reminders(expense_id, errors=None, status=200):
+        with connect() as conn:
+            expense = load_or_404(conn, expense_id)
+            open_ones = db.stored_open_reminders(conn, expense["car_id"])
+        return render_template("expense_reminders.html", expense=expense, open_ones=open_ones, errors=errors or {},
+                               message=MESSAGES.get(request.args.get("msg", ""))), status
+
+    @app.get("/<int:expense_id>/reminders")
+    def expense_reminders(expense_id):
+        return render_expense_reminders(expense_id)
+
+    @app.post("/<int:expense_id>/reminders")
+    def expense_reminders_resolve(expense_id):
+        with connect() as conn:
+            expense = load_or_404(conn, expense_id)
+            ids = request.form.getlist("reminder_id")
+            rows = [db.get_reminder(conn, int(i)) if i.isdigit() and int(i) < 2 ** 31 else None for i in ids]
+        if not ids:
+            return redirect(url_for("index"), 303)
+        if any(r is None or r["car_id"] != expense["car_id"] or r["resolved_at"] is not None for r in rows):
+            return render_expense_reminders(expense_id, {"reminder_id": "Choose from this car's open reminders."}, 400)
+        with connect() as conn:
+            results = [reminders.resolve(conn, teslamate(conn), r["id"], ZoneInfo(tz), expense) for r in rows]
+        log.info("expense %s resolved %d reminder(s)", expense_id, len(results))
+        return redirect(url_for("reminders_page", msg=resolved_message(results)), 303)
 
     @app.post("/categories/<int:category_id>/pool")
     def category_pool(category_id):

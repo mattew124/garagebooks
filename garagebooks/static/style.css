@@ -7,6 +7,7 @@
   --text: #15181d; --muted: #5b6472;
   --accent: #0b6bcb; --accent-soft: #e6f0fb; --on-accent: #fff;
   --good: #17753a; --good-soft: #e8f5ec; --bad: #b3261e; --bad-soft: #fbeceb;
+  --warn: #8a4b00; --warn-soft: #fdf0d9;
   --header: rgb(255 255 255 / .9);
   --shadow: 0 1px 2px rgb(16 24 40 / .06), 0 4px 16px rgb(16 24 40 / .05);
   --r: .75rem; --r-small: .6rem;
@@ -17,6 +18,7 @@
     --text: #e9ebef; --muted: #99a2b1;
     --accent: #58a6f5; --accent-soft: #14283d; --on-accent: #06121f;
     --good: #5fd08a; --good-soft: #14301f; --bad: #ff8a80; --bad-soft: #3a1b19;
+    --warn: #f5b84d; --warn-soft: #382a0e;
     --header: rgb(23 26 32 / .9);
     --shadow: none;
   }
@@ -320,3 +322,31 @@ a.secondary-link { background: var(--surface); color: var(--text); border: 1px s
 .lease-form legend { font-weight: 700; padding: 0 .4rem; }
 .lease-form label.check { display: flex; align-items: center; gap: .5rem; }
 .lease-form label.check input { flex: none; }
+
+/* ---- reminders ---- */
+nav a .count { display: inline-block; min-width: 1.3rem; padding: 0 .35rem; border-radius: 99px; background: var(--bad); color: #fff;
+  font-size: .8rem; font-weight: 700; line-height: 1.3rem; text-align: center; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.reminder-list { list-style: none; margin: .5rem 0 1rem; padding: 0; display: grid; gap: .75rem; }
+.reminder.card { padding: .8rem 1rem; }
+.reminder-head { display: flex; gap: .5rem 1rem; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.reminder .due { margin: .25rem 0 0; }
+.reminder .meta { margin: .15rem 0 0; }
+.reminder .left { font-weight: 600; }
+.reminder-actions { display: flex; gap: .5rem 1.25rem; align-items: start; flex-wrap: wrap; margin-top: .5rem; }
+.reminder-actions details { flex: 1 1 100%; order: 3; }
+.reminder-actions summary { cursor: pointer; color: var(--accent); font-weight: 600; }
+.reminder-actions details[open] { margin-top: .25rem; }
+.reminder-actions form.stack { margin-top: .5rem; }
+.badge { display: inline-flex; align-items: center; gap: .3rem; border-radius: 99px; padding: .05rem .65rem; font-size: .85rem; font-weight: 700;
+  border: 1px solid currentColor; white-space: nowrap; }
+.badge > span { font-weight: 800; }
+.status-overdue { color: var(--bad); background: var(--bad-soft); }
+.status-due_soon, .status-unknown { color: var(--warn); background: var(--warn-soft); }
+.status-upcoming, .status-info, .status-resolved { color: var(--muted); background: var(--sunken); }
+.status-resolved { color: var(--good); background: var(--good-soft); }
+fieldset.due-fields { border: 1px solid var(--line); border-radius: var(--r-small); padding: .6rem .9rem .9rem; min-width: 0; display: grid; gap: .75rem; }
+label.check { display: flex; align-items: center; gap: .5rem; font-weight: 500; }
+.pager { margin: 0 0 1rem; }
+#add-reminder { margin-top: 1.5rem; }
+#resolved { margin-top: 2rem; }
