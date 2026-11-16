@@ -1,8 +1,8 @@
 """GarageBooks: a small web UI for recording what the car costs to own.
 
-Data lives in the `garagebooks` schema of the TeslaMate database; the Grafana
-dashboard in grafana/ turns it (plus TeslaMate's own charging costs) into total
-cost of ownership.
+Data lives in the `garagebooks` schema, in TeslaMate's database where there is a TeslaMate;
+the Grafana dashboard in grafana/ turns it (plus TeslaMate's own charging costs, when it has
+them) into total cost of ownership. TeslaMate is optional: see sources.py.
 """
 
 import hashlib
@@ -16,12 +16,13 @@ from datetime import date, datetime, time as dtime, timedelta, timezone
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
-from flask import Flask, abort, g, jsonify, make_response, redirect, render_template, request, send_file, url_for
+from flask import (Flask, abort, g, has_request_context, jsonify, make_response, redirect, render_template, request,
+                   send_file, url_for)
 
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from . import compat, dashboard, db, docinfo, icons, invoices, logs, onedrive, storage, updates, validation
+from . import dashboard, db, docinfo, icons, invoices, lease, leaseform, logs, onedrive, reminders, sources, storage, updates, validation
 
 log = logging.getLogger("garagebooks.app")
 
@@ -40,6 +41,28 @@ MESSAGES = {
                             "this car's invoices. Choose its folder on the Invoice storage page, then upload "
                             "it again.",
     "category": "Category added.",
+    "car_added": "Car added.",
+    "car_saved": "Car saved.",
+    "car_deleted": "Car deleted.",
+    "car_sold": "Sale saved.",
+    "car_sold_early": "Sale saved. The sale date is before the car's first expense, so its figures may look odd.",
+    "car_unsold": "Sale cleared.",
+    "lease_added": "Lease added.",
+    "lease_saved": "Lease saved.",
+    "lease_added_not_uploaded": "Lease added. The PDF wasn't kept: choose a folder for this car on the Invoice storage page first.",
+    "lease_saved_not_uploaded": "Lease saved. The PDF wasn't kept: choose a folder for this car on the Invoice storage page first.",
+    "lease_deleted": "Lease deleted.",
+    "reminder_added": "Reminder added.",
+    "reminder_saved": "Reminder saved.",
+    "reminder_deleted": "Reminder deleted.",
+    "reminder_resolved": "Reminder resolved.",
+    "reminder_resolved_next": "Reminder resolved, and the next one is added.",
+    "reminder_resolved_exists": "Reminder resolved. The next one already exists, so no other was added.",
+    "reminder_resolved_no_odometer": "Reminder resolved. No odometer is known to count the next one from, so it "
+                                     "wasn't created: add it yourself.",
+    "reminder_reopened": "Reminder reopened. The next one it had added was removed.",
+    "reminder_reopened_kept": "Reminder reopened. The next one had been edited or resolved, so it was left as it is.",
+    "category_pool": "Budget pool saved.",
     "settings": "Settings saved.",
     "folders": "Folders saved.",
     "connected": "OneDrive connected.",
@@ -52,8 +75,10 @@ MESSAGES = {
 
 # PDFs read per page without JavaScript: each is downloaded and text-extracted (OCR for scans) while
 # the request waits, so a big folder is worked through in rounds. The normal page reads them all, one request each.
+TESLAMATE_RECHECK_SECONDS = 60   # how often the app looks again at whether TeslaMate is there and readable
 TOKEN_MARGIN_SECONDS = 120   # a kept access token is dropped this long before it expires
 IMPORT_BATCH = 10
+LEASE_FOLDER = "Lease"       # the subfolder of a car's folder that its lease documents are saved in
 # ...and stop reading more files once a round has taken this long (OCR can take 10+ seconds a file,
 # and a request that outlasts gunicorn's 120 s timeout is killed), leaving the rest for the next round.
 IMPORT_BUDGET_SECONDS = 75
@@ -104,9 +129,54 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             db.migrate()
         else:
             log.info("SKIP_MIGRATE=1: not touching the schema")
-        with db.connect() as conn:   # refuses to start on a TeslaMate newer than the tested one
-            compat.check(conn, allow_untested=os.environ.get("ALLOW_UNTESTED_TESLAMATE") == "1")
+            with db.connect() as conn:
+                if not db.has_schema(conn):
+                    raise RuntimeError("SKIP_MIGRATE=1, but the 'garagebooks' schema in this database is from an "
+                                       "older release. Run scripts/provision-db.sh again, then start the app.")
+    # Who made a change, for the change history. The sign-in gate in front of the app names the user in
+    # a request header; AUTH_USER_HEADER says which. Unset (the default) the header is never read: it is
+    # only trustworthy when the proxy strips it from client requests. Every database connection the
+    # app opens passes it on, so each write path is covered, and it lasts for that transaction only.
+    actor_header = (os.environ.get("AUTH_USER_HEADER") or "").strip()
+    if actor_header:
+        open_connection = connect
+
+        def connect():
+            conn = open_connection()
+            actor = validation.parse_actor(request.headers.get(actor_header)) if has_request_context() else None
+            if conn is not None and actor:
+                conn.execute("SELECT set_config('garagebooks.actor', %s, true)", (actor,))
+            return conn
     dashboard_dir = os.environ.get("DASHBOARD_DIR")
+    allow_untested = os.environ.get("ALLOW_UNTESTED_TESLAMATE") == "1"
+    # What is known about TeslaMate, looked at again every so often: it may be installed, upgraded
+    # or repaired while the app runs. "view" is the form the ownership view was last put in.
+    known = {"teslamate": sources.TeslaMate(sources.UNAVAILABLE, "The database has not been looked at yet."),
+             "at": None, "view": None, "logged": None}
+
+    def teslamate(conn=None, fresh=False):
+        """TeslaMate's state (sources.TeslaMate). With a connection, and when it was last looked at over
+        a minute ago (or fresh=True), look again: add its new cars to ours, and put the ownership view
+        in the form that fits."""
+        now = time.monotonic()
+        if conn is None or not (fresh or known["at"] is None or now - known["at"] > TESLAMATE_RECHECK_SECONDS):
+            return known["teslamate"]
+        found = sources.detect(conn, allow_untested)
+        known["teslamate"], known["at"] = found, now
+        if (found.state, found.reason) != known["logged"]:
+            known["logged"] = (found.state, found.reason)
+            if found.state == sources.OK and found.reason:
+                log.error("ALLOW_UNTESTED_TESLAMATE=1: using TeslaMate's figures anyway. %s", found.reason)
+            elif found.state == sources.OK:
+                log.info("TeslaMate: installed and within what was tested; its odometer and charging figures are used")
+            elif found.state == sources.ABSENT:
+                log.info("TeslaMate: not installed in this database; everything comes from what is entered by hand")
+            else:
+                log.warning("TeslaMate: %s; its figures are held back. %s", found.state, found.reason)
+        sources.sync_cars(conn, found)
+        if known["view"] != found.usable and db.build_ownership(conn, found.usable) is not None:
+            known["view"] = found.usable
+        return found
 
     def refresh_dashboard():
         """Write the dashboard with a time range that starts at the earliest data. Run on start and
@@ -116,15 +186,26 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         try:
             try:
                 with connect() as conn:
-                    start = db.first_activity(conn)
+                    start = sources.first_activity(conn, teslamate(conn))
             except Exception as exc:    # no data yet, or no database: Grafana's own default range then
                 log.info("Dashboard time range left at its default (%s)", exc)
                 start = None
-            wrote = dashboard.export(dashboard_dir, tz, os.environ.get("BASE_PATH", "").rstrip("/"), start=start)
+            try:
+                with connect() as conn:
+                    sold = any(car["sold_at"] is not None for car in db.cars(conn))
+            except Exception:           # noqa: BLE001 - no database yet: the panel is left out until a sale is known
+                sold = False
+            wrote = dashboard.export(dashboard_dir, tz, os.environ.get("BASE_PATH", "").rstrip("/"), start=start,
+                                     teslamate=known["teslamate"], sold=sold)
             log.info("Grafana dashboard %s in %s", "written" if wrote else "already up to date", dashboard_dir)
         except OSError as exc:
             log.warning("Could not write the Grafana dashboard to %s: %s", dashboard_dir, exc)
 
+    try:
+        with connect() as conn:
+            teslamate(conn, fresh=True)
+    except Exception as exc:    # noqa: BLE001 - no database yet: looked at again on the first request
+        log.info("TeslaMate not looked for at start: %s", exc)
     refresh_dashboard()
     # Room for the largest PDF plus the rest of the form.
     app.config["MAX_CONTENT_LENGTH"] = validation.MAX_PDF_BYTES + 1024 * 1024
@@ -193,9 +274,17 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
     def km(value):
         return "—" if value is None else f"{float(value):,.0f} km"
 
+    @app.template_filter("percent")
+    def percent(value):
+        return "—" if value is None else f"{Decimal(value).normalize():f}%"
+
     @app.template_filter("when")
     def when(value):
         return value.astimezone(ZoneInfo(tz)).strftime("%d %b %Y %H:%M")
+
+    @app.template_filter("isodate")
+    def isodate(value):
+        return value.astimezone(ZoneInfo(tz)).date().isoformat()
 
     @app.template_filter("day")
     def day(value):
@@ -250,6 +339,18 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                                text="Invoice PDF is too large (max 20 MB). Go back and choose a smaller file."), 413
 
     @app.before_request
+    def refuse_nul_bytes():
+        """Postgres text can't hold a NUL (and the file system won't take one in a path), so one in any
+        field or query value is refused here with a 400, rather than failing later as a server error."""
+        for source in (request.args, request.form):
+            if any("\x00" in key or "\x00" in value for key, value in source.items(multi=True)):
+                text = "That request contains a character the app can't store. Go back and remove it."
+                if request.path.startswith("/api/"):
+                    return jsonify(error=text), 400
+                return render_template("error.html", title="Invalid request", text=text), 400
+        return None
+
+    @app.before_request
     def same_origin_posts():
         """CSRF guard: a state-changing request must come from this site's own
         pages. Behind a forward-auth gate the browser's cookies are sent
@@ -260,6 +361,23 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         source = request.headers.get("Origin") or request.headers.get("Referer")
         if not source or urlparse(source).netloc != request.host:
             abort(403)
+
+    @app.before_request
+    def look_for_teslamate():
+        """Once a minute at most: has TeslaMate appeared, gone or changed? The dashboard follows."""
+        if request.endpoint in (None, "static", "healthz", "provider_icon"):
+            return
+        if known["at"] is not None and time.monotonic() - known["at"] <= TESLAMATE_RECHECK_SECONDS:
+            return
+        before = known["teslamate"]
+        try:
+            with connect() as conn:
+                teslamate(conn)
+        except Exception as exc:    # noqa: BLE001 - the page itself will say the database is down
+            log.debug("TeslaMate not looked for: %s", exc)
+            return
+        if known["teslamate"] != before:
+            refresh_dashboard()
 
     @app.context_processor
     def dashboards_link():
@@ -278,7 +396,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 # Which storage each car's invoices go to, for the file picker: only where it can be used.
                 "car_storage": {car_id: f["backend"] for car_id, f in folders.items() if store_for(f["backend"])},
                 "default_storage": "onedrive" if drive else "local",
-                "cars": db.cars(conn),
+                "cars": sorted(db.cars(conn), key=lambda c: c["sold_at"] is not None),   # sold cars last (the sort is stable)
                 "categories": db.categories(conn),
                 "values": values or {},
                 "errors": errors or {},
@@ -539,6 +657,10 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             expense_id = db.insert_expense(conn, values)
         refresh_dashboard()
         log.info("expense %s saved (car %s, category %s)", expense_id, values["car_id"], values["category_id"])
+        with connect() as conn:
+            offer = bool(db.stored_open_reminders(conn, values["car_id"]))
+        if offer:       # the car has open reminders: offer to resolve them with this expense
+            return redirect(url_for("expense_reminders", expense_id=expense_id, msg=saved_msg("saved")), 303)
         return redirect(url_for("index", **list_view(), msg=saved_msg("saved")), 303)
 
     def load_or_404(conn, expense_id):
@@ -560,7 +682,9 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             "vendor": row["vendor"] or "", "notes": row["notes"] or "",
             "invoice_url": row["invoice_url"] or "", "invoice_path": row["invoice_path"] or "",
         }
-        return render_template("form.html", **form_context(values, expense_id=expense_id))
+        with connect() as conn:
+            offer = bool(db.stored_open_reminders(conn, row["car_id"]))
+        return render_template("form.html", **form_context(values, expense_id=expense_id), reminder_offer=offer)
 
     @app.post("/<int:expense_id>/edit")
     def update(expense_id):
@@ -599,8 +723,589 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 error = str(exc)
         with connect() as conn:
             cats = db.categories(conn)
-        return render_template("categories.html", categories=cats, error=error,
+            budgets_on = db.lease_budgets_on(conn)
+        return render_template("categories.html", categories=cats, error=error, pools=lease.POOLS, budgets_on=budgets_on,
                                message=MESSAGES.get(request.args.get("msg", ""))), (400 if error else 200)
+
+    # ---- cars ----------------------------------------------------------------
+
+    def render_cars(errors=None, values=None, status=200):
+        now = datetime.now(ZoneInfo(tz))
+        with connect() as conn:
+            state = teslamate(conn)
+            cars = db.car_details(conn)
+            for car in cars:
+                car["odometer"] = sources.odometer_at(conn, state, car["id"], min(car["sold_at"] or now, now))
+        return render_template("cars.html", cars=cars, kinds=db.CAR_KINDS, teslamate=state, errors=errors or {},
+                               values=values or {}, today=now.date().isoformat(),
+                               message=MESSAGES.get(request.args.get("msg", ""))), status
+
+    @app.get("/cars")
+    def cars_page():
+        return render_cars()
+
+    def parse_car():
+        """The car's own details and, when a price is entered, its purchase. -> (values, purchase, errors)."""
+        values, errors = validation.parse_car_form(request.form, db.CAR_KINDS)
+        purchase, more = validation.parse_purchase(request.form, tz, datetime.now(ZoneInfo(tz)))
+        return values, purchase, {**errors, **more}
+
+    def save_purchase(conn, car_id, purchase):
+        """-> an error for the price box, or None. Nothing entered leaves the purchase as it is."""
+        if purchase is None:
+            return None
+        outcome = db.set_purchase(conn, car_id, purchase)
+        if outcome == "several":
+            return "This car has more than one purchase expense, so the total can't be changed here: edit them in the expense list."
+        if outcome == "no_category":
+            return "There is no purchase category to record it in."
+        return None
+
+    @app.post("/cars")
+    def car_add():
+        values, purchase, errors = parse_car()
+        if errors:
+            return render_cars({"new": errors}, {"new": request.form}, 400)
+        with connect() as conn:
+            car_id = db.add_car(conn, values)
+            save_purchase(conn, car_id, purchase)
+        refresh_dashboard()
+        log.info("car %s added by hand", car_id)
+        return redirect(url_for("cars_page", msg="car_added"), 303)
+
+    @app.post("/cars/<int:car_id>")
+    def car_update(car_id):
+        car_or_404(car_id)
+        values, purchase, errors = parse_car()
+        if not errors:
+            try:
+                with connect() as conn:
+                    db.update_car(conn, car_id, values)
+                    problem = save_purchase(conn, car_id, purchase)
+                    if problem:
+                        raise ValueError(problem)       # nothing is saved: the car's details wait with the price
+            except ValueError as exc:
+                errors["purchase_price"] = str(exc)
+        if errors:
+            return render_cars({car_id: errors}, {car_id: request.form}, 400)
+        refresh_dashboard()
+        log.info("car %s updated", car_id)
+        return redirect(url_for("cars_page", msg="car_saved"), 303)
+
+    @app.post("/cars/<int:car_id>/sale")
+    def car_sale(car_id):
+        car = car_or_404(car_id)
+        now = datetime.now(ZoneInfo(tz))
+        if request.form.get("action") == "clear":
+            values, errors = {"sold_at": None, "sale_price": None, "sale_km": None}, {}
+        else:
+            # The final odometer is asked for; a car TeslaMate tracks may leave it to TeslaMate.
+            values, errors = validation.parse_sale(request.form, tz, now,
+                                                   km_required=car["teslamate_car_id"] is None)
+        if errors:
+            return render_cars({car_id: errors}, {car_id: request.form}, 400)
+        with connect() as conn:
+            db.set_sale(conn, car_id, values["sold_at"], values["sale_price"], values["sale_km"])
+            first = db.first_expense_at(conn, car_id)
+        refresh_dashboard()
+        log.info("car %s sale %s", car_id, "recorded" if values["sold_at"] else "cleared")
+        if values["sold_at"] is None:
+            msg = "car_unsold"
+        elif first is not None and values["sold_at"] < first:
+            msg = "car_sold_early"
+        else:
+            msg = "car_sold"
+        return redirect(url_for("cars_page", msg=msg), 303)
+
+    @app.post("/cars/<int:car_id>/delete")
+    def car_delete(car_id):
+        car_or_404(car_id)
+        with connect() as conn:
+            deleted = db.delete_car(conn, car_id)
+        if not deleted:
+            return render_cars({car_id: {"delete": "Only a car added by hand that has no expenses can be deleted."}},
+                               status=400)
+        log.info("car %s deleted", car_id)
+        return redirect(url_for("cars_page", msg="car_deleted"), 303)
+
+    # ---- leases (roadmap L1) -------------------------------------------------------
+
+    def today_here():
+        return datetime.now(ZoneInfo(tz)).date()
+
+    def lease_context(car, **extra):
+        with connect() as conn:
+            budgets_on = db.lease_budgets_on(conn)
+            folder = db.car_folders(conn).get(car["id"])
+            kind = folder["backend"] if folder and store_for(folder["backend"]) and connected(conn, folder["backend"]) else None
+        return dict(car=car, pools=lease.POOLS, frequencies={k: v[0] for k, v in lease.FREQUENCIES.items()},
+                    fbt_methods=lease.FBT_METHODS, tax_treatments=lease.TAX_TREATMENTS, budgets_on=budgets_on,
+                    documents=validation.LEASE_DOCUMENTS, storage_kind=kind, doc_link=lease_doc_link,
+                    message=MESSAGES.get(request.args.get("msg", "")), **extra)
+
+    def lease_doc_link(row, doc):
+        """Where a lease's kept document opens: its link, or the app's own address for a file in the folder."""
+        if row.get(f"{doc}_url"):
+            return row[f"{doc}_url"]
+        if row.get(f"{doc}_path") and local is not None:
+            return url_for("local_file", path=row[f"{doc}_path"])
+        return None
+
+    def lease_view(conn, row, today):
+        """A lease with its budgets and the read-only figures worked out from them."""
+        budgets = db.lease_budgets(conn, row["id"])
+        return {**row, "budgets": {b["pool"]: b["yearly_amount"] for b in lease.initial_budgets(row, budgets)},
+                "later_budgets": [b for b in budgets if b["effective_from"] != row["start_date"]],
+                "figures": lease.derived(row, budgets, today)}
+
+    def render_lease(car, status=200):
+        today = today_here()
+        with connect() as conn:
+            current = db.current_lease(conn, car["id"], today)
+            views = [lease_view(conn, row, today) for row in db.car_leases(conn, car["id"])]
+        shown = next((v for v in views if current and v["id"] == current["id"]), None)
+        others = [v for v in views if v is not shown]
+        return render_template("lease.html", **lease_context(car, shown=shown, others=others, today=today)), status
+
+    def render_lease_form(car, lease_id, values, errors, status=200):
+        return render_template("lease_form.html", **lease_context(car, lease_id=lease_id, values=values, errors=errors)), status
+
+    def lease_form_values(row, budgets):
+        """A saved lease as the form's text fields."""
+        values = {k: ("" if v is None else v) for k, v in row.items()}
+        values["associate_lease"] = "on" if row["associate_lease"] else ""
+        for pool, amount in budgets.items():
+            values[f"budget_{pool}"] = amount
+        return values
+
+    def parse_lease(car, lease_id=None):
+        """-> (values, errors). A PDF chosen for the lease form or the agreement is saved to the car's folder
+        once everything else is right; with no folder to save to, the lease is still saved (g.lease_note)."""
+        car_id = car["id"]
+        with connect() as conn:
+            budgets_on = db.lease_budgets_on(conn)
+        values, errors = validation.parse_lease_form(request.form, lease.POOLS, lease.FREQUENCIES,
+                                                     lease.FBT_METHODS, lease.TAX_TREATMENTS, budgets_on)
+        if not errors:
+            with connect() as conn:
+                clash = db.overlapping_lease(conn, car_id, values["start_date"], values["end_date"], lease_id)
+            if clash:
+                errors["start_date"] = (f"These dates overlap the lease from {clash['start_date']:%d %b %Y} "
+                                        f"to {clash['end_date']:%d %b %Y}. A car has one current lease: "
+                                        "end that one first, or change these dates.")
+        chosen = {}
+        for doc in validation.LEASE_DOCUMENTS:
+            upload = request.files.get(f"{doc}_file")
+            try:
+                pdf = validation.parse_invoice_pdf(upload and upload.filename, upload.read() if upload else b"")
+            except ValueError as exc:
+                errors[f"{doc}_file"] = str(exc)
+                continue
+            if pdf is not None:
+                chosen[doc] = pdf
+        if errors:
+            for doc in chosen:
+                errors.setdefault(f"{doc}_file", "Fix the details below, then choose the PDF again.")
+            return values, errors
+        if chosen and not upload_ready(car_id):
+            log.info("lease documents not saved: no invoice storage is set up for car %s", car_id)
+            g.lease_note = "not_uploaded"
+            return values, errors
+        for doc, pdf in chosen.items():
+            try:
+                store, ref = upload_lease_document(car, values, doc, pdf)
+            except storage.StorageError as exc:
+                log.warning("lease document upload failed: %s", exc)
+                errors[f"{doc}_file"] = exc.user_message
+                return values, errors
+            values[f"{doc}_url"] = values[f"{doc}_path"] = None
+            values[f"{doc}_{'path' if store.ref_field == 'invoice_path' else 'url'}"] = ref
+            log.info("lease document (%s) saved to %s (%d bytes)", doc, store.name, len(pdf))
+        return values, errors
+
+    def upload_lease_document(car, values, doc, pdf):
+        """Save a lease document in the "Lease" subfolder of the car's folder. -> (the storage, the file's reference)."""
+        with connect() as conn:
+            folder = db.car_folders(conn).get(car["id"])
+            store = store_for(folder["backend"]) if folder else None
+            settings_row = db.get_settings(conn)
+        if store is None:
+            raise storage.StorageError("Choose a folder for this car on the Invoice storage page first.")
+        start = values["start_date"]
+        name = validation.invoice_filename(
+            datetime(start.year, start.month, start.day), validation.LEASE_DOCUMENTS[doc],
+            values.get("package_name") or values.get("financier"), settings_row["invoice_date_format"],
+            settings_row["invoice_name_format"], car=car["name"])
+        return store, store.upload(store.ensure_subfolder(folder["folder_id"], LEASE_FOLDER), name, pdf)
+
+    def lease_msg(base):
+        return base + "_not_uploaded" if getattr(g, "lease_note", None) else base
+
+    @app.get("/cars/<int:car_id>/lease")
+    def car_lease(car_id):
+        return render_lease(car_or_404(car_id))
+
+    @app.get("/cars/<int:car_id>/lease/new")
+    def car_lease_new(car_id):
+        car = car_or_404(car_id)
+        return render_lease_form(car, None, {"fbt_method": "statutory", "statutory_percent": "20",
+                                             "tax_treatment": "employee_contribution"}, {})
+
+    @app.post("/cars/<int:car_id>/lease/new")
+    def car_lease_create(car_id):
+        car = car_or_404(car_id)
+        values, errors = parse_lease(car)
+        if errors:
+            return render_lease_form(car, None, request.form, errors, 400)
+        with connect() as conn:
+            lease_id = db.add_lease(conn, car_id, values)
+        if lease_id is None:      # another lease was added between the check and the save
+            return render_lease_form(car, None, request.form, {"start_date": "These dates overlap another lease of this car."}, 400)
+        log.info("lease %s added to car %s", lease_id, car_id)
+        return redirect(url_for("car_lease", car_id=car_id, msg=lease_msg("lease_added")), 303)
+
+    def lease_or_404(car_id, lease_id):
+        with connect() as conn:
+            row = db.get_lease(conn, lease_id, car_id)
+            budgets = db.lease_budgets(conn, lease_id) if row else []
+        if row is None:
+            abort(404)
+        return row, lease.initial_budgets(row, budgets)
+
+    @app.get("/cars/<int:car_id>/lease/<int:lease_id>/edit")
+    def car_lease_edit(car_id, lease_id):
+        car = car_or_404(car_id)
+        row, first = lease_or_404(car_id, lease_id)
+        values = lease_form_values(row, {b["pool"]: b["yearly_amount"] for b in first})
+        return render_lease_form(car, lease_id, values, {})
+
+    @app.post("/cars/<int:car_id>/lease/<int:lease_id>/edit")
+    def car_lease_update(car_id, lease_id):
+        car = car_or_404(car_id)
+        lease_or_404(car_id, lease_id)
+        values, errors = parse_lease(car, lease_id)
+        if errors:
+            return render_lease_form(car, lease_id, request.form, errors, 400)
+        with connect() as conn:
+            outcome = db.update_lease(conn, car_id, lease_id, values)
+        if outcome == "missing":
+            abort(404)
+        if outcome == "overlap":
+            return render_lease_form(car, lease_id, request.form, {"start_date": "These dates overlap another lease of this car."}, 400)
+        log.info("lease %s of car %s updated", lease_id, car_id)
+        return redirect(url_for("car_lease", car_id=car_id, msg=lease_msg("lease_saved")), 303)
+
+    @app.post("/cars/<int:car_id>/lease/<int:lease_id>/delete")
+    def car_lease_delete(car_id, lease_id):
+        car_or_404(car_id)
+        with connect() as conn:
+            if not db.delete_lease(conn, car_id, lease_id):
+                abort(404)
+        log.info("lease %s of car %s deleted", lease_id, car_id)
+        return redirect(url_for("car_lease", car_id=car_id, msg="lease_deleted"), 303)
+
+    @app.post("/api/lease-prefill")
+    def api_lease_prefill():
+        """Read a provider's lease form and propose the Add a lease page's fields: the PDF just chosen on the
+        computer, or one already in a storage (onedrive_id or local_id). Only the lease's own figures are
+        read (leaseform.py); nothing is saved here."""
+        upload = request.files.get("form_file")
+        filename = upload and upload.filename
+        data = upload.read() if upload else b""
+        kind = next((k for k in STORES if request.form.get(f"{k}_id") and store_for(k)), None)
+        if not upload and kind:
+            filename = request.form.get("name", "")
+            try:
+                data = store_for(kind).download(request.form[f"{kind}_id"])
+            except storage.StorageError as exc:
+                log.warning("lease prefill from %s failed: %s", STORES[kind]["label"], exc)
+                return jsonify(error=exc.user_message), 502
+        try:
+            pdf = validation.parse_invoice_pdf(filename, data)
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
+        if pdf is None:
+            return jsonify(error="Choose a PDF first."), 400
+        found = leaseform.read(invoices.extract_text(pdf))
+        with connect() as conn:
+            if not db.lease_budgets_on(conn):
+                found = {k: v for k, v in found.items() if not k.startswith("budget_")}
+        log.debug("lease prefill file=%s bytes=%d found=%s", docinfo.quote(filename), len(pdf), sorted(found))
+        return jsonify(fields=found)
+
+    # ---- the FBT year report (roadmap L2) -------------------------------------------
+
+    @app.get("/cars/<int:car_id>/fbt")
+    def car_fbt(car_id):
+        car = car_or_404(car_id)
+        today = today_here()
+        try:
+            year = int(request.args["year"]) if "year" in request.args else lease.fbt_year(today)
+        except ValueError:
+            abort(404)
+        if not 1990 <= year <= 2200:
+            abort(404)
+        zone = ZoneInfo(tz)
+        with connect() as conn:
+            rows = db.car_leases(conn, car_id)
+            if not rows:
+                return render_template("fbt.html", car=car, report=None, today=today)
+            budgets_on = db.lease_budgets_on(conn)
+            leases = [(row, db.lease_budgets(conn, row["id"]) if budgets_on else []) for row in rows]
+            costs = db.fbt_costs(conn, car_id, year, tz)
+            years = lease.fbt_years(rows, db.fbt_years_with_expenses(conn, car_id, tz))
+            # TeslaMate's charging for the year (only its part: what was entered by hand is already in the costs)
+            charging = sources.charging_cost(conn, teslamate(conn), car_id, datetime(year, 4, 1, tzinfo=zone),
+                                             datetime(year + 1, 4, 1, tzinfo=zone), include_manual=False)
+        report = lease.fbt_report(leases, costs, charging, year, today)
+        earlier, later = [y for y in years if y < year], [y for y in years if y > year]
+        return render_template("fbt.html", car=car, report=report, today=today, budgets_on=budgets_on, frequencies={k: v[0] for k, v in lease.FREQUENCIES.items()},
+                               previous=earlier[-1] if earlier else None, following=later[0] if later else None,
+                               label=lease.fbt_label)
+    # ---- reminders (roadmap item 4) ------------------------------------------------
+
+    def open_items(conn, car_id=None):
+        """Every open reminder with its status. Worked out when asked, once per request for all cars."""
+        if car_id is None and "reminder_items" in g:
+            return g.reminder_items
+        now = datetime.now(ZoneInfo(tz))
+        items = reminders.due_items(conn, teslamate(conn), now.date(), now, car_id)
+        if car_id is None:
+            g.reminder_items = items
+        return items
+
+    @app.context_processor
+    def reminder_badge():
+        """What the header's Reminders link and the list's notice say: how many are overdue or need a look.
+        A failure to work it out must not take the page down."""
+        try:
+            with connect() as conn:
+                overdue, attention = reminders.attention(open_items(conn))
+        except Exception:      # noqa: BLE001 - the page itself will say the database is down
+            return {"reminder_attention": None}
+        return {"reminder_attention": {"overdue": overdue, "total": attention}}
+
+    def reminder_form_context(conn):
+        now = datetime.now(ZoneInfo(tz))
+        cars = db.cars(conn)
+        state = teslamate(conn)
+        # Each car's odometer now, so a standard reminder's first due reading can be worked out on the page.
+        odometers = {c["id"]: sources.odometer_at(conn, state, c["id"], now) for c in cars}
+        return dict(cars=cars, categories=db.categories(conn), lead_days=reminders.DEFAULT_LEAD_DAYS,
+                    lead_km=reminders.DEFAULT_LEAD_KM, standard=reminders.STANDARD,
+                    odometers={k: v.km for k, v in odometers.items() if v}, today_iso=now.date().isoformat())
+
+    def render_reminders(errors=None, values=None, status=200):
+        page = max(request.args.get("page", 1, type=int) or 1, 1)
+        with connect() as conn:
+            items = open_items(conn)
+            done, total = db.resolved_reminders(conn, reminders.RESOLVED_PAGE, (page - 1) * reminders.RESOLVED_PAGE)
+            choices = {i["car_id"]: db.recent_expenses(conn, i["car_id"]) for i in items if i["reminder_id"]}
+            ctx = reminder_form_context(conn)
+        return render_template("reminders.html", items=items, resolved=done, page=page,
+                               pages=-(-total // reminders.RESOLVED_PAGE) or 1, resolved_total=total, choices=choices,
+                               errors=errors or {}, values=values or {}, today=today_here().isoformat(),
+                               message=MESSAGES.get(request.args.get("msg", "")), **ctx), status
+
+    @app.get("/reminders")
+    def reminders_page():
+        return render_reminders()
+
+    def parse_reminder(car_id=None):
+        with connect() as conn:
+            car_ids = {c["id"] for c in db.cars(conn)}
+            category_ids = {c["id"] for c in db.categories(conn)}
+        return validation.parse_reminder_form(request.form, car_ids, category_ids, car_id)
+
+    @app.post("/reminders")
+    def reminder_add():
+        values, errors = parse_reminder()
+        if errors:
+            return render_reminders({"new": errors}, {"new": request.form}, 400)
+        with connect() as conn:
+            reminder_id = db.add_reminder(conn, values)
+        log.info("reminder %s added to car %s", reminder_id, values["car_id"])
+        return redirect(url_for("reminders_page", msg="reminder_added"), 303)
+
+    def open_reminder_or_404(reminder_id):
+        with connect() as conn:
+            row = db.get_reminder(conn, reminder_id)
+        if row is None or row["resolved_at"] is not None:
+            abort(404)
+        return row
+
+    def render_reminder_edit(row, values, errors, status=200):
+        with connect() as conn:
+            ctx = reminder_form_context(conn)
+        car = next(c for c in ctx["cars"] if c["id"] == row["car_id"])
+        return render_template("reminder_edit.html", reminder=row, car=car, values=values, errors=errors, **ctx), status
+
+    @app.get("/reminders/<int:reminder_id>/edit")
+    def reminder_edit(reminder_id):
+        row = open_reminder_or_404(reminder_id)
+        values = {k: ("" if v is None else v) for k, v in row.items()}
+        return render_reminder_edit(row, values, {})
+
+    @app.post("/reminders/<int:reminder_id>/edit")
+    def reminder_update(reminder_id):
+        row = open_reminder_or_404(reminder_id)
+        values, errors = parse_reminder(row["car_id"])
+        if errors:
+            return render_reminder_edit(row, request.form, errors, 400)
+        with connect() as conn:
+            if not db.update_reminder(conn, reminder_id, values):
+                abort(404)
+        log.info("reminder %s updated", reminder_id)
+        return redirect(url_for("reminders_page", msg="reminder_saved"), 303)
+
+    @app.post("/reminders/<int:reminder_id>/delete")
+    def reminder_delete(reminder_id):
+        with connect() as conn:
+            if not db.delete_reminder(conn, reminder_id):
+                abort(404)
+        log.info("reminder %s deleted", reminder_id)
+        return redirect(url_for("reminders_page", msg="reminder_deleted"), 303)
+
+    def resolved_message(results):
+        if any(r.next_id for r in results):
+            return "reminder_resolved_next"
+        notes = sorted({r.next_note for r in results if r.next_note})
+        return f"reminder_resolved_{notes[0]}" if notes else "reminder_resolved"
+
+    @app.post("/reminders/<int:reminder_id>/resolve")
+    def reminder_resolve(reminder_id):
+        row = open_reminder_or_404(reminder_id)
+        now = datetime.now(ZoneInfo(tz))
+        values, errors = validation.parse_resolve_form(request.form, now.date())
+        expense = None
+        if values["expense_id"] is not None:
+            with connect() as conn:
+                expense = db.get_expense(conn, values["expense_id"])
+            if expense is None or expense["car_id"] != row["car_id"]:
+                errors["expense_id"] = "That expense is not one of this car's."
+        if errors:
+            return render_reminders({reminder_id: errors}, {reminder_id: request.form}, 400)
+        moment = None if expense else reminders.resolution_moment(values["date"], ZoneInfo(tz), now)
+        with connect() as conn:
+            result = reminders.resolve(conn, teslamate(conn), reminder_id, ZoneInfo(tz), expense, moment, values["km"])
+        if result.outcome != "resolved":      # resolved by someone else meanwhile
+            abort(404)
+        log.info("reminder %s resolved%s", reminder_id, f", next {result.next_id}" if result.next_id else "")
+        return redirect(url_for("reminders_page", msg=resolved_message([result])), 303)
+
+    @app.post("/reminders/<int:reminder_id>/unresolve")
+    def reminder_unresolve(reminder_id):
+        with connect() as conn:
+            outcome = reminders.unresolve(conn, reminder_id)
+        if outcome is None:
+            abort(404)
+        log.info("reminder %s reopened", reminder_id)
+        return redirect(url_for("reminders_page", msg="reminder_reopened_kept" if outcome[1] else "reminder_reopened"), 303)
+
+    def render_expense_reminders(expense_id, errors=None, status=200):
+        with connect() as conn:
+            expense = load_or_404(conn, expense_id)
+            open_ones = db.stored_open_reminders(conn, expense["car_id"])
+        return render_template("expense_reminders.html", expense=expense, open_ones=open_ones, errors=errors or {},
+                               message=MESSAGES.get(request.args.get("msg", ""))), status
+
+    @app.get("/<int:expense_id>/reminders")
+    def expense_reminders(expense_id):
+        return render_expense_reminders(expense_id)
+
+    @app.post("/<int:expense_id>/reminders")
+    def expense_reminders_resolve(expense_id):
+        with connect() as conn:
+            expense = load_or_404(conn, expense_id)
+            ids = request.form.getlist("reminder_id")
+            rows = [db.get_reminder(conn, int(i)) if i.isdigit() and int(i) < 2 ** 31 else None for i in ids]
+        if not ids:
+            return redirect(url_for("index"), 303)
+        if any(r is None or r["car_id"] != expense["car_id"] or r["resolved_at"] is not None for r in rows):
+            return render_expense_reminders(expense_id, {"reminder_id": "Choose from this car's open reminders."}, 400)
+        with connect() as conn:
+            results = [reminders.resolve(conn, teslamate(conn), r["id"], ZoneInfo(tz), expense) for r in rows]
+        log.info("expense %s resolved %d reminder(s)", expense_id, len(results))
+        return redirect(url_for("reminders_page", msg=resolved_message(results)), 303)
+
+    @app.post("/categories/<int:category_id>/pool")
+    def category_pool(category_id):
+        pool = (request.form.get("budget_pool") or "").strip() or None
+        if pool is not None and pool not in lease.POOLS:
+            abort(400)
+        with connect() as conn:
+            if not db.set_budget_pool(conn, category_id, pool):
+                abort(404)
+        return redirect(url_for("categories", msg="category_pool"), 303)
+    # ---- change history ---------------------------------------------------------
+
+    # Field -> label, in the order they are shown. id and the created/updated stamps are never shown.
+    history_fields = {
+        "expense": (("car_id", "Car"), ("category_id", "Category"), ("occurred_at", "Date and time"),
+                    ("amount", "Amount"), ("odometer_km", "Odometer"), ("vendor", "Vendor"), ("notes", "Notes"),
+                    ("invoice_url", "Invoice link"), ("invoice_path", "Invoice file")),
+        "category": (("name", "Name"), ("kind", "Kind"), ("sort_order", "Sort order"),
+                     ("upload_folder", "Invoice subfolder")),
+    }
+
+    def history_entries(entries, car_names, category_names):
+        def show(field, value):
+            if value is None or value == "":
+                return "—"
+            if field == "car_id":
+                return car_names.get(value, f"car {value}")
+            if field == "category_id":
+                return category_names.get(value, f"category {value}")
+            if field == "amount":
+                return money(Decimal(str(value)))
+            if field == "odometer_km":
+                return km(value)
+            if field == "occurred_at":
+                try:
+                    return when(datetime.fromisoformat(value))
+                except (TypeError, ValueError):
+                    return str(value)
+            return str(value)
+
+        out = []
+        for e in entries:
+            before, after = e["before_row"] or {}, e["after_row"] or {}
+            row = after or before
+            fields = history_fields[e["table_name"]]
+            if e["operation"] == "update":
+                changed = [(label, show(f, before.get(f)), show(f, after.get(f)))
+                           for f, label in fields if before.get(f) != after.get(f)]
+            else:
+                changed = [(label, None, show(f, row.get(f))) for f, label in fields if row.get(f) not in (None, "")]
+            if e["table_name"] == "expense":
+                title = "Expense: " + " · ".join(
+                    x for x in (category_names.get(row.get("category_id")), car_names.get(row.get("car_id")),
+                                row.get("vendor")) if x)
+            else:
+                title = f"Category: {row.get('name', '')}"
+            out.append({"when": e["changed_at"], "actor": e["actor"], "operation": e["operation"],
+                        "label": {"insert": "Added", "update": "Edited", "delete": "Deleted"}[e["operation"]],
+                        "title": title, "row_id": e["row_id"], "table": e["table_name"], "fields": changed})
+        return out
+
+    @app.get("/history")
+    def history_page():
+        filters = {}
+        car = request.args.get("car", type=int)
+        if car:
+            filters["car"] = car
+        if request.args.get("table") in db.HISTORY_TABLES:
+            filters["table"] = request.args["table"]
+        if request.args.get("operation") in db.HISTORY_OPERATIONS:
+            filters["operation"] = request.args["operation"]
+        with connect() as conn:
+            entries, page, pages = db.history(conn, car, filters.get("table"), filters.get("operation"),
+                                              request.args.get("page", 1, type=int))
+            cars = db.cars(conn)
+            cats = db.categories(conn)
+        shown = history_entries(entries, {c["id"]: c["name"] for c in cars}, {c["id"]: c["name"] for c in cats})
+        return render_template("history.html", entries=shown, cars=cars, filters=filters, page=page, pages=pages,
+                               page_link=lambda n: url_for("history_page", **filters, **({"page": n} if n > 1 else {})))
 
     @app.get("/learned")
     def learned_page():
@@ -628,7 +1333,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         except ValueError as exc:
             with connect() as conn:
                 cats = db.categories(conn)
-            return render_template("categories.html", categories=cats, error=None,
+            return render_template("categories.html", categories=cats, error=None, pools=lease.POOLS,
                                    folder_error=(category_id, str(exc)), message=None), 400
         with connect() as conn:
             if not db.set_upload_folder(conn, category_id, folder):
@@ -890,9 +1595,10 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                   if guess["missing"] else ""))
         if guess["date"] and not row["odometer_km"]:
             with connect() as conn:
-                reading = db.odometer_at(conn, car["id"], datetime.combine(guess["date"], dtime(12), ZoneInfo(tz)))
+                reading = sources.odometer_at(conn, teslamate(), car["id"],
+                                              datetime.combine(guess["date"], dtime(12), ZoneInfo(tz)), manual=False)
             if reading is not None:
-                row["odometer_km"] = f"{reading:.1f}".rstrip("0").rstrip(".")
+                row["odometer_km"] = f"{reading.km:.1f}".rstrip("0").rstrip(".")
                 row["odo_note"] = "from TeslaMate"
         if guess["date"] and guess["amount"] is not None:
             with connect() as conn:
@@ -1226,6 +1932,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 values["invoice_name_format"] = validation.parse_name_format(raw)
             except ValueError as exc:
                 errors["invoice_name_format"] = str(exc)
+            values["lease_budgets"] = bool(request.form.get("lease_budgets"))
             raw = request.form.get("multi_amount", "max")
             values["multi_amount"] = raw
             try:
@@ -1240,7 +1947,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                     db.save_settings(conn, values["app_url"], values["grafana_url"],
                                      None if date_pattern == validation.DEFAULT_DATE_PATTERN else date_pattern,
                                      None if name_format == validation.DEFAULT_NAME_FORMAT else name_format,
-                                     values["multi_amount"])
+                                     values["multi_amount"], values["lease_budgets"])
                 log.info("settings saved")
                 return redirect(url_for("settings", msg="settings"), 303)
         else:
@@ -1316,7 +2023,9 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 request.args.get("date"), request.args.get("time"), tz)
         except ValueError as exc:
             return jsonify(error=str(exc)), 400
+        # Only TeslaMate's: an older reading entered by hand is not the odometer on this day.
         with connect() as conn:
-            return jsonify(odometer_km=db.odometer_at(conn, car_id, when))
+            reading = sources.odometer_at(conn, teslamate(), car_id, when, manual=False)
+        return jsonify(odometer_km=reading.km if reading else None)
 
     return app

@@ -85,7 +85,7 @@ def test_render_starts_the_time_range_at_the_earliest_data():
 def test_period_variable_drives_the_bucketed_charts():
     assert [o["value"] for o in var(SOURCE, "period")["options"]] == ["week", "month", "year"]
     for p in SOURCE["panels"]:
-        if p["title"].startswith(("Running costs per", "Cumulative")):
+        if p["title"].startswith(("Running costs per", "Cumulative")) and "FBT year" not in p["title"]:   # that one is always per FBT year
             assert "date_trunc('$period'" in p["targets"][0]["rawSql"]
 
 
@@ -132,3 +132,52 @@ def test_the_invoice_column_links_a_stored_invoice_to_the_app():
     sql = next(t["rawSql"] for p in SOURCE["panels"] for t in p.get("targets", []) if '"Invoice"' in t.get("rawSql", ""))
     assert "e.invoice_path IS NOT NULL" in sql and "${app_url:sqlstring}" in sql
     assert "'/invoice/' || e.id" in sql and "ELSE e.invoice_url END" in sql
+
+
+# ---- the Sold panel is there only once a car has been sold ------------------------------------
+
+def titles(dash):
+    return [p["title"] for p in dash["panels"]]
+
+
+def test_the_sold_panel_is_left_out_until_a_car_is_sold_and_its_row_is_shared_by_the_rest():
+    dash = dashboard.render("UTC", "", sold=False)
+    assert "Sold" not in titles(dash) and "Sold" in titles(dashboard.render("UTC", ""))
+    assert "Sold" in titles(dashboard.render("UTC", "", sold=True))
+    sold = next(p for p in SOURCE["panels"] if p["title"] == "Sold")
+    row = [p for p in dash["panels"] if p["gridPos"]["y"] == sold["gridPos"]["y"] and p["gridPos"]["h"] == sold["gridPos"]["h"]]
+    assert len(row) == 3 and [p["gridPos"]["w"] for p in row] == [8, 8, 8]
+    assert sorted(p["gridPos"]["x"] for p in row) == [0, 8, 16]
+    assert len(dash["panels"]) == len(SOURCE["panels"]) - 1
+    ids = [p["id"] for p in dash["panels"]]
+    assert len(ids) == len(set(ids))
+    other = [p for p in dash["panels"] if p not in row]       # every other panel is as shipped
+    assert all(p in SOURCE["panels"] for p in other)
+
+
+def test_export_writes_the_dashboard_with_or_without_the_sold_panel(tmp_path):
+    assert dashboard.export(tmp_path, "UTC", "", sold=False) is True
+    target = tmp_path / dashboard.FILENAME
+    assert "Sold" not in titles(json.loads(target.read_text()))
+    assert dashboard.export(tmp_path, "UTC", "", sold=False) is False       # unchanged: not rewritten
+    assert dashboard.export(tmp_path, "UTC", "", sold=True) is True         # a sale brings the panel back
+    assert "Sold" in titles(json.loads(target.read_text()))
+
+
+def test_the_app_writes_the_panel_after_a_sale_and_drops_it_again_when_the_sale_is_cleared(empty_db, monkeypatch, tmp_path):
+    from tests.test_sources import ORIGIN, connect, start
+    client = start(empty_db, monkeypatch, DASHBOARD_DIR=str(tmp_path))
+    target = tmp_path / dashboard.FILENAME
+    assert "Sold" not in titles(json.loads(target.read_text()))              # nothing sold at start
+    client.post("/cars", data={"name": "Ute", "kind": "ICE"}, headers=ORIGIN)
+    with connect(empty_db) as conn:
+        car_id = conn.execute("SELECT id FROM garagebooks.car").fetchone()["id"]
+    sale = {"date": "2025-03-01", "price": "1000", "km": "5000"}
+    assert client.post(f"/cars/{car_id}/sale", data=sale, headers=ORIGIN).status_code == 303
+    assert "Sold" in titles(json.loads(target.read_text()))
+    assert client.post(f"/cars/{car_id}/sale", data={"action": "clear"}, headers=ORIGIN).status_code == 303
+    assert "Sold" not in titles(json.loads(target.read_text()))
+    sale_again = {**sale, "price": "1200"}
+    client.post(f"/cars/{car_id}/sale", data=sale_again, headers=ORIGIN)
+    start(empty_db, monkeypatch, DASHBOARD_DIR=str(tmp_path))                # a restart keeps it, as a car is sold
+    assert "Sold" in titles(json.loads(target.read_text()))

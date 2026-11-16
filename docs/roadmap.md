@@ -51,9 +51,9 @@ directly.
     row with the same id, so no expense changes or moves. A car added by hand never needs TeslaMate.
   - **Sources, not queries.** A small interface that answers "which cars are there?", "what was this
     car's odometer at this time?" and "what did charging cost?". TeslaMate answers from the tables it
-    reads now. Manual odometer readings, and charging and fuel entries, answer for every other car. A
+    reads now. The odometer on expenses, and charging and fuel entries, answer for every other car. A
     feature asks the interface and handles "no answer", so cost per km, reminders and kilometre pace
-    run from manual readings.
+    run from the odometer on expenses.
   - **A schema that starts without TeslaMate's tables.** `schema.sql` stops requiring `public.cars`.
     The ownership view is built in the form that fits what is there (with or without the charging and
     distance parts) and rebuilt if TeslaMate appears later. The version check applies only when
@@ -87,8 +87,8 @@ directly.
   *Why now:* An accidental edit or delete can be seen and undone by hand.
 
 - **4. Reminders by date or odometer** (size M)
-  Service reminders that fall due on a date, an odometer reading (from TeslaMate when it is there, otherwise your latest manual reading) or whichever comes first, with a lead time in days or km. Recurring ones (tyre rotation every 10,000 km) create the next when resolved, and are resolved by linking the expense that did the job. Registration expiry and lease end (L1) become reminders too. Shown in the app and as a dashboard panel. Resolved reminders are kept.
-  *Why now:* The odometer is already there, from TeslaMate or by hand (T1), so this is the cheapest useful new feature.
+  Service reminders that fall due on a date, an odometer reading (from TeslaMate when it is there, otherwise the odometer on your latest expense) or whichever comes first, with a lead time in days or km. Recurring ones (tyre rotation every 10,000 km) create the next when resolved, and are resolved by linking the expense that did the job. Registration expiry and lease end (L1) become reminders too. Shown in the app and as a dashboard panel. Resolved reminders are kept.
+  *Why now:* The odometer is already there, from TeslaMate or from expenses (T1), so this is the cheapest useful new feature.
   *Depends on:* T1
 
 - **5. Payment calculator** (size S)
@@ -118,7 +118,8 @@ directly.
   *Depends on:* L1, T1
 
 - **L5. Cost after tax** (size M)
-  What an expense paid from pre-tax salary really costs, beside its invoice amount.
+  What an expense paid from pre-tax salary really costs, beside its invoice amount. Not built yet. It will
+  include the charging reimbursement for an electric car on a novated or associate lease.
   *Depends on:* L1, L3
 
 - **9. Status page** (size S–M)
@@ -180,7 +181,7 @@ directly.
   *Depends on:* 17
 
 - **20. Cars outside TeslaMate** (size L)
-  Petrol, diesel, plug-in hybrid and hybrid cars, on the car table T1 builds. Fuel entries (litres, price per litre, fuel type, full tank or not), manual odometer readings, and L/100 km on the dashboard. TeslaMate cars are still added automatically, never overwriting what you have entered. A package that holds an EV and a petrol car needs this.
+  Petrol, diesel, plug-in hybrid and hybrid cars, on the car table T1 builds. Fuel entries (litres, price per litre, fuel type, full tank or not), the odometer on expenses, and L/100 km on the dashboard. TeslaMate cars are still added automatically, never overwriting what you have entered. A package that holds an EV and a petrol car needs this.
   *Depends on:* T1
 
 - **21. Standalone install** (size S–M)
@@ -262,7 +263,7 @@ one of the provider's budget pools.
 
 ### L4. Kilometre pace (Next, S)
 
-From the lease's estimated km and the odometer (TeslaMate's, or the latest manual reading): the reading at the start of the FBT year,
+From the lease's estimated km and the odometer (TeslaMate's, or the odometer on the latest expense): the reading at the start of the FBT year,
 the km expected by its end (pro rata if the car is held only part of the year), the km per day
 needed to get there, and the km per day actually driven. On the dashboard and the status page.
 
@@ -272,6 +273,11 @@ A packaged expense costs less than its invoice: the GST is claimed back, and the
 pre-tax salary. With your marginal tax rate entered once in Settings (the rate, not your salary),
 each packaged expense and the TCO show both the invoice amount and the effective cost, less any
 post-tax contributions. Expenses paid personally are unaffected.
+
+Not built yet. It will also include the charging reimbursement for an electric car on a novated or
+associate lease: the ATO's cents-per-km rate for home charging times the km driven, whatever the
+charging actually cost (4.20 cents per km for the FBT years to 31 March 2026, and 5.47 cents from 1 April 2026). The rate is set per FBT year, so it is
+kept as data by FBT year, like the other ATO figures.
 
 ### L6. Read the provider's statements (Later, M)
 

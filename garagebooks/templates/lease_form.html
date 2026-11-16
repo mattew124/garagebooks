@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% from "_provider.html" import mark with context %}
+{% block title %}{{ 'Edit lease' if lease_id else 'Add a lease' }} · {{ car.name }}{% endblock %}
+{% block main_attrs %} class="narrow"{% endblock %}
+{% macro field(name, label, kind='text', hint=None, required=False, attrs='') %}
+  <label for="f-{{ name }}"><span>{{ label }}{% if required %} <small>(required)</small>{% endif %}</span>
+    <input id="f-{{ name }}" name="{{ name }}" type="{{ 'text' if kind in ('money', 'percent', 'km') else kind }}"
+      {% if kind in ('money', 'percent') %}inputmode="decimal"{% elif kind == 'km' %}inputmode="numeric"{% endif %}
+      {{ 'required' if required }} value="{{ values.get(name, '') }}" autocomplete="off"
+      {% if errors.get(name) %}aria-invalid="true" aria-describedby="e-{{ name }}"{% elif hint %}aria-describedby="h-{{ name }}"{% endif %} {{ attrs|safe }}>
+    {% if errors.get(name) %}<span class="error" id="e-{{ name }}">{{ errors[name] }}</span>
+    {% elif hint %}<small id="h-{{ name }}">{{ hint }}</small>{% endif %}</label>
+{% endmacro %}
+{% macro choose(name, label, options) %}
+  <label for="f-{{ name }}">{{ label }}
+    <select id="f-{{ name }}" name="{{ name }}" {% if errors.get(name) %}aria-invalid="true" aria-describedby="e-{{ name }}"{% endif %}>
+      <option value="">Choose…</option>
+      {% for key, text in options.items() %}<option value="{{ key }}" {{ 'selected' if values.get(name) == key }}>{{ text }}</option>{% endfor %}
+    </select>
+    {% if errors.get(name) %}<span class="error" id="e-{{ name }}">{{ errors[name] }}</span>{% endif %}</label>
+{% endmacro %}
+{% macro tick(name, label, hint=None) %}
+  <label class="check" for="f-{{ name }}"><input id="f-{{ name }}" type="checkbox" name="{{ name }}"
+    {{ 'checked' if values.get(name) in (True, 'on') }}> <span>{{ label }}{% if hint %}<br><small>{{ hint }}</small>{% endif %}</span></label>
+{% endmacro %}
+{# One document kept with the lease: choose a PDF on this computer, or one already in the car's storage. #}
+{% macro document(doc, label, hint) %}
+  {% set url = values.get(doc ~ '_url') %}{% set path = values.get(doc ~ '_path') %}
+  <div class="field" data-lease-document="{{ doc }}">
+    <label for="f-{{ doc }}_file">{{ label }}</label>
+    <div class="drop">
+      <input type="file" id="f-{{ doc }}_file" name="{{ doc }}_file" accept="application/pdf,.pdf"
+        {% if errors.get(doc ~ '_file') %}aria-invalid="true" aria-describedby="e-{{ doc }}_file"{% endif %}>
+      {% if storage_kind %}
+      <span class="or-pick"><span>or</span>
+        <button type="button" class="secondary" data-pick="{{ doc }}">
+          {% if storage_kind == 'onedrive' %}{{ mark() }} Choose from {{ storage.name }}{% else %}Choose from the invoice folder{% endif %}
+        </button></span>
+      {% endif %}
+    </div>
+    {% if errors.get(doc ~ '_file') %}<span class="error" id="e-{{ doc }}_file">{{ errors[doc ~ '_file'] }}</span>{% endif %}
+    <small data-doc-hint>{{ hint }}</small>
+    <input type="hidden" name="{{ doc }}_url" value="{{ url or '' }}">
+    <input type="hidden" name="{{ doc }}_path" value="{{ path or '' }}">
+    <span class="kept" data-doc-kept{{ ' hidden' if not (url or path) }}>Kept with this lease:
+      <a data-doc-link href="{{ doc_link(values, doc) or '#' }}" target="_blank" rel="noopener noreferrer">{{ path.rsplit('/', 1)[-1] if path else 'open it' }}</a>
+      <label class="inline"><input type="checkbox" name="remove_{{ doc }}" value="1">
+        <small>Remove it from this lease (the file stays where it is)</small></label></span>
+  </div>
+{% endmacro %}
+{% block content %}
+<h1>{{ 'Edit lease' if lease_id else 'Add a lease' }}: {{ car.name }}</h1>
+<p><a href="{{ url_for('car_lease', car_id=car.id) }}">← Lease</a></p>
+{% if errors %}<p class="notice bad" role="alert">Some details need another look: they are marked below.</p>{% endif %}
+<form method="post" class="cards lease-form" id="lease-form" enctype="multipart/form-data"
+      data-prefill-url="{{ url_for('api_lease_prefill') }}"
+      {% if storage_kind %}data-storage="{{ storage_kind }}" data-browse-url="{{ url_for('api_' ~ storage_kind ~ '_browse', car_id=car.id) }}"
+      {% if storage_kind == 'local' %}data-file-url="{{ url_for('local_file') }}"{% endif %}{% endif %}
+      action="{{ url_for('car_lease_update', car_id=car.id, lease_id=lease_id) if lease_id else url_for('car_lease_create', car_id=car.id) }}">
+  <section class="card stack">
+    <h2 class="card-title">Documents</h2>
+    {{ document('form', 'Lease form PDF', 'The provider\'s lease form or package confirmation. Choose it first: the boxes below are filled in from what can be read in it. Check them before saving.') }}
+    {{ document('agreement', 'Lease agreement PDF', 'Kept with the lease for reference. Nothing is read from it.') }}
+    <small>{% if storage_kind %}A PDF chosen here is saved to the “Lease” folder in {{ 'the car\'s OneDrive folder' if storage_kind == 'onedrive' else 'the car\'s invoice folder' }} when you save.
+      {% else %}To keep the PDFs with the lease, <a href="{{ url_for('storage_page') }}">choose a folder for this car</a> first. The lease form can still be read to fill in the boxes.{% endif %}
+      Only the lease's own figures are read: no names, employer, payroll, bank or registration details are read or stored.</small>
+  </section>
+
+  <section class="card stack">
+    <h2 class="card-title">Lease</h2>
+    {{ tick('associate_lease', 'Associate lease', 'The car is owned outright and leased to your employer by an associate: there is no financier and no residual (balloon) payment.') }}
+    {{ field('package_name', 'Salary packaging provider') }}
+    <div data-not-associate{{ ' hidden' if values.get('associate_lease') in (True, 'on') }}>{{ field('financier', 'Financier', hint='Required unless this is an associate lease.') }}</div>
+    <div class="row">{{ field('start_date', 'Lease start', 'date', required=True) }}
+      {{ field('term_months', 'Term (months)', 'km', hint='Fills in the lease end.') }}</div>
+    <div class="row">{{ field('end_date', 'Lease end', 'date') }}
+      {{ field('refinance_date', 'Refinance date', 'date', hint='Only if the lease was refinanced.') }}</div>
+    {{ field('car_cost', 'Car\'s cost, value or financed amount', 'money') }}
+    <div class="row" data-not-associate{{ ' hidden' if values.get('associate_lease') in (True, 'on') }}>{{ field('residual_amount', 'Residual (balloon) amount', 'money') }}
+      {{ field('residual_percent', 'Residual percentage of cost', 'percent', hint='Enter either; the other is worked out from the cost.') }}</div>
+  </section>
+
+  <section class="card stack">
+    <h2 class="card-title">Payments</h2>
+    {{ choose('pay_frequency', 'Paid', frequencies) }}
+    <div class="row">{{ field('pretax_payment', 'Pre-tax part, per pay', 'money') }}{{ field('posttax_payment', 'Post-tax part, per pay', 'money') }}</div>
+    {{ field('admin_fee', 'Provider\'s admin fee, per pay', 'money') }}
+  </section>
+
+  <section class="card stack">
+    <h2 class="card-title">Fringe benefits tax</h2>
+    <div class="row">{{ field('fbt_base_value', 'FBT base value', 'money') }}{{ choose('fbt_method', 'Valuation method', fbt_methods) }}</div>
+    <div class="row">{{ field('statutory_percent', 'Statutory percentage', 'percent', hint='20 for the statutory formula.') }}
+      {{ choose('tax_treatment', 'Tax treatment', tax_treatments) }}</div>
+    {{ field('tax_treatment_note', 'If other, what the statement calls it') }}
+    {{ tick('ev_exempt', 'Exempt as an eligible electric car') }}
+    {{ field('estimated_km_per_year', 'Provider\'s estimated km per year', 'km') }}
+  </section>
+
+  {% if budgets_on %}
+  <section class="card stack" id="lease-budgets">
+    <h2 class="card-title">Yearly budgets</h2>
+    <p><small>From the lease start. Leave a box empty for a pool the package doesn't budget.</small></p>
+    {% for key, label in pools.items() %}{{ field('budget_' ~ key, label, 'money') }}{% endfor %}
+  </section>
+  {% endif %}
+
+  <section class="card stack">
+    <h2 class="card-title">Registration</h2>
+    {{ field('rego_expiry', 'Registration expires', 'date') }}
+    {{ tick('rego_renewed_by_provider', 'The provider renews it') }}
+  </section>
+
+  <div class="row"><button type="submit" class="button">{{ 'Save lease' if lease_id else 'Add lease' }}</button>
+    <a href="{{ url_for('car_lease', car_id=car.id) }}">Cancel</a></div>
+</form>
+<p><small>This is a record of what the provider's documents say, not tax advice. Leave a box empty when they don't give it.</small></p>
+{% if storage_kind %}
+<dialog id="lease-picker" aria-labelledby="lease-picker-title" class="picker">
+  <h2 id="lease-picker-title">{% if storage_kind == 'onedrive' %}{{ mark() }} Choose a PDF from {{ storage.name }}{% else %}Choose a PDF from the invoice folder{% endif %}</h2>
+  <p class="here"><code id="lease-picker-path"></code></p>
+  <p id="lease-picker-status" role="status"></p>
+  <ul class="plain folder-list" id="lease-picker-list"></ul>
+  <div class="row"><button type="button" id="lease-picker-close" class="secondary">Cancel</button></div>
+</dialog>
+{% endif %}
+{% endblock %}

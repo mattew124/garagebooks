@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Resolve reminders{% endblock %}
+{% block main_attrs %} class="narrow"{% endblock %}
+{% block content %}
+<h1>Resolve reminders</h1>
+<p>Expense: {{ expense.occurred_at|day }} · {{ expense.category }}{% if expense.vendor %} · {{ expense.vendor }}{% endif %} · {{ expense.amount|money }}
+  <small>({{ expense.car_name }})</small></p>
+{% if open_ones %}
+<form method="post" action="{{ url_for('expense_reminders_resolve', expense_id=expense.id) }}" class="card stack">
+  <fieldset class="due-fields"><legend>Did this expense do any of {{ expense.car_name }}'s open reminders?</legend>
+    {% for r in open_ones %}
+    <label class="check" for="r-{{ r.id }}"><input id="r-{{ r.id }}" type="checkbox" name="reminder_id" value="{{ r.id }}"
+        {{ 'checked' if r.category_id == expense.category_id }}> {{ r.title }}
+      <small>{% if r.due_date %}due {{ r.due_date.strftime('%d %b %Y') }}{% endif %}{% if r.due_date and r.due_km is not none %} or {% endif %}{% if r.due_km is not none %}at {{ r.due_km|km }}{% endif %}</small></label>
+    {% endfor %}
+    {% if errors.reminder_id %}<span class="error">{{ errors.reminder_id }}</span>{% endif %}
+  </fieldset>
+  <p><small>Those in the same category as the expense are ticked. A repeating reminder gets its next one when it is resolved.</small></p>
+  <div class="row"><button type="submit" class="button">Resolve ticked</button>
+    <a href="{{ url_for('index') }}">Skip</a></div>
+</form>
+{% else %}
+<p class="empty">{{ expense.car_name }} has no open reminders to resolve.</p>
+<p><a href="{{ url_for('reminders_page') }}">Reminders</a> · <a href="{{ url_for('index') }}">All expenses</a></p>
+{% endif %}
+{% endblock %}

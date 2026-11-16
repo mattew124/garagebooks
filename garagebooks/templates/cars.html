@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}Cars{% endblock %}
+{% block main_attrs %} class="narrow"{% endblock %}
+{# `v` is what to show (the car as saved, or what was just typed), `e` the errors by field, `c` the saved car. #}
+{% macro car_fields(v, e, c=None, typed=False) %}
+  {% set several = c and c.purchases > 1 %}
+  <div class="row">
+    <label>Make <input name="make" maxlength="60" value="{{ v.make or '' }}" autocomplete="off">
+      {% if e.make %}<span class="error">{{ e.make }}</span>{% endif %}</label>
+    <label>Model <input name="model" maxlength="60" value="{{ v.model or '' }}" autocomplete="off">
+      {% if e.model %}<span class="error">{{ e.model }}</span>{% endif %}</label>
+  </div>
+  <div class="row">
+    {# A name that is only the make and model is shown as empty: it follows them when they change. #}
+    <label><span>Name <small>(optional)</small></span>
+      <input name="name" maxlength="100" autocomplete="off" placeholder="Make and model"
+        value="{{ '' if not typed and c and c.name == ((c.make or '') ~ ' ' ~ (c.model or ''))|trim else (v.name or '') }}">
+      {% if e.name %}<span class="error">{{ e.name }}</span>{% endif %}</label>
+    <label>Type
+      <select name="kind">
+        {% for code, label in kinds.items() %}<option value="{{ code }}" {{ 'selected' if (v.kind or 'BEV') == code }}>{{ label }}</option>{% endfor %}
+      </select>
+      {% if e.kind %}<span class="error">{{ e.kind }}</span>{% endif %}</label>
+  </div>
+  {% if several %}
+  <p class="car-purchases"><small>Bought for <strong>{{ c.purchase_price|money }}</strong>, in {{ c.purchases }} purchase expenses:
+    change them in the <a href="{{ url_for('index') }}">expense list</a>.</small></p>
+  {% if e.purchase_price %}<span class="error">{{ e.purchase_price }}</span>{% endif %}
+  {% else %}
+  <div class="row">
+    <label>Purchase price ($)
+      <input name="purchase_price" inputmode="decimal" autocomplete="off"
+        value="{{ v.purchase_price if typed else (c.purchase_price if c and c.purchases else '') or '' }}">
+      {% if e.purchase_price %}<span class="error">{{ e.purchase_price }}</span>{% endif %}</label>
+    <label>Date bought
+      <input type="date" name="purchase_date" max="{{ today }}"
+        value="{{ v.purchase_date if typed else (c.purchased_at|isodate if c and c.purchases else '') or '' }}">
+      {% if e.purchase_date %}<span class="error">{{ e.purchase_date }}</span>{% endif %}</label>
+    <label>Odometer then (km)
+      <input name="purchase_km" inputmode="decimal" autocomplete="off"
+        value="{{ v.purchase_km if typed else (c.purchase_km if c and c.purchase_km is not none else '') or '' }}">
+      {% if e.purchase_km %}<span class="error">{{ e.purchase_km }}</span>{% endif %}</label>
+  </div>
+  <small>The purchase price is kept as an expense in a purchase category, so it counts once in the total cost of ownership.</small>
+  {% endif %}
+{% endmacro %}
+{% block content %}
+<h1>Cars</h1>
+<p id="teslamate-status" data-state="{{ teslamate.state }}"><small>
+  {% if teslamate.state == "ok" %}TeslaMate is connected: the cars it tracks are listed here by themselves, with their odometer and charging costs.
+  {% elif teslamate.state == "absent" %}TeslaMate is not configured, and isn't needed: add your cars here. The odometer comes from the readings on your expenses.
+  {% else %}TeslaMate's figures are unavailable. Everything entered by hand carries on.
+  {% endif %}</small></p>
+{% if teslamate.reason %}<p class="{{ 'notice' if teslamate.state == 'ok' else 'error' }}" id="teslamate-reason">{{ teslamate.reason }}</p>{% endif %}
+<div class="cards">
+{% for c in cars %}{% set e = errors.get(c.id, {}) %}{% set v = values.get(c.id) %}{% set sale_err = e.sold_date or e.sold_price or e.sold_km %}
+<section class="card stack car" id="car-{{ c.id }}">
+  <h2>{{ c.name }} <small>{{ 'from TeslaMate' if c.teslamate_car_id is not none else 'added by hand' }}</small></h2>
+  <p class="car-odometer">Odometer:
+    {% if c.odometer %}<strong>{{ c.odometer.km|km }}</strong>
+      <small>{% if c.odometer.source == "teslamate" %}from TeslaMate{% else %}as at {{ c.odometer.at|day }}{% endif %}</small>
+    {% elif c.teslamate_car_id is not none and teslamate.state not in ("ok", "absent") %}<strong>unavailable</strong>
+    {% else %}<strong>not recorded</strong>{% endif %}
+    · {{ c.expenses }} expense{{ '' if c.expenses == 1 else 's' }}</p>
+  <p class="car-lease"><a href="{{ url_for('car_lease', car_id=c.id) }}">Lease{% if c.leases %} <small>({{ c.leases }} recorded)</small>{% else %} <small>(none recorded)</small>{% endif %}</a></p>
+  {% if c.purchases %}<p class="car-bought">Bought <strong>{{ c.purchased_at|day }}</strong> for <strong>{{ c.purchase_price|money }}</strong></p>{% endif %}
+  {% if c.sold_at %}<p class="car-sold">Sold <strong>{{ c.sold_at|day }}</strong> for <strong>{{ c.sale_price|money }}</strong>{% if c.sale_km is not none %} at <strong>{{ c.sale_km|km }}</strong>{% endif %}</p>{% endif %}
+  <details{{ ' open' if e and not sale_err }}>
+    <summary>Edit</summary>
+    <form method="post" action="{{ url_for('car_update', car_id=c.id) }}" class="stack">
+      {% if v and e and not sale_err %}{{ car_fields(v, e, c, typed=True) }}{% else %}{{ car_fields(c, e, c) }}{% endif %}
+      <button type="submit" class="secondary">Save car</button>
+    </form>
+    {% if c.teslamate_car_id is none and c.expenses == 0 %}
+    <form method="post" action="{{ url_for('car_delete', car_id=c.id) }}" data-confirm="Delete {{ c.name }}?">
+      <button type="submit" class="secondary danger">Delete car</button>
+    </form>
+    {% endif %}
+    {% if e.delete %}<span class="error">{{ e.delete }}</span>{% endif %}
+  </details>
+  <details{{ ' open' if sale_err }} class="car-sale">
+    <summary>{{ 'Sale' if c.sold_at else 'Sold this car?' }}</summary>
+    <form method="post" action="{{ url_for('car_sale', car_id=c.id) }}" class="stack">
+      <div class="row">
+        <label>Date sold <input type="date" name="date" max="{{ today }}" value="{{ (v.date if v and sale_err else (c.sold_at|isodate if c.sold_at)) or '' }}">
+          {% if e.sold_date %}<span class="error">{{ e.sold_date }}</span>{% endif %}</label>
+        <label>Sale price ($) <input name="price" inputmode="decimal" value="{{ (v.price if v and sale_err else (c.sale_price if c.sold_at)) or '' }}" autocomplete="off">
+          {% if e.sold_price %}<span class="error">{{ e.sold_price }}</span>{% endif %}</label>
+        <label>Final odometer (km) <input name="km" inputmode="decimal" autocomplete="off"
+            value="{{ (v.km if v and sale_err else (c.sale_km if c.sale_km is not none)) or '' }}"
+            {% if c.teslamate_car_id is not none %}placeholder="from TeslaMate"{% endif %}>
+          {% if e.sold_km %}<span class="error">{{ e.sold_km }}</span>{% endif %}</label>
+      </div>
+      <div class="row">
+        <button type="submit" class="secondary">Save sale</button>
+        {% if c.sold_at %}<button type="submit" name="action" value="clear" class="secondary">Clear sale</button>{% endif %}
+      </div>
+    </form>
+    <p><small>Total cost of ownership is net of the sale price, and the time owned and distance stop at the sale{% if c.teslamate_car_id is not none %}
+      (leave the odometer empty to use TeslaMate's){% endif %}. A sold car can still take expenses, such as a late bill.</small></p>
+  </details>
+</section>
+{% else %}
+<p class="empty">No cars yet. Add one below.</p>
+{% endfor %}
+</div>
+<form method="post" action="{{ url_for('cars_page') }}" class="card stack" id="add-car">
+  <h2 class="card-title">Add a car</h2>
+  {{ car_fields(values.get('new', {}), errors.get('new', {}), typed=True) }}
+  <button type="submit" class="button">Add car</button>
+  <p><small>For a car TeslaMate doesn't track: any make, electric or not. Cars TeslaMate tracks are added automatically.</small></p>
+</form>
+{% endblock %}

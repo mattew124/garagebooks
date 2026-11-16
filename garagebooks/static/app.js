@@ -252,6 +252,205 @@ document.addEventListener("DOMContentLoaded", () => {
   window.addEventListener("popstate", () => { if (document.querySelector("form[data-live]")) showList(location.href, null, false); });
   if (document.querySelector("form[data-live]")) bindList();
 
+  // Add a reminder: a standard reminder fills in the title and how often it repeats, and the first due date
+  // and odometer reading from today and the car's odometer. A car's type decides which are offered: a battery
+  // electric car has no engine oil or air filter to change.
+  const standardBox = document.getElementById("standard-reminder");
+  if (standardBox) {
+    const pick = standardBox.querySelector("select");
+    const f = pick.form;
+    const carOption = () => (f.elements.car_id && f.elements.car_id.selectedOptions ? f.elements.car_id.selectedOptions[0] : null);
+    const offer = () => {
+      const kind = (carOption() && carOption().dataset.kind) || "";
+      [...pick.options].forEach((o) => {
+        const kinds = (o.dataset.kinds || "").split(" ").filter(Boolean);
+        o.hidden = o.disabled = Boolean(kinds.length && kind && !kinds.includes(kind));
+      });
+      if (pick.selectedOptions[0] && pick.selectedOptions[0].disabled) pick.value = "";
+    };
+    const addMonths = (iso, months) => {
+      const [y, m, d] = iso.split("-").map(Number);
+      const last = new Date(Date.UTC(y, m - 1 + months + 1, 0)).getUTCDate();
+      return new Date(Date.UTC(y, m - 1 + months, Math.min(d, last))).toISOString().slice(0, 10);
+    };
+    standardBox.hidden = false;
+    offer();
+    if (f.elements.car_id) f.elements.car_id.addEventListener("change", offer);
+    pick.addEventListener("change", () => {
+      const o = pick.selectedOptions[0];
+      if (!o || !o.value) return;
+      const odometer = parseFloat((carOption() && carOption().dataset.odometer) || "");
+      f.elements.title.value = o.dataset.title;
+      f.elements.every_months.value = o.dataset.months;
+      f.elements.every_km.value = o.dataset.km;
+      f.elements.due_date.value = o.dataset.months ? addMonths(standardBox.dataset.today, Number(o.dataset.months)) : "";
+      f.elements.due_km.value = o.dataset.km && Number.isFinite(odometer) ? String(Math.round(odometer + Number(o.dataset.km))) : "";
+      const category = [...f.elements.category_id.options].find((c) => c.textContent.trim() === o.dataset.category);
+      f.elements.category_id.value = category && o.dataset.category ? category.value : "";
+    });
+  }
+
+  // Add or edit a lease. The provider's lease form fills in the boxes (never one already typed in), the lease
+  // end follows the start and the term, and an associate lease hides what it has none of.
+  const leaseForm = document.getElementById("lease-form");
+  if (leaseForm) {
+    const el = leaseForm.elements;
+    const touched = new Set();
+    leaseForm.addEventListener("input", (ev) => { if (ev.isTrusted && ev.target.name) touched.add(ev.target.name); });
+    leaseForm.addEventListener("change", (ev) => { if (ev.isTrusted && ev.target.name) touched.add(ev.target.name); });
+
+    const showAssociate = () => leaseForm.querySelectorAll("[data-not-associate]").forEach((box) => {
+      box.hidden = el.associate_lease.checked;
+    });
+    el.associate_lease.addEventListener("change", showAssociate);
+    showAssociate();
+
+    // The last day of a lease: the day before the same day of the month, that many months on.
+    const endFor = (iso, months) => {
+      const [y, m, d] = iso.split("-").map(Number);
+      const last = new Date(Date.UTC(y, m - 1 + months + 1, 0)).getUTCDate();
+      const end = new Date(Date.UTC(y, m - 1 + months, Math.min(d, last)));
+      end.setUTCDate(end.getUTCDate() - 1);
+      return end.toISOString().slice(0, 10);
+    };
+    let endFilled = el.end_date.value === "";       // an end date that was typed or saved is never replaced
+    const fillEnd = () => {
+      const months = parseInt(el.term_months.value, 10);
+      if (!endFilled || !el.start_date.value || !(months >= 1 && months <= 120)) return;
+      el.end_date.value = endFor(el.start_date.value, months);
+    };
+    el.end_date.addEventListener("input", () => { endFilled = el.end_date.value === ""; });
+    el.start_date.addEventListener("change", fillEnd);
+    el.term_months.addEventListener("input", fillEnd);
+
+    const box = (doc) => leaseForm.querySelector(`[data-lease-document=${doc}]`);
+    const say = (doc, text) => { box(doc).querySelector("[data-doc-hint]").textContent = text; };
+    const labels = { associate_lease: "associate lease", package_name: "provider", start_date: "start", end_date: "end",
+      term_months: "term", pay_frequency: "pay frequency", pretax_payment: "payment", fbt_base_value: "FBT base value",
+      ev_exempt: "electric car exemption", estimated_km_per_year: "km per year" };
+    async function prefill(body) {
+      say("form", "Reading the lease form…");
+      try {
+        const res = await fetch(leaseForm.dataset.prefillUrl, { method: "POST", body });
+        const data = await res.json();
+        if (!res.ok) return say("form", data.error || "Couldn't read that file.");
+        const filled = [];
+        Object.entries(data.fields).forEach(([name, value]) => {
+          const input = el[name];
+          if (!input || touched.has(name)) return;
+          if (input.type === "checkbox") input.checked = Boolean(value);
+          else input.value = value;
+          filled.push(labels[name] || (name.startsWith("budget_") ? null : name));
+        });
+        if ("end_date" in data.fields) endFilled = false;
+        showAssociate();
+        fillEnd();
+        const named = [...new Set(filled.filter(Boolean))];
+        const budgets = filled.length - filled.filter(Boolean).length;
+        say("form", filled.length
+          ? "Filled from the lease form: " + named.concat(budgets ? ["yearly budgets"] : []).join(", ") + ". Check them before saving."
+          : "Nothing could be read from that PDF as a lease form; fill the boxes in.");
+      } catch (e) {
+        say("form", "Couldn't read the lease form.");
+      }
+    }
+    el.form_file.addEventListener("change", () => {
+      if (!el.form_file.files.length) return;
+      const body = new FormData();
+      body.append("form_file", el.form_file.files[0]);
+      prefill(body);
+    });
+
+    // Dropping a PDF onto either box is the same as choosing it with the button.
+    leaseForm.querySelectorAll("[data-lease-document] .drop").forEach((drop) => {
+      const input = drop.querySelector("input[type=file]");
+      ["dragenter", "dragover"].forEach((name) => drop.addEventListener(name, (ev) => { ev.preventDefault(); drop.classList.add("over"); }));
+      ["dragleave", "drop"].forEach((name) => drop.addEventListener(name, () => drop.classList.remove("over")));
+      drop.addEventListener("drop", (ev) => {
+        ev.preventDefault();
+        const pdf = [...((ev.dataTransfer && ev.dataTransfer.files) || [])].find((x) => x.type === "application/pdf" || /\.pdf$/i.test(x.name));
+        if (!pdf) return;
+        const chosen = new DataTransfer();
+        chosen.items.add(pdf);
+        input.files = chosen.files;
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+    });
+
+    // A PDF already in the car's storage: it isn't copied, the lease keeps its link (or its path in the folder).
+    const picker = document.getElementById("lease-picker");
+    if (picker && leaseForm.dataset.browseUrl) {
+      const status = document.getElementById("lease-picker-status");
+      const pathBox = document.getElementById("lease-picker-path");
+      const list = document.getElementById("lease-picker-list");
+      const kind = leaseForm.dataset.storage;
+      let wanted = null;
+      let loading = 0;
+      const entry = (label, onClick) => {
+        const li = document.createElement("li");
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "linklike";
+        b.textContent = label;
+        b.addEventListener("click", onClick);
+        li.append(b);
+        list.append(li);
+      };
+      async function show(folder) {
+        const ticket = ++loading;
+        status.textContent = "Loading…";
+        list.textContent = "";
+        let data;
+        try {
+          const res = await fetch(leaseForm.dataset.browseUrl + (folder ? "?folder=" + encodeURIComponent(folder) : ""));
+          data = await res.json();
+          if (!res.ok) throw new Error(data.error || "Couldn't open the folder.");
+        } catch (e) {
+          if (ticket === loading) status.textContent = e.message;
+          return;
+        }
+        if (ticket !== loading) return;
+        pathBox.textContent = data.path;
+        status.textContent = data.folders.length || data.files.length ? "" : "No folders or PDFs in here.";
+        if (!data.is_root) entry("⬑ Up", () => show(data.parent_id || "root"));
+        data.folders.forEach((x) => entry("📁 " + x.name, () => show(x.id)));
+        data.files.forEach((x) => entry("📄 " + x.name, () => choose(x)));
+      }
+      function choose(file) {
+        picker.close();
+        const doc = wanted;
+        el[doc + "_file"].value = "";
+        el[doc + "_url"].value = kind === "local" ? "" : file.web_url;
+        el[doc + "_path"].value = kind === "local" ? file.id : "";
+        el["remove_" + doc].checked = false;
+        const link = box(doc).querySelector("[data-doc-link]");
+        link.textContent = file.name;
+        link.href = kind === "local" ? leaseForm.dataset.fileUrl + "?path=" + encodeURIComponent(file.id) : file.web_url;
+        box(doc).querySelector("[data-doc-kept]").hidden = false;
+        if (doc === "form") {
+          const body = new FormData();
+          body.append(kind + "_id", file.id);
+          body.append("name", file.name);
+          prefill(body);
+        }
+      }
+      leaseForm.querySelectorAll("[data-pick]").forEach((button) => button.addEventListener("click", () => {
+        wanted = button.dataset.pick;
+        picker.showModal();
+        show(null);
+      }));
+      document.getElementById("lease-picker-close").addEventListener("click", () => picker.close());
+    }
+
+    // An upload can take a few seconds: say so, and stop a second click sending it twice.
+    leaseForm.addEventListener("submit", () => {
+      if (!el.form_file.files.length && !el.agreement_file.files.length) return;
+      const save = leaseForm.querySelector("button[type=submit]");
+      save.disabled = true;
+      save.textContent = "Uploading…";
+    });
+  }
+
   const form = document.getElementById("expense-form");
   if (!form) return;
 
@@ -332,6 +531,104 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       amountInput.focus();
     }));
+  }
+
+  // Payment calculator: the true cost of a payment made of parts, such as a discounted gift card plus cash.
+  // Works in whole cents so nothing drifts. The parts are never named, never sent and never saved: "Use this
+  // amount" only puts the result in the amount field, and the server checks it like any typed figure.
+  const payCalc = document.getElementById("pay-calc");
+  if (payCalc && amountInput) {
+    const rowsBox = document.getElementById("pay-rows");
+    const template = document.getElementById("pay-row-template");
+    const useBtn = document.getElementById("pay-use");
+    const problem = document.getElementById("pay-problem");
+    const money = (cents) => `${cents < 0 ? "-" : ""}$${(Math.abs(cents) / 100).toLocaleString("en-AU",
+      { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    // "12.5" -> 1250 (hundredths of a unit), or null for anything that is not a plain non-negative number.
+    const hundredths = (text) => {
+      const m = /^(\d*)(?:\.(\d{0,2}))?$/.exec(text.replace(/[$,%\s]/g, ""));
+      if (!m || (m[1] === "" && !m[2])) return null;
+      return parseInt(m[1] || "0", 10) * 100 + parseInt((m[2] || "").padEnd(2, "0"), 10);
+    };
+    let costCents = null;
+
+    function renumber() {
+      rowsBox.querySelectorAll(".pay-row").forEach((row, i) => {
+        row.querySelector(".pay-legend").textContent = `Part ${i + 1}`;
+        row.querySelector("[data-part=remove]").setAttribute("aria-label", `Remove part ${i + 1}`);
+      });
+    }
+    function addRow() {
+      const row = template.content.firstElementChild.cloneNode(true);
+      rowsBox.append(row);
+      renumber();
+      return row;
+    }
+    function recalc() {
+      let covered = 0, cost = 0, bad = 0, used = 0;
+      rowsBox.querySelectorAll(".pay-row").forEach((row) => {
+        const face = row.querySelector("[data-part=face]");
+        const mode = row.querySelector("[data-part=mode]").value;
+        const value = row.querySelector("[data-part=value]");
+        row.querySelector("[data-part-value]").hidden = mode === "cash";
+        row.querySelector("[data-part-value-label]").textContent = mode === "off" ? "Percentage off" : "Amount paid";
+        row.querySelector("[data-part-unit]").textContent = mode === "off" ? "%" : "$";
+        const empty = face.value.trim() === "" && (mode === "cash" || value.value.trim() === "");
+        const f = hundredths(face.value);
+        const v = mode === "cash" ? 0 : hundredths(value.value);
+        let paid = null;
+        if (!empty && f !== null && v !== null) {
+          if (mode === "cash") paid = f;
+          else if (mode === "paid") paid = v;
+          else if (v <= 10000) paid = Math.round(f * (10000 - v) / 10000);
+        }
+        face.setAttribute("aria-invalid", String(!empty && f === null));
+        value.setAttribute("aria-invalid", String(!empty && mode !== "cash" && (v === null || (mode === "off" && v > 10000))));
+        if (empty) return;
+        if (paid === null) { bad++; return; }
+        covered += f; cost += paid; used++;
+      });
+      document.getElementById("pay-covered").textContent = money(covered);
+      document.getElementById("pay-cost").textContent = money(cost);
+      document.getElementById("pay-saved").textContent = money(covered - cost);
+      problem.textContent = bad ? "Check the parts outlined: each needs a face value, and an amount paid or a percentage from 0 to 100." : "";
+      costCents = bad || !used ? null : cost;
+      useBtn.disabled = costCents === null;
+    }
+
+    payCalc.hidden = false;
+    addRow(); addRow();
+    document.getElementById("pay-add").addEventListener("click", () => {
+      addRow().querySelector("[data-part=face]").focus();
+      recalc();
+    });
+    rowsBox.addEventListener("input", recalc);
+    rowsBox.addEventListener("change", recalc);
+    rowsBox.addEventListener("click", (ev) => {
+      const btn = ev.target.closest("[data-part=remove]");
+      if (!btn) return;
+      const row = btn.closest(".pay-row");
+      const next = row.nextElementSibling || row.previousElementSibling;
+      rowsBox.removeChild(row);
+      if (!rowsBox.children.length) addRow();
+      renumber();
+      recalc();
+      (next || rowsBox.firstElementChild).querySelector("[data-part=face]").focus();
+    });
+    rowsBox.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" && ev.target.matches("input")) {   // Enter must not save the whole form
+        ev.preventDefault();
+        if (costCents !== null) useBtn.click();
+      }
+    });
+    useBtn.addEventListener("click", () => {
+      if (costCents === null) return;
+      amountInput.value = (costCents / 100).toFixed(2);
+      calcNote.textContent = "";
+      amountInput.dispatchEvent(new Event("input", { bubbles: true }));
+      amountInput.focus();
+    });
+    recalc();
   }
 
   // An upload can take a few seconds: say so, and stop a second click sending it twice.

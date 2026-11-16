@@ -40,6 +40,10 @@
     {% if errors.multi_amount %}<span class="error">{{ errors.multi_amount }}</span>{% endif %}
     <small>Some invoices give a choice, such as a registration renewal for 6 or 12 months. This picks which
       figure is read from a <em>Total due</em> line that shows more than one. Choose “blank” to type it in yourself.</small></label>
+  <label class="check" for="lease-budgets"><input id="lease-budgets" type="checkbox" name="lease_budgets" value="1" {{ 'checked' if values.lease_budgets }}>
+    <span>Track lease budgets<br><small>For a salary-packaged car whose provider sets a yearly budget for each running cost. Adds the budgets to
+      a car's lease, a budget pool to each category, and the budgets to the FBT year report. Leave it off if you don't follow them:
+      budgets already entered are kept.</small></span></label>
   <button type="submit" class="button">Save</button>
 </form>
 <p><small>Grafana logo: <a href="{{ icon_credit.url }}" target="_blank" rel="noopener noreferrer">{{ icon_credit.text }}</a>,

@@ -9,11 +9,46 @@ The tests let the real TeslaMate image (the release in `garagebooks/compat.py`) 
 throwaway database, so docker pulls `teslamate/teslamate` the first time. They then start the app so
 it creates its own schema, and also cover the optional `scripts/provision-db.sh` role.
 
+TeslaMate is optional, so the suite runs both ways, and CI runs both (the `test` and `no-teslamate`
+jobs). A feature isn't done until its tests pass in each:
+
+```bash
+TEST_TESLAMATE=0 .venv/bin/python -m pytest -q   # plain PostgreSQL, no TeslaMate tables at all
+```
+
+Mark a test that needs TeslaMate's real tables `@pytest.mark.teslamate` (skipped in that run), and use
+the `empty_db` fixture for one about a database with no TeslaMate, which then runs every time. New code
+never queries TeslaMate's tables itself: it asks `garagebooks/sources.py` ("which cars?", "what was the
+odometer?", "what did charging cost?") and handles "no answer".
+
+## Quality gates
+
+CI fails a pull request that does not clear these, and you can run each of them yourself first:
+
+- **Coverage floor of 90%.** `pytest -q --cov` fails under the `fail_under` value in `pyproject.toml`
+  (`.venv/bin/coverage report` lists the lines that are not covered). Write a test for the behaviour, rather
+  than excluding the code.
+- **Property-based tests.** [Hypothesis](https://hypothesis.readthedocs.io) generates the input, so the tests
+  in `tests/test_properties.py` (every parser in `validation.py`, the invoice text reading, release tags)
+  and `tests/test_properties_routes.py` (every route that takes a form, a query string, JSON or an
+  upload) check what must hold for *any* input: a parser returns a value or its `ValueError` and nothing
+  else, what it accepts has the shape the app relies on, a value written the way the app writes it reads back
+  unchanged, no route answers with a server error, and nothing invalid reaches the database. Add a new input
+  to the matching file when you add a field or a route. When Hypothesis finds a failing example, keep it as an
+  ordinary test too (as `test_amount_rejected` does), then fix the code. A local run uses 50 examples
+  per property; CI sets `HYPOTHESIS_PROFILE=ci` for 200 (the route tests use 40 either way, as each is a real
+  request on a real database). The `.hypothesis/` folder is a cache of what it has found: leave it out of commits.
+- **Vulnerability scans.** Ruff and Bandit lint the code, CodeQL analyses it, and Trivy scans the
+  dependencies and the image (`.github/workflows/security.yml`, weekly as well as on each change).
+- **A software bill of materials.** The release workflow lists what is in each published image (every
+  operating system and Python package, with its version) as SPDX JSON, one file per platform, and attaches
+  both to the GitHub release as `garagebooks-<tag>-<platform>.spdx.json`.
+
 ## Testing against a TeslaMate release
 
 TeslaMate can change its tables in any release, so each release of this app records the one it was
-tested with (`TESTED_TESLAMATE` and `TESTED_MIGRATION` in `garagebooks/compat.py`) and refuses to
-start on a newer database. To try a new TeslaMate, with nothing but docker and the `.venv`:
+tested with (`TESTED_TESLAMATE` and `TESTED_MIGRATION` in `garagebooks/compat.py`) and holds
+TeslaMate's figures back on a newer database. To try a new TeslaMate, with nothing but docker and the `.venv`:
 
 ```bash
 scripts/teslamate-compat.sh 4.5.0            # or `latest`; defaults to the recorded release

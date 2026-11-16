@@ -54,7 +54,7 @@ MIGRATE_LOCK = 7_265_171   # arbitrary; stops two workers starting at once from 
 
 def migrate(wait=60):
     """Create or update the `garagebooks` schema. schema.sql is idempotent, so this is safe on
-    every start. Waits for the database to come up (TeslaMate may start after us), but
+    every start. Waits for the database to come up, but
     gives up straight away on a permissions problem and says what to do about it."""
     deadline = time.monotonic() + wait
     while True:
@@ -120,26 +120,143 @@ def connect():
     return psycopg.connect(dsn(), row_factory=dict_row, connect_timeout=5)
 
 
+CAR_KINDS = {"BEV": "Battery electric", "ICE": "Petrol or diesel", "PHEV": "Plug-in hybrid", "HEV": "Hybrid"}
+
+
 def cars(conn):
-    return conn.execute("SELECT id, name FROM public.cars ORDER BY id").fetchall()
+    """The app's own car list: the cars TeslaMate tracks (sources.sync_cars adds them) and those added by hand."""
+    return conn.execute("SELECT id, name, kind, make, model, teslamate_car_id, sold_at, sale_price FROM garagebooks.car ORDER BY id").fetchall()
+
+
+_PURCHASES = ("FROM garagebooks.expense e JOIN garagebooks.category k ON k.id = e.category_id "
+              "WHERE e.car_id = %s AND k.kind = 'purchase'")
+
+
+def car_details(conn):
+    """The cars as the Cars page shows them: with how many expenses and leases each has, what it cost to buy
+    (the expenses in a purchase category: how many, their total, and the first one's date and odometer)
+    and the final odometer entered with its sale."""
+    return conn.execute(
+        "SELECT c.id, c.name, c.kind, c.make, c.model, c.teslamate_car_id, c.sold_at, c.sale_price,"
+        " (SELECT count(*) FROM garagebooks.expense e WHERE e.car_id = c.id) AS expenses,"
+        " (SELECT count(*) FROM garagebooks.lease l WHERE l.car_id = c.id) AS leases,"
+        " p.purchases, p.purchase_price, p.purchased_at, p.purchase_km,"
+        " (SELECT r.km FROM garagebooks.odometer_reading r WHERE r.car_id = c.id AND r.read_at = c.sold_at) AS sale_km "
+        "FROM garagebooks.car c LEFT JOIN LATERAL ("
+        " SELECT count(*) AS purchases, SUM(e.amount) AS purchase_price, MIN(e.occurred_at) AS purchased_at,"
+        "  (ARRAY_AGG(e.odometer_km ORDER BY e.occurred_at, e.id))[1] AS purchase_km"
+        " FROM garagebooks.expense e JOIN garagebooks.category k ON k.id = e.category_id"
+        " WHERE e.car_id = c.id AND k.kind = 'purchase') p ON true ORDER BY c.id").fetchall()
+
+
+def set_purchase(conn, car_id, v):
+    """Record or change what a car cost to buy (`v`: amount, occurred_at, odometer_km). The purchase is an
+    expense in a purchase category, as it always was, so the totals need nothing new: a car with none
+    gets one, a car with one has it changed. Returns "ok", "several" (more than one purchase expense:
+    not ours to merge) or "no_category"."""
+    rows = conn.execute(f"SELECT e.id, e.amount, e.occurred_at, e.odometer_km {_PURCHASES} ORDER BY e.id FOR UPDATE OF e",
+                        (car_id,)).fetchall()
+    if len(rows) > 1:
+        return "several"
+    if rows:
+        old, zone = rows[0], v["occurred_at"].tzinfo
+        if (old["amount"], old["occurred_at"].astimezone(zone).date(),
+                None if old["odometer_km"] is None else float(old["odometer_km"])) == (
+                v["amount"], v["occurred_at"].date(), v["odometer_km"]):
+            return "ok"       # saved unchanged with the car's other details: the expense keeps its time of day
+        conn.execute("UPDATE garagebooks.expense SET amount = %(amount)s, occurred_at = %(occurred_at)s, "
+                     "odometer_km = %(odometer_km)s WHERE id = %(id)s", {**v, "id": rows[0]["id"]})
+        return "ok"
+    category = conn.execute("SELECT id FROM garagebooks.category WHERE kind = 'purchase' ORDER BY sort_order, id LIMIT 1").fetchone()
+    if category is None:
+        return "no_category"
+    conn.execute("INSERT INTO garagebooks.expense (car_id, category_id, occurred_at, amount, odometer_km) "
+                 "VALUES (%(car)s, %(category)s, %(occurred_at)s, %(amount)s, %(odometer_km)s)",
+                 {**v, "car": car_id, "category": category["id"]})
+    return "ok"
+
+
+def add_car(conn, v):
+    """A car entered by hand. Returns its id."""
+    return conn.execute(
+        "INSERT INTO garagebooks.car (name, kind, make, model) VALUES (%(name)s, %(kind)s, %(make)s, %(model)s) "
+        "RETURNING id", v).fetchone()["id"]
+
+
+def update_car(conn, car_id, v):
+    """Returns False when there is no such car. A TeslaMate car renamed here keeps the new name."""
+    return conn.execute(
+        "UPDATE garagebooks.car SET kind = %(kind)s, make = %(make)s, model = %(model)s, "
+        "name_from_teslamate = name_from_teslamate AND name = %(name)s, name = %(name)s WHERE id = %(id)s",
+        {**v, "id": car_id}).rowcount == 1
+
+
+def set_sale(conn, car_id, sold_at, sale_price, sale_km=None):
+    """Record the sale of a car, or clear it (all None). The final odometer is kept as an odometer reading
+    at the moment of the sale, so the distance and the per-km figures end there; the one from an earlier
+    entry of the sale is replaced. Returns False when there is no such car."""
+    old = conn.execute("SELECT sold_at FROM garagebooks.car WHERE id = %s FOR UPDATE", (car_id,)).fetchone()
+    if old is None:
+        return False
+    if old["sold_at"] is not None:
+        conn.execute("DELETE FROM garagebooks.odometer_reading WHERE car_id = %s AND read_at = %s", (car_id, old["sold_at"]))
+    conn.execute("UPDATE garagebooks.car SET sold_at = %s, sale_price = %s WHERE id = %s", (sold_at, sale_price, car_id))
+    if sold_at is not None and sale_km is not None:
+        conn.execute("INSERT INTO garagebooks.odometer_reading (car_id, read_at, km) VALUES (%s, %s, %s) "
+                     "ON CONFLICT (car_id, read_at) DO UPDATE SET km = EXCLUDED.km", (car_id, sold_at, sale_km))
+    return True
+
+
+def first_expense_at(conn, car_id):
+    return conn.execute("SELECT MIN(occurred_at) AS at FROM garagebooks.expense WHERE car_id = %s", (car_id,)).fetchone()["at"]
+
+
+def delete_car(conn, car_id):
+    """Only a car added by hand that has no expenses. Returns whether it was deleted."""
+    return conn.execute(
+        "DELETE FROM garagebooks.car c WHERE c.id = %s AND c.teslamate_car_id IS NULL "
+        "AND NOT EXISTS (SELECT 1 FROM garagebooks.expense e WHERE e.car_id = c.id)", (car_id,)).rowcount == 1
+
+
+def has_schema(conn):
+    """Whether the schema is this release's (SKIP_MIGRATE=1 leaves that to scripts/provision-db.sh)."""
+    return conn.execute("SELECT to_regclass('garagebooks.setting') IS NULL "   # no schema at all: not ours to judge
+                        "OR to_regclass('garagebooks.car') IS NOT NULL AS ok").fetchone()["ok"]
+
+
+def build_ownership(conn, use_teslamate):
+    """Put the ownership view in the form that fits: with TeslaMate's figures or without. Returns
+    whether they are in it, or None when this database user may not rebuild it."""
+    try:
+        with conn.transaction():
+            return conn.execute("SELECT garagebooks.build_ownership(%s) AS tm", (use_teslamate,)).fetchone()["tm"]
+    except psycopg.Error as exc:
+        log.warning("the ownership view could not be rebuilt: %s", exc)
+        return None
 
 
 def get_settings(conn):
-    row = conn.execute("SELECT app_url, grafana_url, invoice_date_format, invoice_name_format, multi_amount "
-                       "FROM garagebooks.setting WHERE id = 1").fetchone()
+    row = conn.execute("SELECT app_url, grafana_url, invoice_date_format, invoice_name_format, multi_amount, "
+                       "lease_budgets FROM garagebooks.setting WHERE id = 1").fetchone()
     return row or {"app_url": None, "grafana_url": None, "invoice_date_format": None,
-                   "invoice_name_format": None, "multi_amount": None}
+                   "invoice_name_format": None, "multi_amount": None, "lease_budgets": False}
 
 
-def save_settings(conn, app_url, grafana_url, invoice_date_format, invoice_name_format=None, multi_amount=None):
+def lease_budgets_on(conn):
+    """Whether the owner tracks the provider's yearly budget pools (Settings). Off unless turned on."""
+    return bool(get_settings(conn)["lease_budgets"])
+
+
+def save_settings(conn, app_url, grafana_url, invoice_date_format, invoice_name_format=None, multi_amount=None,
+                  lease_budgets=False):
     conn.execute("UPDATE garagebooks.setting SET app_url = %s, grafana_url = %s, "
-                 "invoice_date_format = %s, invoice_name_format = %s, multi_amount = %s WHERE id = 1",
-                 (app_url, grafana_url, invoice_date_format, invoice_name_format, multi_amount))
+                 "invoice_date_format = %s, invoice_name_format = %s, multi_amount = %s, lease_budgets = %s WHERE id = 1",
+                 (app_url, grafana_url, invoice_date_format, invoice_name_format, multi_amount, bool(lease_budgets)))
 
 
 def categories(conn):
     return conn.execute(
-        "SELECT id, name, kind, upload_folder FROM garagebooks.category ORDER BY sort_order, name"
+        "SELECT id, name, kind, upload_folder, budget_pool FROM garagebooks.category ORDER BY sort_order, name"
     ).fetchall()
 
 
@@ -168,7 +285,7 @@ _SELECT = """
            cat.kind, e.occurred_at, e.amount, e.odometer_km, e.vendor, e.notes,
            e.invoice_url, e.invoice_path
     FROM garagebooks.expense e
-    JOIN public.cars c ON c.id = e.car_id
+    JOIN garagebooks.car c ON c.id = e.car_id
     JOIN garagebooks.category cat ON cat.id = e.category_id
 """
 
@@ -201,15 +318,6 @@ def totals(conn, category_id=None):
         f"SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS n FROM garagebooks.expense {where}",
         params,
     ).fetchone()
-
-
-def first_activity(conn):
-    """The earliest thing the dashboard can show: first expense (the purchase, usually) or TeslaMate position.
-    Reads only what the app may read, so it works with the least-privilege role too."""
-    return conn.execute(
-        "SELECT LEAST((SELECT MIN(date AT TIME ZONE 'UTC') FROM public.positions),"
-        " (SELECT MIN(occurred_at) FROM garagebooks.expense)) AS first"
-    ).fetchone()["first"]
 
 
 def get_expense(conn, expense_id):
@@ -326,22 +434,6 @@ def delete_expense(conn, expense_id):
     return conn.execute("DELETE FROM garagebooks.expense WHERE id = %s", (expense_id,)).rowcount == 1
 
 
-def odometer_at(conn, car_id, when):
-    """Odometer (km) from the last TeslaMate position at or before `when`.
-
-    positions.date is a naive UTC timestamp, so the aware `when` is converted
-    to UTC first — comparing it as local time would be off by the UTC offset.
-    Returns None when TeslaMate hadn't started tracking the car yet.
-    """
-    row = conn.execute(
-        "SELECT odometer FROM public.positions "
-        "WHERE car_id = %s AND odometer IS NOT NULL AND date <= (%s AT TIME ZONE 'UTC') "
-        "ORDER BY date DESC LIMIT 1",
-        (car_id, when),
-    ).fetchone()
-    return None if row is None else round(row["odometer"], 1)
-
-
 # ---- invoice storage -----------------------------------------------------------
 
 def car_folders(conn):
@@ -381,3 +473,233 @@ def save_onedrive_account(conn, **fields):
         f"ON CONFLICT (id) DO UPDATE SET {sets}, updated_at = now()",
         fields)
 
+
+
+# ---- leases (roadmap L1) -------------------------------------------------------------
+
+LEASE_FIELDS = ("package_name", "financier", "start_date", "end_date", "refinance_date", "term_months",
+                "pay_frequency", "pretax_payment", "posttax_payment", "admin_fee", "car_cost",
+                "residual_amount", "residual_percent", "fbt_base_value", "fbt_method", "statutory_percent",
+                "ev_exempt", "tax_treatment", "tax_treatment_note", "estimated_km_per_year",
+                "rego_expiry", "rego_renewed_by_provider", "associate_lease",
+                "form_url", "form_path", "agreement_url", "agreement_path")
+
+
+def car_leases(conn, car_id):
+    """Every lease of a car, newest first. A row per lease with all its columns."""
+    return conn.execute("SELECT * FROM garagebooks.lease WHERE car_id = %s ORDER BY start_date DESC, id DESC",
+                        (car_id,)).fetchall()
+
+
+def get_lease(conn, lease_id, car_id=None):
+    """One lease, or None. With `car_id`, only if it is that car's."""
+    return conn.execute("SELECT * FROM garagebooks.lease WHERE id = %s AND (%s::smallint IS NULL OR car_id = %s)",
+                        (lease_id, car_id, car_id)).fetchone()
+
+
+def current_lease(conn, car_id, on):
+    """The lease that covers the date `on` (both ends included), else the next one to start, else
+    None. At most one lease of a car covers a day: the app refuses overlapping ranges."""
+    return conn.execute(
+        "SELECT * FROM garagebooks.lease WHERE car_id = %(car)s AND end_date >= %(on)s "
+        "ORDER BY start_date LIMIT 1", {"car": car_id, "on": on}).fetchone()
+
+
+def lease_budgets(conn, lease_id):
+    """Every yearly budget of a lease: rows of pool, yearly_amount, effective_from (earliest first).
+    A later re-budget is another row for the pool; lease.budget_on() picks the one in force on a date."""
+    return conn.execute("SELECT pool, yearly_amount, effective_from FROM garagebooks.lease_budget "
+                        "WHERE lease_id = %s ORDER BY effective_from, pool", (lease_id,)).fetchall()
+
+
+def overlapping_lease(conn, car_id, start, end, exclude_id=None):
+    """A lease of this car whose dates share a day with start..end, or None."""
+    return conn.execute(
+        "SELECT * FROM garagebooks.lease WHERE car_id = %(car)s AND start_date <= %(end)s AND end_date >= %(start)s "
+        "AND (%(skip)s::integer IS NULL OR id <> %(skip)s) ORDER BY start_date LIMIT 1",
+        {"car": car_id, "start": start, "end": end, "skip": exclude_id}).fetchone()
+
+
+def _save_budgets(conn, lease_id, start, budgets):
+    for pool, amount in budgets.items():
+        conn.execute("INSERT INTO garagebooks.lease_budget (lease_id, pool, yearly_amount, effective_from) "
+                     "VALUES (%s, %s, %s, %s)", (lease_id, pool, amount, start))
+
+
+def add_lease(conn, car_id, v):
+    """Add a lease with its first budgets (effective from its start). Returns its id, or None when its dates
+    overlap another lease of the car (checked while the car's row is held, so two at once can't both pass)."""
+    conn.execute("SELECT id FROM garagebooks.car WHERE id = %s FOR UPDATE", (car_id,))
+    if overlapping_lease(conn, car_id, v["start_date"], v["end_date"]):
+        return None
+    cols = ", ".join(LEASE_FIELDS)
+    marks = ", ".join(f"%({f})s" for f in LEASE_FIELDS)
+    lease_id = conn.execute(f"INSERT INTO garagebooks.lease (car_id, {cols}) VALUES (%(car_id)s, {marks}) RETURNING id",
+                            {**v, "car_id": car_id}).fetchone()["id"]
+    _save_budgets(conn, lease_id, v["start_date"], v["budgets"] or {})
+    return lease_id
+
+
+def update_lease(conn, car_id, lease_id, v):
+    """Change a lease and its first budgets (the rows effective from its start; a later re-budget stays).
+    Returns "missing" (no such lease for this car), "overlap" or "ok"."""
+    conn.execute("SELECT id FROM garagebooks.car WHERE id = %s FOR UPDATE", (car_id,))
+    old = get_lease(conn, lease_id, car_id)
+    if old is None:
+        return "missing"
+    if overlapping_lease(conn, car_id, v["start_date"], v["end_date"], exclude_id=lease_id):
+        return "overlap"
+    sets = ", ".join(f"{f} = %({f})s" for f in LEASE_FIELDS)
+    conn.execute(f"UPDATE garagebooks.lease SET {sets} WHERE id = %(id)s", {**v, "id": lease_id})
+    if v["budgets"] is None:      # lease budgets are turned off: the first set is kept, and follows the start date
+        conn.execute("UPDATE garagebooks.lease_budget SET effective_from = %s WHERE lease_id = %s AND effective_from = %s",
+                     (v["start_date"], lease_id, old["start_date"]))
+        return "ok"
+    conn.execute("DELETE FROM garagebooks.lease_budget WHERE lease_id = %s AND effective_from = %s",
+                 (lease_id, old["start_date"]))
+    _save_budgets(conn, lease_id, v["start_date"], v["budgets"])
+    return "ok"
+
+
+def delete_lease(conn, car_id, lease_id):
+    return conn.execute("DELETE FROM garagebooks.lease WHERE id = %s AND car_id = %s", (lease_id, car_id)).rowcount == 1
+
+
+# ---- the FBT year report (roadmap L2) ---------------------------------------------------
+
+def fbt_costs(conn, car_id, year, tz):
+    """A car's expenses in one FBT year, by category: rows of category, kind, budget_pool, total and count.
+    The year is decided by each expense's date in time zone `tz`, through garagebooks.fbt_year()."""
+    return conn.execute(
+        "SELECT c.name AS category, c.kind, c.budget_pool, c.sort_order, SUM(e.amount) AS total, count(*) AS n "
+        "FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id "
+        "WHERE e.car_id = %(car)s AND garagebooks.fbt_year((e.occurred_at AT TIME ZONE %(tz)s)::date) = %(year)s "
+        "GROUP BY c.id ORDER BY c.sort_order, c.name", {"car": car_id, "year": year, "tz": tz}).fetchall()
+
+
+def fbt_years_with_expenses(conn, car_id, tz):
+    """The FBT years (the year each starts in) in which this car has an expense, oldest first."""
+    return [r["y"] for r in conn.execute(
+        "SELECT DISTINCT garagebooks.fbt_year((occurred_at AT TIME ZONE %(tz)s)::date) AS y "
+        "FROM garagebooks.expense WHERE car_id = %(car)s ORDER BY 1", {"car": car_id, "tz": tz}).fetchall()]
+
+
+def set_budget_pool(conn, category_id, pool):
+    """Which of the provider's budget pools a category's expenses come from (None: none). False if no such category."""
+    return conn.execute("UPDATE garagebooks.category SET budget_pool = %s WHERE id = %s", (pool, category_id)).rowcount == 1
+
+
+# ---- reminders (roadmap item 4) --------------------------------------------------------
+
+REMINDER_FIELDS = ("car_id", "title", "category_id", "due_date", "due_km", "lead_days", "lead_km",
+                   "every_months", "every_km", "notes")
+
+
+def open_reminders(conn, car_id=None):
+    """Every open reminder, stored and derived from a lease (see the reminder_due view), with the car's
+    name, the category's name and, for a stored one, its notes and recurrence. Not sorted."""
+    return conn.execute(
+        "SELECT d.*, c.name AS car_name, cat.name AS category, r.notes, r.every_months, r.every_km, "
+        "       r.edited_at, NULL::timestamptz AS resolved_at "
+        "FROM garagebooks.reminder_due d JOIN garagebooks.car c ON c.id = d.car_id "
+        "LEFT JOIN garagebooks.category cat ON cat.id = d.category_id "
+        "LEFT JOIN garagebooks.reminder r ON r.id = d.reminder_id "
+        "WHERE (%(car)s::smallint IS NULL OR d.car_id = %(car)s)", {"car": car_id}).fetchall()
+
+
+def get_reminder(conn, reminder_id, lock=False):
+    """One stored reminder, or None. lock=True holds it until commit, so two resolutions at once can't both succeed."""
+    return conn.execute("SELECT * FROM garagebooks.reminder WHERE id = %s" + (" FOR UPDATE" if lock else ""),
+                        (reminder_id,)).fetchone()
+
+
+def add_reminder(conn, v):
+    """Add a reminder. `v` has the REMINDER_FIELDS (and optionally previous_id). Returns its id."""
+    cols = REMINDER_FIELDS + ("previous_id",)
+    return conn.execute(
+        f"INSERT INTO garagebooks.reminder ({', '.join(cols)}) VALUES ({', '.join('%(' + c + ')s' for c in cols)}) RETURNING id",
+        {"previous_id": None, **v}).fetchone()["id"]
+
+
+def update_reminder(conn, reminder_id, v):
+    """Change an open reminder (its car stays). False if there is none."""
+    sets = ", ".join(f"{f} = %({f})s" for f in REMINDER_FIELDS if f != "car_id")
+    return conn.execute(f"UPDATE garagebooks.reminder SET {sets}, edited_at = now() "
+                        "WHERE id = %(id)s AND resolved_at IS NULL", {**v, "id": reminder_id}).rowcount == 1
+
+
+def delete_reminder(conn, reminder_id):
+    """Delete a reminder that is still open: a resolved one is kept. False if there is none."""
+    return conn.execute("DELETE FROM garagebooks.reminder WHERE id = %s AND resolved_at IS NULL",
+                        (reminder_id,)).rowcount == 1
+
+
+def mark_resolved(conn, reminder_id, resolved_at, expense_id, km):
+    conn.execute("UPDATE garagebooks.reminder SET resolved_at = %s, resolved_expense_id = %s, resolved_km = %s WHERE id = %s",
+                 (resolved_at, expense_id, km, reminder_id))
+
+
+def mark_open(conn, reminder_id):
+    conn.execute("UPDATE garagebooks.reminder SET resolved_at = NULL, resolved_expense_id = NULL, resolved_km = NULL "
+                 "WHERE id = %s", (reminder_id,))
+
+
+def following_reminder(conn, reminder_id):
+    """The reminder created when this one was resolved, or None."""
+    return conn.execute("SELECT * FROM garagebooks.reminder WHERE previous_id = %s ORDER BY id LIMIT 1",
+                        (reminder_id,)).fetchone()
+
+
+def resolved_reminders(conn, limit, offset=0):
+    """-> (rows, total): resolved reminders, newest resolution first, with the expense that did the job."""
+    rows = conn.execute(
+        "SELECT r.id, r.title, r.car_id, c.name AS car_name, r.resolved_at, r.resolved_km, r.resolved_expense_id, "
+        "       e.occurred_at AS expense_at, e.vendor, e.amount, cat.name AS expense_category "
+        "FROM garagebooks.reminder r JOIN garagebooks.car c ON c.id = r.car_id "
+        "LEFT JOIN garagebooks.expense e ON e.id = r.resolved_expense_id "
+        "LEFT JOIN garagebooks.category cat ON cat.id = e.category_id "
+        "WHERE r.resolved_at IS NOT NULL ORDER BY r.resolved_at DESC, r.id DESC LIMIT %s OFFSET %s", (limit, offset)).fetchall()
+    total = conn.execute("SELECT count(*) AS n FROM garagebooks.reminder WHERE resolved_at IS NOT NULL").fetchone()["n"]
+    return rows, total
+
+
+def stored_open_reminders(conn, car_id):
+    """A car's open reminders that can be resolved (not the ones derived from its lease)."""
+    return conn.execute("SELECT r.id, r.title, r.category_id, r.due_date, r.due_km FROM garagebooks.reminder r "
+                        "WHERE r.car_id = %s AND r.resolved_at IS NULL ORDER BY r.due_date NULLS LAST, r.id",
+                        (car_id,)).fetchall()
+
+
+def recent_expenses(conn, car_id, limit=20):
+    """A car's latest expenses, for choosing the one that resolves a reminder."""
+    return conn.execute(f"{_SELECT} WHERE e.car_id = %s ORDER BY e.occurred_at DESC, e.id DESC LIMIT %s",
+                        (car_id, limit)).fetchall()
+# ---- change history ------------------------------------------------------------
+
+HISTORY_PAGE = 50
+HISTORY_TABLES = ("expense", "category")
+HISTORY_OPERATIONS = ("insert", "update", "delete")
+
+
+def history(conn, car_id=None, table=None, operation=None, page=1):
+    """One page of the change log, newest first, filtered. -> (entries, page, pages). A car filter
+    means that car's expenses (a category belongs to no car). The page is clamped to the last one."""
+    where, params = [], {}
+    if car_id:
+        where.append("table_name = 'expense' AND COALESCE(after_row, before_row) ->> 'car_id' = %(car)s")
+        params["car"] = str(car_id)
+    if table in HISTORY_TABLES:
+        where.append("table_name = %(table)s")
+        params["table"] = table
+    if operation in HISTORY_OPERATIONS:
+        where.append("operation = %(operation)s")
+        params["operation"] = operation
+    clause = ("WHERE " + " AND ".join(where)) if where else ""
+    total = conn.execute(f"SELECT count(*) AS n FROM garagebooks.change_log {clause}", params).fetchone()["n"]
+    pages = max(1, -(-total // HISTORY_PAGE))
+    page = min(max(page, 1), pages)
+    entries = conn.execute(
+        f"SELECT id, changed_at, actor, table_name, row_id, operation, before_row, after_row "
+        f"FROM garagebooks.change_log {clause} ORDER BY changed_at DESC, id DESC LIMIT %(limit)s OFFSET %(offset)s",
+        {**params, "limit": HISTORY_PAGE, "offset": (page - 1) * HISTORY_PAGE}).fetchall()
+    return entries, page, pages

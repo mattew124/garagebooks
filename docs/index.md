@@ -36,6 +36,46 @@ and rebates show in green, and the app follows your device's light or dark setti
 
 ![The expense list as tiles, with the sort and layout controls](images/expense-list-tiles.png)
 
+## Cars
+
+The **Cars** page lists your cars. The ones TeslaMate tracks are added by themselves and follow
+TeslaMate's name until you rename them here. Any other car, electric or not, is added by hand, with
+its type, make and model; TeslaMate isn't needed at all. The name is optional: a car with none is called
+by its make and model. The purchase price, date bought and odometer at purchase are edited on the car's
+card too. They are kept as one expense in a purchase category, so the price counts once; a car with
+several purchase expenses is edited in the expense list. Each car shows its latest odometer: TeslaMate's,
+or else the odometer on its latest expense. The page also says whether TeslaMate is connected, not
+configured, or unavailable and why.
+
+<!-- screenshot: cars-page - The Cars page, with a TeslaMate car and a car added by hand -->
+
+A car paid for through a novated lease has a **Lease** link: the details from the provider's
+statement, its yearly budgets (when [budgets are turned on](leases.md#lease-budgets)) and a few checks on them. See [Leases](leases.md).
+
+### Selling a car
+
+When you sell a car, open **Sold this car?** on its card and enter the date it sold and what it sold
+for (0 if it was given away), and the final odometer, then **Save sale**. The final odometer is required
+for a car TeslaMate doesn't track, and optional for one it does (leave it empty to use TeslaMate's). The card then reads *Sold 12 Mar 2026 for $31,000.00*.
+**Clear sale** takes it back if you entered it by mistake. The date can't be in the future; a date
+before the car's first expense is accepted, with a warning.
+
+A sold car is not removed. Its total cost of ownership is the purchase price plus running costs and
+charging, **less the sale price**; the time owned, and so every per-day and per-month figure, stops at
+the sale date; and the distance stops at the final odometer, or the last odometer known on or before the sale date. You can still add
+an expense to a sold car (a late bill, say), but it goes after your other cars in the Add form's car
+list, marked *(sold)*. The dashboard names the car *(sold)* in its **Car** box and shows a **Sold**
+tile. See [What the dashboard counts](dashboard.md).
+
+<!-- screenshot: cars-sold - A car marked as sold on the Cars page, with its sale date and price -->
+
+## Reminders
+
+The **Reminders** page keeps track of what a car needs next: service that falls due on a date, an
+odometer reading or whichever comes first, repeating ones such as a tyre rotation every 10,000 km, and
+the registration and lease end from a car's lease. Resolve one by linking the expense that did the
+job. See [Reminders](reminders.md).
+
 ## Adding an expense
 
 Category, date, time, amount, odometer, vendor, notes and the invoice. The odometer can be filled in
@@ -48,6 +88,24 @@ looking at.
 
 <!-- screenshot: amount-calculator - The amount field with a sum typed in and its result -->
 
+### Payment calculator
+
+When a payment is made of several parts, open **Payment calculator** under the amount field to
+work out what it really cost. A $100 gift card bought for $95, plus $42.50 in cash, covers a $142.50
+invoice for a true cost of $137.50.
+
+1. Add a part for each payment. Enter its face value, then choose how it cost you: **an amount paid**
+   (the $95 you paid for the gift card), **a percentage off** (5% off), or **the full value (cash)**.
+2. The calculator shows the invoice total covered, the true cost and the saving. Empty parts are
+   ignored. A part that doesn't make sense, such as a discount over 100%, is outlined and stops the
+   total until you fix or remove it.
+3. Press **Use this amount** to put the true cost in the amount field, then save as usual.
+
+Working is in whole cents and rounds to the nearest cent. The parts are not saved or sent anywhere:
+only the amount you use is recorded, and the face value is not kept.
+
+<!-- screenshot: payment-calculator - The Payment calculator open under the amount field, with a discounted gift card and a cash part -->
+
 Choosing the invoice PDF fills in what can be read from it. With
 [OneDrive uploads](onedrive.md) on, the PDF goes into that car's OneDrive folder (choose it, or drop
 it onto the invoice box) and the link is filled in for you. Or keep them on your own
@@ -58,6 +116,16 @@ there, per car and category, and shows them itself behind your login. Invoices a
 Starter categories: Initial purchase, Insurance, Registration, Tyres, Cabin air filter,
 Air filter, Wheel alignment, Tyre rotation. Add more on the **Categories** page
 (new ones count as running costs).
+
+## Change history
+
+The **History** page lists every add, edit and delete of an expense or category, newest first: when,
+who, and what changed (for an edit, each changed field as old → new; for an add or delete, the whole
+row). Filter it by car, by expenses or categories, or by kind of change. It is read-only: if
+something was changed or deleted by mistake, enter the old values again. See
+[Reference](reference.md#change-history) for how it is recorded.
+
+<!-- screenshot: change-history - The History page, listing an add, an edit and a delete -->
 
 ## How it fits together
 

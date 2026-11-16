@@ -33,6 +33,8 @@ Rules of thumb:
 2. Tag a **release candidate**: `git tag -a v0.3.0-rc1 -m "v0.3.0-rc1" && git push origin v0.3.0-rc1`.
    The Release workflow runs the tests, builds `ghcr.io/<owner>/garagebooks:0.3.0-rc1` for
    amd64 and arm64, and prints the digest in the run summary. A pre-release tag never moves `:latest`.
+   It also attaches the image's software bill of materials (SPDX JSON, one file per platform) to the
+   GitHub release.
 3. Test that digest from a worktree: `scripts/dev.sh up --image <ref>@<digest>`, `scripts/dev.sh onedrive-link`,
    then `scripts/dev.sh test-browser --onedrive` (it fails if the real OneDrive checks can't run), then
    look at the pages yourself.

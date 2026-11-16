@@ -6,8 +6,11 @@ from decimal import Decimal
 from pathlib import Path
 
 import psycopg
+import pytest
 
 from garagebooks import create_app, db
+
+pytestmark = pytest.mark.teslamate   # the old schema pointed at TeslaMate's cars: it only ever ran beside it
 
 OLD_SCHEMA = (Path(__file__).parent / "fixtures" / "schema-0.4.0-rc1.sql").read_text()
 
@@ -107,3 +110,23 @@ def test_the_new_encryption_key_name_turns_onedrive_on(monkeypatch, caplog):
     with caplog.at_level("INFO"):
         create_app(connect=lambda: None)
     assert any("onedrive=on" in r.getMessage() for r in caplog.records)
+
+
+def test_the_upgrade_gives_teslamates_car_its_own_row_and_moves_nothing(blank_db, monkeypatch):
+    """Up to 0.4.0 an expense pointed at TeslaMate's public.cars. It now points at our own car, which
+    has the same id, so the expense is still that car's, and nothing of ours points at TeslaMate."""
+    old_install(blank_db)
+    monkeypatch.setenv("DATABASE_URL", blank_db)
+    create_app()
+    create_app()                                   # and again: nothing to do the second time
+    with psycopg.connect(blank_db) as conn:
+        assert conn.execute("SELECT id, teslamate_car_id, name, name_from_teslamate FROM garagebooks.car").fetchall() == [
+            (1, 1, "Test car", True)]
+        assert conn.execute("SELECT e.car_id, c.name, e.amount FROM garagebooks.expense e "
+                            "JOIN garagebooks.car c ON c.id = e.car_id").fetchall() == [(1, "Test car", Decimal("123.45"))]
+        refs = {r[0] for r in conn.execute(
+            "SELECT confrelid::regclass::text FROM pg_constraint WHERE contype = 'f' "
+            "AND conrelid::regclass::text LIKE 'garagebooks.%'")}
+        assert "cars" not in refs and "public.cars" not in refs and "garagebooks.car" in refs
+        assert conn.execute("SELECT tco FROM garagebooks.ownership WHERE car_id = 1").fetchone()[0] == Decimal("123.45")
+        conn.execute("DELETE FROM cars WHERE id = 1")          # TeslaMate may delete its car now

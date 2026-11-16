@@ -1,9 +1,11 @@
-"""The app refuses to run against a TeslaMate newer than the one it was tested with."""
+"""On a TeslaMate newer than the one it was tested with, the app runs, and holds TeslaMate's figures back."""
 
 import psycopg
 import pytest
 
 from garagebooks import compat, create_app
+
+pytestmark = pytest.mark.teslamate
 
 
 def set_newest(url, version):
@@ -34,27 +36,47 @@ def test_starts_on_an_older_teslamate(env):
     create_app()
 
 
-def test_a_newer_teslamate_stops_the_app_and_says_what_to_do(env):
+def held_back(url):
+    """What the ownership view says about the TeslaMate car's charging: None means held back."""
+    with psycopg.connect(url) as conn:
+        return conn.execute("SELECT charging_total, tco FROM garagebooks.ownership WHERE car_id = 1").fetchone()
+
+
+def test_a_newer_teslamate_does_not_stop_the_app_but_its_figures_are_held_back(env, caplog):
     set_newest(env, compat.TESTED_MIGRATION + 1)
-    with pytest.raises(compat.UntestedTeslaMate) as err:
-        create_app()
-    text = str(err.value)
+    app = create_app()
+    assert app.test_client().get("/").status_code == 200           # everything entered by hand carries on
+    text = next(r.getMessage() for r in caplog.records if r.levelname == "WARNING" and "untested" in r.getMessage())
     assert compat.TESTED_TESLAMATE in text and str(compat.TESTED_MIGRATION + 1) in text
     assert "ALLOW_UNTESTED_TESLAMATE=1" in text
+    assert held_back(env) == (None, None)                          # unknown, never a wrong zero
+    page = app.test_client().get("/cars").data.decode()
+    assert 'data-state="untested"' in page and "ALLOW_UNTESTED_TESLAMATE=1" in page
 
 
 def test_it_is_checked_even_when_the_schema_is_left_alone(env, monkeypatch):
+    create_app()                                                   # the schema exists, as provision-db.sh leaves it
     set_newest(env, compat.TESTED_MIGRATION + 1)
     monkeypatch.setenv("SKIP_MIGRATE", "1")
-    with pytest.raises(compat.UntestedTeslaMate):
-        create_app()
+    create_app()
+    assert held_back(env) == (None, None)
 
 
-def test_the_override_runs_anyway_and_logs_an_error(env, monkeypatch, caplog):
+def test_the_override_uses_its_figures_anyway_and_logs_an_error(env, monkeypatch, caplog):
     set_newest(env, compat.TESTED_MIGRATION + 1)
     monkeypatch.setenv("ALLOW_UNTESTED_TESLAMATE", "1")
     create_app()
     assert any(r.levelname == "ERROR" and "newer than" in r.getMessage() for r in caplog.records)
+    assert held_back(env) == (0, 0)
+
+
+def test_the_figures_come_back_when_a_tested_version_is_seen_again(env):
+    set_newest(env, compat.TESTED_MIGRATION + 1)
+    create_app()
+    assert held_back(env) == (None, None)
+    set_newest(env, compat.TESTED_MIGRATION)
+    create_app()
+    assert held_back(env) == (0, 0)
 
 
 def test_an_unreadable_version_warns_and_does_not_stop_the_app(env, caplog):

@@ -70,6 +70,17 @@ def test_invoice_link_is_rendered_safely(client, admin):
     assert 'href="https://1drv.ms/b/abc" target="_blank" rel="noopener noreferrer"' in html
 
 
+@pytest.mark.parametrize("path,kind", [("/new", "form"), ("/categories", "form"), ("/settings", "form"),
+                                       ("/learned/vendor/delete", "form"), ("/api/duplicates", "query"), ("/", "query")])
+def test_a_nul_character_is_a_400_not_a_server_error(client, admin, path, kind):
+    """Postgres text can't hold NUL: found by test_properties_routes.py, where it was a 500."""
+    bad = form(admin, vendor="Tyre\x00Shop", name="a\x00b", app_url="http://x\x00", category="1\x002")
+    resp = (client.post(path, data=bad, headers=ORIGIN) if kind == "form"
+            else client.get(path, query_string=bad))
+    assert resp.status_code == 400 and b"can" in resp.data
+    assert rows(admin) == []
+
+
 def test_javascript_link_is_refused(client, admin):
     resp = client.post("/new", data=form(admin, invoice_url="javascript:alert(1)"), headers=ORIGIN)
     assert resp.status_code == 400 and b"https://" in resp.data
@@ -201,6 +212,7 @@ def test_add_category(client, admin):
     admin.execute("DELETE FROM garagebooks.category WHERE name='Car wash'")  # leave seed list intact
 
 
+@pytest.mark.teslamate
 def test_odometer_lookup_uses_utc_positions(client, admin):
     # positions are naive UTC. 10:00 AEST on 7 Nov is 00:00 UTC on 7 Nov.
     admin.execute("""INSERT INTO positions (latitude, longitude, date, odometer, car_id) VALUES
@@ -247,6 +259,7 @@ def test_site_icon(client):
     assert client.get("/static/icon-180.png").mimetype == "image/png"
 
 
+@pytest.mark.teslamate
 def test_app_role_is_least_privilege(pg, admin):
     with psycopg.connect(pg.app_url, autocommit=True) as conn:
         conn.execute("SELECT * FROM public.cars")
@@ -266,7 +279,7 @@ def test_provision_is_idempotent(pg, admin):
     assert pg.provision().returncode == 0
     assert pg.provision().returncode == 0
     n = admin.execute("SELECT count(*) AS n FROM garagebooks.category WHERE sort_order < 100").fetchone()["n"]
-    assert n == 8
+    assert n == 10   # the starter categories, with Charging and Fuel
 
 
 def test_provision_rejects_weak_or_missing_password(pg):
@@ -278,6 +291,7 @@ def test_provision_rejects_weak_or_missing_password(pg):
         assert r.returncode != 0 and "GARAGEBOOKS_DB_PASS" in r.stderr
 
 
+@pytest.mark.teslamate
 def test_ownership_view(admin):
     purchase = category_id(admin, "Initial purchase")
     insurance = category_id(admin, "Insurance")
@@ -293,6 +307,7 @@ def test_ownership_view(admin):
     assert r["owned_since"] == datetime.fromisoformat("2024-01-01T00:00:00+10:00")
 
 
+@pytest.mark.teslamate
 def test_ownership_view_without_purchase_or_data(admin):
     admin.execute("INSERT INTO positions (latitude, longitude, date, odometer, car_id) VALUES (0, 0, '2025-01-10 00:00', 2000, 1), (0, 0, '2025-02-10', 2600, 1)")
     r = admin.execute("SELECT * FROM garagebooks.ownership").fetchone()
@@ -408,7 +423,7 @@ def test_restart_keeps_data_and_is_idempotent(blank_db, monkeypatch):
     with psycopg.connect(blank_db) as conn:
         assert conn.execute("SELECT count(*) FROM garagebooks.category WHERE name = 'Car wash'").fetchone()[0] == 1
         assert conn.execute("SELECT grafana_url FROM garagebooks.setting").fetchone()[0] == "https://g.example.test/"
-        assert conn.execute("SELECT count(*) FROM garagebooks.category WHERE sort_order < 100").fetchone()[0] == 8
+        assert conn.execute("SELECT count(*) FROM garagebooks.category WHERE sort_order < 100").fetchone()[0] == 10
 
 
 def test_skip_migrate_for_a_restricted_role(blank_db, monkeypatch):

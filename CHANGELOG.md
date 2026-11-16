@@ -7,6 +7,49 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+**Lease and car page changes.** Nothing to do on upgrade: the app adds the new columns itself.
+
+- **Lease form import.** The Add a lease page starts with a **Documents** card. Choose the provider's lease
+  form or package confirmation (from the computer, by dropping it, or from the car's OneDrive or invoice
+  folder) and the boxes are filled in from it: provider, start, end, term, pay frequency, the pre-tax
+  payment per pay, FBT base value, electric car exemption, estimated km per year and, with budgets on, the
+  yearly budgets. Only the lease's own figures are read, never names, employer, payroll, bank or
+  registration details. Check the boxes before saving.
+- **Lease documents.** A **Lease agreement PDF** can be kept for reference (nothing is read from it). Chosen
+  PDFs are saved in a **Lease** subfolder of the car's folder and linked from the lease page. With no
+  folder chosen for the car, the lease still saves and says the PDF wasn't kept.
+- **Lease periods.** A car's lease page has **Add a lease period** at the top, and the periods other than
+  the current one are folded to a line each. Every period keeps its own lease form and lease agreement.
+- **Associate leases.** A new **Associate lease** tick box, for a car owned outright and leased to the
+  employer by an associate. No financier is needed, and the residual boxes and the minimum-residual check
+  go away.
+- **Salary packaging provider.** *Package or provider name* is now **Salary packaging provider**, and
+  packaging is recorded per car.
+- **Lease end** is filled in from the start date and the term in months. Leave the term empty and it is
+  worked out from the two dates.
+- **Lease budgets are optional and off by default.** Turn on **Track lease budgets** in Settings to see
+  them on the lease pages, the Categories page and the FBT year report. While off, the FBT year report
+  lists running costs by category. Budgets already entered are kept.
+- **Cars page.** The name is optional (a car with none is called by its make and model). Purchase price,
+  date bought and odometer are edited on the Cars page. The **Odometer readings** section is gone: the
+  odometer comes from TeslaMate or from the odometer on expenses. Recording a sale asks for the final
+  odometer (required for a car TeslaMate doesn't track).
+- **Standard reminders.** The Add a reminder form has a **Standard reminder** list (engine oil, tyre
+  rotation, registration renewal and others) that fills in the title, how often it repeats and the first
+  due date or odometer. Engine items are not offered for a battery electric car.
+- **Dashboard.** The **Sold** panel is only on the dashboard once a car has been sold.
+
+**Change history.** A new **History** page lists every add, edit and delete of an expense or category:
+when, who, and what changed (old and new values). It is written by triggers in the database, so changes
+made by other tools are recorded too, into an append-only `garagebooks.change_log` table. Who made a
+change is only known when you set the new optional `AUTH_USER_HEADER` to the header your forward-auth
+gate sets with the signed-in user (and the gate removes it from incoming requests); otherwise it shows
+*unknown*. Nothing is recorded for changes made before this version. **To upgrade:** pull the new image.
+If you use the restricted database role (`SKIP_MIGRATE=1`), re-run `scripts/provision-db.sh` first: it
+creates the log and grants the role `SELECT` and `INSERT` on it.
+A payment calculator on the Add and Edit form's amount field works out the true cost of a payment made of several
+parts, such as a discounted gift card plus cash. Only the amount you choose to use is saved. Nothing to do on upgrade.
+
 The rename to GarageBooks reaches the last places the old name was kept: the database schema, the
 dashboard's address and the settings. The app upgrades your database itself on its first start, and
 your data, saved links and OneDrive sign-in carry over.
@@ -20,6 +63,58 @@ drops the old dashboard and its folder by itself. If you use the
 restricted database role (`SKIP_MIGRATE=1`), re-run `scripts/provision-db.sh` first: it does the same,
 and keeps your existing role when you set `GARAGEBOOKS_DB_USER` (or the old `EXPENSES_DB_USER`) to it.
 
+- **TeslaMate is optional.** GarageBooks now keeps its own list of cars (the new **Cars** page) and
+  runs with TeslaMate absent, unreadable or on an untested version. The cars TeslaMate tracks are added
+  automatically with the same ids, so no expense moves; any other car is added by hand, with odometer
+  readings entered on the Cars page and charging or fuel costs entered as expenses in the new
+  **Charging** and **Fuel** categories (counted with TeslaMate's charging costs on the dashboard).
+  The app no longer stops on a TeslaMate newer than it was tested with: it holds TeslaMate's figures
+  back, shows them as *unavailable* with the reason, and carries on. `ALLOW_UNTESTED_TESLAMATE=1`
+  still uses them anyway. The dashboard is written to match, and follows within a minute when
+  TeslaMate appears or changes. The app's tables no longer hold a foreign key onto TeslaMate's `cars`,
+  so TeslaMate can delete a car. If you use the restricted database role, re-running
+  `scripts/provision-db.sh` (already needed for this release) also lets it read
+  `charging_processes(car_id, start_date, cost)`. A grant you added yourself on the
+  `garagebooks.ownership` view needs granting again: the view is rebuilt once. The dashboard's car
+  list is now in id order.
+- **Lease details per car.** Each car on the **Cars** page has a **Lease** link: the novated lease
+  behind it, entered from the provider's statement (financier, dates, term, payments split pre-tax and
+  post-tax, residual, FBT details, the provider's estimated km, registration, and a yearly budget for
+  each running cost), with add, edit and delete, and past leases kept. The page shows figures worked
+  out from what you entered (total per pay, yearly payments, budgets against payments, the residual
+  against the ATO's minimum, days remaining) so a typing mistake stands out. Each category can be
+  given the budget pool it is paid from, on the **Categories** page. It records the statement and is
+  not tax advice; no personal details are stored. See [Leases](docs/leases.md). The app adds the new
+  `garagebooks.lease` and `garagebooks.lease_budget` tables and `category.budget_pool` on start; with
+  the restricted database role, re-run `scripts/provision-db.sh` first.
+- **Selling a car.** Record a sale date and price on the **Cars** page (**Sold this car?**). A sold car's
+  total cost of ownership is net of the sale price, its time owned, per-day and per-month figures stop at
+  the sale date, and its distance stops at the last odometer reading on or before it. The dashboard adds
+  a **Sold** tile and names the car *(sold)* in the Car box; the Add form lists sold cars last. The
+  `garagebooks.car` table gains `sold_at` and `sale_price`, and the `garagebooks.ownership` view gains
+  `sale_price`, `sold_at` and `owned_until` (its `tco` and `current_km` change for a sold car). Both apply
+  themselves on start; with the restricted database role, nothing more is needed.
+- **FBT year and taxable value.** A car's lease page links to a report for each FBT year (1 April to
+  31 March), chosen by the dates of its expenses, never by you: days held, the taxable value under the
+  statutory formula, the contribution that cancels it against what the post-tax payments make, and running
+  costs by budget pool (with TeslaMate's charging, or *unavailable* when it can't be read). The dashboard has a
+  new **Running costs per FBT year** panel, and the database a `garagebooks.fbt_year(date)` function. It is not
+  tax advice. See [Leases](docs/leases.md). The app adds the function on start; with the restricted database
+  role, re-run `scripts/provision-db.sh` first.
+- **Reminders.** A new **Reminders** page (and a count in the header when something is overdue or due
+  soon) keeps track of what a car needs next: a reminder falls due on a date, an odometer reading
+  (TeslaMate's, or your latest reading) or whichever comes first, with a lead time in days and km.
+  Repeating ones (a tyre rotation every 10,000 km) make the next when resolved, and are resolved by
+  linking the expense that did the job, from the reminder or after saving the expense. Resolved
+  reminders are kept, and can be reopened. A lease's registration date and end date appear as reminders
+  by themselves. The dashboard has a **Reminders** table for the selected car. Due-ness is worked out
+  when a page or the dashboard is viewed; nothing is sent. See [Reminders](docs/reminders.md). The app
+  adds the new `garagebooks.reminder` table and `garagebooks.reminder_due` view on start; with the
+  restricted database role, re-run `scripts/provision-db.sh` first.
+- **Backup and restore:** a new guide ([Backup and restore](https://mattew124.github.io/garagebooks/backup/)) and
+  `scripts/backup.sh`, which dumps and restores only the `garagebooks` schema, and checks whether an existing
+  TeslaMate backup includes it. It never writes to the database except for `restore`, which refuses to replace a
+  schema that has tables unless you add `--replace`. Nothing to do to upgrade.
 - **Schema:** `expenses` is now `garagebooks`. Grafana panels or queries of your own that name
   `expenses.` need the new name.
 - **Dashboard address:** the uid is now `garagebooks-tco` (was `tm-expenses-tco`), so its address is
@@ -30,6 +125,13 @@ and keeps your existing role when you set `GARAGEBOOKS_DB_USER` (or the old `EXP
   Its default role is now `garagebooks_app`.
 - **Fixed:** `docker-compose.invoices.yml` still named the service `expenses` after 0.4.0-rc1 renamed
   it, so the invoice folder override started a second, broken container. It names `garagebooks` again.
+- **Fixed:** an amount such as `1e999999999`, or a `NUL` character anywhere in a field or an address, made
+  the app answer with a server error. Both are now refused with a message. Found by the new property-based
+  tests.
+- **Quality gates:** the coverage floor is now 90% (it was 85%), the parsers and every route that takes input
+  are tested with generated input ([Hypothesis](https://hypothesis.readthedocs.io)), and each release
+  carries a software bill of materials (SPDX JSON, one file per platform) on its GitHub release page. Nothing
+  changes in the image.
 - **Docs:** a [roadmap](https://mattew124.github.io/garagebooks/roadmap/) of what comes next, in priority
   order, and [novated lease calculations](https://mattew124.github.io/garagebooks/lease-calculations/) with an
   example workbook (invented figures) that reads its tax rates from the ATO's pages. Two development scripts,

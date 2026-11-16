@@ -1,0 +1,328 @@
+"""Novated lease facts that are data, and the read-only figures worked out from a lease's details.
+
+Pure functions, no database or Flask. What a lease record says comes from the provider's statement
+(db.py stores it); this module only names the fixed lists (pools, pay frequencies, FBT methods) and
+works out figures to show beside the entry, so a typing mistake is visible. It records what the
+statement says and is not tax advice.
+"""
+
+from datetime import date, timedelta
+from decimal import Decimal, ROUND_HALF_UP
+
+# The provider's budget pools, in the order a statement lists them: identifier -> label.
+POOLS = {
+    "lease": "Lease payments",
+    "fuel_charging": "Fuel or charging",
+    "insurance": "Insurance",
+    "registration": "Registration and CTP",
+    "maintenance": "Maintenance",
+    "tyres": "Tyres",
+    "other": "Other running costs",
+}
+
+# How often a payment comes out of pay, and how many pays that is in a year.
+FREQUENCIES = {"weekly": ("Weekly", 52), "fortnightly": ("Fortnightly", 26), "monthly": ("Monthly", 12)}
+
+FBT_METHODS = {"statutory": "Statutory formula", "operating_cost": "Operating cost"}
+DEFAULT_STATUTORY_PERCENT = Decimal("20")   # the schema default; stored per lease, never used to calculate in code
+
+TAX_TREATMENTS = {"employee_contribution": "Employee contribution method", "other": "Other"}
+
+# ATO data, in one place. The minimum residual (balloon) payment, as a percentage of the car's cost,
+# for a lease of 1 to 5 whole years: 75% less 75% / 8 for each year of the term (see
+# docs/lease-calculations.md). Source: the ATO's minimum residual values for a lease of a car,
+# as set out on that page. Update them here, and only here, if the ATO changes them.
+MIN_RESIDUAL_PERCENT = {
+    1: Decimal("65.625"),
+    2: Decimal("56.25"),
+    3: Decimal("46.875"),
+    4: Decimal("37.5"),
+    5: Decimal("28.125"),
+}
+
+CENTS = Decimal("0.01")
+
+
+def pays_per_year(frequency):
+    return FREQUENCIES[frequency][1]
+
+
+def total_per_pay(lease):
+    """Pre-tax part + post-tax part + the provider's admin fee, for one pay."""
+    return lease["pretax_payment"] + lease["posttax_payment"] + lease["admin_fee"]
+
+
+def yearly_payments(lease):
+    return (total_per_pay(lease) * pays_per_year(lease["pay_frequency"])).quantize(CENTS, ROUND_HALF_UP)
+
+
+def yearly_before_admin(lease):
+    """What comes out of pay in a year for the budgets: the pre-tax and post-tax parts, without the admin fee."""
+    return ((lease["pretax_payment"] + lease["posttax_payment"]) * pays_per_year(lease["pay_frequency"])).quantize(CENTS, ROUND_HALF_UP)
+
+
+def budget_total(budgets):
+    """The yearly total of a set of budgets (amounts as stored)."""
+    return sum((Decimal(b["yearly_amount"]) for b in budgets), Decimal(0))
+
+
+def budget_on(budgets, pool, on):
+    """The yearly budget for `pool` that applies on the date `on`: the latest row for that pool that
+    has taken effect by then, or None. A later re-budget never changes an earlier date's answer."""
+    rows = [b for b in budgets if b["pool"] == pool and b["effective_from"] <= on]
+    return max(rows, key=lambda b: b["effective_from"])["yearly_amount"] if rows else None
+
+
+def initial_budgets(lease, budgets):
+    """The first set (effective from the lease's start): what the lease form shows and edits."""
+    return [b for b in budgets if b["effective_from"] == lease["start_date"]]
+
+
+def residual_figures(lease):
+    """-> (amount, percent), each None when it can't be worked out. Whichever the statement gave is
+    kept; the other follows from the car's cost when that is known."""
+    amount, percent, cost = lease["residual_amount"], lease["residual_percent"], lease["car_cost"]
+    if amount is None and percent is not None and cost:
+        amount = (cost * percent / 100).quantize(CENTS, ROUND_HALF_UP)
+    if percent is None and amount is not None and cost:
+        percent = (amount / cost * 100).quantize(Decimal("0.001"), ROUND_HALF_UP)
+    return amount, percent
+
+
+def minimum_residual_percent(term_months):
+    """The ATO's minimum for this term, or None when the term isn't a whole number of years from 1 to 5."""
+    if term_months % 12:
+        return None
+    return MIN_RESIDUAL_PERCENT.get(term_months // 12)
+
+
+def days_remaining(lease, today):
+    """Days from `today` to the lease's end (0 on the last day, negative once it has ended)."""
+    return (lease["end_date"] - today).days
+
+
+def status(lease, today):
+    """'upcoming' before it starts, 'current' while it runs (both dates inclusive), else 'past'."""
+    if today < lease["start_date"]:
+        return "upcoming"
+    return "current" if today <= lease["end_date"] else "past"
+
+
+def derived(lease, budgets, today):
+    """The read-only figures shown beside a lease, so an entry error is visible."""
+    amount, percent = residual_figures(lease)
+    minimum = minimum_residual_percent(lease["term_months"])
+    first = initial_budgets(lease, budgets)
+    yearly = yearly_payments(lease)
+    before_admin = yearly_before_admin(lease)
+    total = budget_total(first)
+    return {
+        "pays_per_year": pays_per_year(lease["pay_frequency"]),
+        "total_per_pay": total_per_pay(lease),
+        "yearly_payments": yearly,
+        "budget_total": total,
+        "yearly_before_admin": before_admin,
+        "budget_gap": total - before_admin,
+        "has_budgets": bool(first),
+        "residual_amount": amount,
+        "residual_percent": percent,
+        "minimum_residual_percent": minimum,
+        "residual_below_minimum": percent is not None and minimum is not None and percent < minimum,
+        "days_remaining": days_remaining(lease, today),
+        "days_to_start": (lease["start_date"] - today).days,
+        "status": status(lease, today),
+    }
+
+
+def overlaps(start, end, other_start, other_end):
+    """Whether two date ranges, each including both ends, share a day."""
+    return start <= other_end and other_start <= end
+
+
+# ---- the FBT year and the car's taxable value (roadmap L2) -----------------------------------------
+# The FBT year runs 1 April to 31 March and the income tax year 1 July to 30 June. Nobody picks one:
+# a date decides both. A year is named by the calendar year it starts in (2025 is "FBT 2025–26"). The
+# same rule is in SQL as garagebooks.fbt_year(date), so the dashboard, the app and a query of your own
+# agree; a test holds the two together.
+
+def fbt_year(day):
+    """The FBT year a date falls in, as the year it starts in."""
+    return day.year if day.month >= 4 else day.year - 1
+
+
+def fbt_start(year):
+    return date(year, 4, 1)
+
+
+def fbt_end(year):
+    return date(year + 1, 3, 31)
+
+
+def days_in_fbt_year(year):
+    return (fbt_end(year) - fbt_start(year)).days + 1
+
+
+def _span(year):
+    return f"{year}–{(year + 1) % 100:02d}"
+
+
+def fbt_label(year):
+    return f"FBT {_span(year)}"
+
+
+def income_tax_year(day):
+    """The income tax year (1 July to 30 June) a date falls in, as the year it starts in."""
+    return day.year if day.month >= 7 else day.year - 1
+
+
+def income_tax_label(year):
+    return _span(year)
+
+
+def _held_range(lease, year):
+    return max(lease["start_date"], fbt_start(year)), min(lease["end_date"], fbt_end(year))
+
+
+def days_held(lease, year):
+    """Days the car was held in an FBT year under this lease: its dates clipped to the year, both ends counted."""
+    first, last = _held_range(lease, year)
+    return max((last - first).days + 1, 0)
+
+
+def _add_months(start, months):
+    """The date `months` after `start`, on the same day of the month, or the month's last day if it has none."""
+    year, month = divmod(start.year * 12 + start.month - 1 + months, 12)
+    month += 1
+    last = (date(year + month // 12, month % 12 + 1, 1) - timedelta(days=1)).day
+    return date(year, month, min(start.day, last))
+
+
+def pay_dates(lease, first, last):
+    """The pay dates from `first` to `last` (both included): stepping from the lease's start date by its pay
+    frequency. An assumption: the provider's own pay dates may differ a little."""
+    frequency = lease["pay_frequency"]
+    step = {"weekly": 7, "fortnightly": 14}.get(frequency)
+    found, n = [], 0
+    while True:
+        day = lease["start_date"] + timedelta(days=n * step) if step else _add_months(lease["start_date"], n)
+        if day > last:
+            return found
+        if day >= first:
+            found.append(day)
+        n += 1
+
+
+def fbt_figures(lease, year, today):
+    """The FBT figures of one lease for one FBT year: days held, taxable value (statutory formula), the
+    post-tax contribution that cancels it, and the contributions made against it. Money is rounded to
+    cents once, at the end. `taxable_value` and `required` are None, with a `reason`, when they can't
+    be worked out here."""
+    held, in_year = days_held(lease, year), days_in_fbt_year(year)
+    first, last = _held_range(lease, year)
+    pays = pay_dates(lease, first, last) if held else []
+    so_far = [p for p in pays if p <= today]
+    posttax = lease["posttax_payment"]
+    out = {"year": year, "days_held": held, "days_in_year": in_year, "exempt": bool(lease["ev_exempt"]),
+           "method": lease["fbt_method"], "taxable_value": None, "required": None, "reason": "",
+           "pays_in_year": len(pays), "pays_so_far": len(so_far),
+           "made": (posttax * len(so_far)).quantize(CENTS, ROUND_HALF_UP),
+           "expected": (posttax * len(pays)).quantize(CENTS, ROUND_HALF_UP), "difference": None}
+    if lease["ev_exempt"]:
+        out["taxable_value"] = out["required"] = Decimal("0.00")
+    elif lease["fbt_method"] != "statutory":
+        out["reason"] = ("The statutory figure doesn't apply: the operating cost method is not worked out by "
+                         "GarageBooks. Use the figure on your provider's statement.")
+    elif lease["fbt_base_value"] is None:
+        out["reason"] = "No FBT base value is entered for this lease, so the taxable value can't be worked out."
+    else:
+        value = lease["fbt_base_value"] * lease["statutory_percent"] / 100 * held / in_year
+        out["taxable_value"] = out["required"] = value.quantize(CENTS, ROUND_HALF_UP)
+    if out["required"] is not None:
+        out["difference"] = out["expected"] - out["required"]
+    return out
+
+
+def fbt_years(leases, expense_years):
+    """Every FBT year with something to show: those a lease spans, and those with an expense. Oldest first."""
+    years = set(expense_years)
+    for row in leases:
+        years.update(range(fbt_year(row["start_date"]), fbt_year(row["end_date"]) + 1))
+    return sorted(years)
+
+
+NO_POOL = "none"        # the report's own line for categories that belong to no pool, so nothing is hidden
+
+
+def _sum(values):
+    return sum(values, Decimal(0)).quantize(CENTS, ROUND_HALF_UP)
+
+
+def fbt_report(leases, costs, charging, year, today):
+    """Everything the per-FBT-year report shows, worked out (no database): `leases` is a list of (lease row,
+    its budgets) for the car, `costs` the year's expenses by category (db.fbt_costs), and `charging`
+    TeslaMate's charging cost for the year (sources.Answer) or None when the car has none to ask for.
+    A figure that depends on something unknown is None with the reason, never a number standing in for it."""
+    held = [(row, budgets, fbt_figures(row, year, today)) for row, budgets in sorted(leases, key=lambda x: x[0]["start_date"])
+            if days_held(row, year)]
+    figures = [f for _, _, f in held]
+    out = {"year": year, "label": fbt_label(year), "income_tax_label": income_tax_label(year), "leases": held,
+           "days_held": sum(f["days_held"] for f in figures), "days_in_year": days_in_fbt_year(year)}
+    worked = all(f["taxable_value"] is not None for f in figures)
+    out.update(
+        exempt=bool(figures) and all(f["exempt"] for f in figures),
+        taxable_value=_sum(f["taxable_value"] for f in figures) if worked and figures else (Decimal("0.00") if not figures else None),
+        reasons=[f["reason"] for f in figures if f["reason"]],
+        pays_in_year=sum(f["pays_in_year"] for f in figures), pays_so_far=sum(f["pays_so_far"] for f in figures),
+        made=_sum(f["made"] for f in figures), expected=_sum(f["expected"] for f in figures))
+    out["required"] = out["taxable_value"]
+    out["difference"] = None if out["required"] is None else out["expected"] - out["required"]
+    # Running costs by pool. Purchases are listed apart; a category in no pool keeps its own line.
+    spent, names = {}, {}
+    for row in costs:
+        if row["kind"] == "purchase":
+            continue
+        key = row["budget_pool"] or NO_POOL
+        spent[key] = spent.get(key, Decimal(0)) + row["total"]
+        names.setdefault(key, []).append((row["category"], row["total"]))
+    out["purchases"] = [(r["category"], r["total"]) for r in costs if r["kind"] == "purchase"]
+    out["teslamate_charging"] = None
+    if charging is not None and (charging.value is None or charging.value != 0):
+        out["teslamate_charging"] = {"value": charging.value, "reason": charging.reason}
+    lines = []
+    for key, label in [*POOLS.items(), (NO_POOL, "Not in a pool")]:
+        budget = None
+        for row, budgets, _ in held:
+            part = budget_for_year(row, budgets, key, year)
+            if part is not None:
+                budget = (budget or Decimal(0)) + part
+        amount, reason = spent.get(key, Decimal(0)), ""
+        if key == "fuel_charging" and out["teslamate_charging"]:
+            if charging.value is None:
+                amount, reason = None, charging.reason
+            else:
+                amount += Decimal(charging.value)
+        if amount or amount is None or budget is not None:
+            lines.append({"key": key, "label": label, "spent": amount, "reason": reason, "budget": budget,
+                          "categories": names.get(key, [])})
+    out["pools"] = lines
+    out["pool_total"] = None if any(line["spent"] is None for line in lines) else _sum(line["spent"] for line in lines)
+    out["budget_total"] = _sum(line["budget"] for line in lines if line["budget"] is not None) if any(
+        line["budget"] is not None for line in lines) else None
+    return out
+
+
+def budget_for_year(lease, budgets, pool, year):
+    """What the yearly budget for `pool` comes to over the days this lease was held in an FBT year: the budget
+    in force on each day, pro-rated by days. None when the pool has no budget in that time. For reference only."""
+    first, last = _held_range(lease, year)
+    if first > last:
+        return None
+    changes = sorted({b["effective_from"] for b in budgets if b["pool"] == pool and first < b["effective_from"] <= last})
+    total, seen = Decimal(0), False
+    for begin, end in zip([first, *changes], [*(c - timedelta(days=1) for c in changes), last], strict=True):
+        yearly = budget_on(budgets, pool, begin)
+        if yearly is not None:
+            seen = True
+            total += Decimal(yearly) * ((end - begin).days + 1) / days_in_fbt_year(year)
+    return total.quantize(CENTS, ROUND_HALF_UP) if seen else None
+

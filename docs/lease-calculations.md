@@ -29,7 +29,7 @@ A package statement lists, for each car, the figures below. GarageBooks records 
 | Tax treatment | Usually the *employee contribution method*: you pay part of the package from after-tax pay, which cancels the FBT. |
 | Estimated contribution required | The after-tax amount needed to bring FBT to nil (equal to the taxable value). |
 | Annual FBT liability | Nil when the contribution is made, or when the car is an exempt electric vehicle. |
-| Annual budgets | Lease payment (inc GST), fuel or charging, insurance, registration, maintenance, tyres, other running costs, and their total. |
+| Annual budgets | Only when budgets are turned on in Settings. Lease payment (inc GST), fuel or charging, insurance, registration, maintenance, tyres, other running costs, and their total. |
 | Per-pay deductions | Each budget's share per pay, marked pre-tax or post-tax, plus the provider's admin fee. |
 | Lease dates | Start, end, and refinance date if the lease was refinanced. |
 
@@ -43,6 +43,9 @@ taxable value    = base value × 20% × days held ÷ days in the FBT year
                    (nil for an exempt electric car)
 contribution     = taxable value      (employee contribution method: FBT becomes nil)
 ```
+
+GarageBooks works these out for each FBT year on the [FBT year report](leases.md#the-fbt-year), from the lease's own
+base value and percentage.
 
 ### Kilometre pace (L4)
 

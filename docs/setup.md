@@ -15,7 +15,8 @@
     on this server instead, see [Invoice folder on the server](local-folder.md).
 
 2. **Back up TeslaMate's database.** The first start adds the `garagebooks` schema to it and changes
-    nothing else, but take a backup first, as for any upgrade that touches the database.
+    nothing else, but take a backup first, as for any upgrade that touches the database. What to back up, and how
+    to check that your backup includes the app's schema, is in [Backup and restore](backup.md).
 
 3. **Run it.** Set `GARAGEBOOKS_IMAGE` to a released image, or leave it unset to build locally. Follow
     a release channel with `:rc` or `:latest`, or pin one version (see [RELEASING.md](https://github.com/mattew124/garagebooks/blob/main/RELEASING.md)).
@@ -87,10 +88,14 @@
 
 There is nothing to run. On start the app creates its own `garagebooks` schema in the TeslaMate
 database (idempotent, so upgrades apply themselves), and only ever writes inside it. It reads
-`cars`, `positions` and `charging_processes`, and the version table `schema_migrations`, and stops on a
-TeslaMate newer than the one it was tested with (see [Reference](reference.md#teslamate-version)). This needs TeslaMate's database user, which
+`cars`, `positions` and `charging_processes`, and the version table `schema_migrations`, and holds
+TeslaMate's figures back on a TeslaMate newer than the one it was tested with (see
+[Reference](reference.md#teslamate-version)). TeslaMate's cars appear on the app's **Cars** page by
+themselves; a car TeslaMate doesn't track is added there by hand (see
+[Without TeslaMate](reference.md#without-teslamate)). This needs TeslaMate's database user, which
 owns the database; Grafana already reads it the same way.
 
 To give the app less than that, run `scripts/provision-db.sh` once. It creates a role that
-can write expenses and read only `cars`, `schema_migrations` and `positions(car_id, date, odometer)`. Point
+can write expenses and read only `cars`, `schema_migrations`, `positions(car_id, date, odometer)` and
+`charging_processes(car_id, start_date, cost)`. Point
 `DATABASE_USER`/`DATABASE_PASS` at it and set `SKIP_MIGRATE=1`. Re-run the script on upgrades.

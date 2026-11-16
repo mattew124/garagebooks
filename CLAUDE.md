@@ -14,6 +14,9 @@ Grafana dashboard (`grafana/`). See README.md and `docs/`, the documentation sit
 - Location history stays out of the test database. `dev.sh` blanks latitude,
   longitude and elevation; don't copy more of `positions` without blanking them.
 - The app has no login, so it must only ever be published behind forward-auth.
+- TeslaMate is optional. Nothing queries its tables except `garagebooks/sources.py`: a feature asks
+  there and handles "no answer" (never a zero standing in for it). No foreign key points at its tables,
+  and the suite must pass both ways (`TEST_TESLAMATE=0 .venv/bin/python -m pytest -q` is the plain run).
 - The app connects as TeslaMate's own database user and creates its `garagebooks` schema itself
   on start (`garagebooks/schema.sql`, idempotent, no setup scripts). It must only ever touch
   `expenses.*` and read `cars`, `positions` and `charging_processes`. `scripts/provision-db.sh`

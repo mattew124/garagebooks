@@ -12,10 +12,13 @@ nav = [
   { "OneDrive uploads" = "onedrive.md" },
   { "Invoice folder on the server" = "local-folder.md" },
   { "Importing invoices" = "importing.md" },
+  { "Reminders" = "reminders.md" },
+  { "Backup and restore" = "backup.md" },
   { "Dashboard" = "dashboard.md" },
   { "Reference" = "reference.md" },
   { "Development" = "development.md" },
   { "Roadmap" = "roadmap.md" },
+  { "Leases" = "leases.md" },
   { "Novated lease calculations" = "lease-calculations.md" },
 ]
 
