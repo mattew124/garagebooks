@@ -29,6 +29,36 @@ DEFAULT_LEAD_KM = 1000
 RESOLVED_PAGE = 10          # resolved reminders per page
 
 
+# Standard reminders offered on the Add a reminder form: a title and how often it usually repeats, as a
+# starting point to check against the car's handbook. `kinds` is the types of car it applies to (None is
+# every car): a battery electric car has no engine oil, oil filter, engine air filter, spark plugs or
+# timing belt. `category` names a standard category, chosen too when it still exists.
+ENGINE = ("ICE", "PHEV", "HEV")
+STANDARD = (
+    {"key": "engine_oil", "title": "Engine oil", "months": 12, "km": 10000, "kinds": ENGINE, "category": None},
+    {"key": "oil_filter", "title": "Oil filter", "months": 12, "km": 10000, "kinds": ENGINE, "category": None},
+    {"key": "air_filter", "title": "Engine air filter", "months": 24, "km": 30000, "kinds": ENGINE, "category": "Air filter"},
+    {"key": "spark_plugs", "title": "Spark plugs", "months": 48, "km": 60000, "kinds": ENGINE, "category": None},
+    {"key": "timing_belt", "title": "Timing belt", "months": 72, "km": 100000, "kinds": ENGINE, "category": None},
+    {"key": "tyre_rotation", "title": "Tyre rotation", "months": None, "km": 10000, "kinds": None, "category": "Tyre rotation"},
+    {"key": "wheel_alignment", "title": "Wheel alignment", "months": 12, "km": 20000, "kinds": None, "category": "Wheel alignment"},
+    {"key": "cabin_air_filter", "title": "Cabin air filter", "months": 24, "km": None, "kinds": None, "category": "Cabin air filter"},
+    {"key": "brake_fluid", "title": "Brake fluid", "months": 24, "km": None, "kinds": None, "category": None},
+    {"key": "brake_pads", "title": "Brake pads and discs check", "months": 12, "km": 20000, "kinds": None, "category": None},
+    {"key": "coolant", "title": "Coolant", "months": 48, "km": None, "kinds": None, "category": None},
+    {"key": "wiper_blades", "title": "Wiper blades", "months": 12, "km": None, "kinds": None, "category": None},
+    {"key": "battery_12v", "title": "12 V battery check", "months": 24, "km": None, "kinds": None, "category": None},
+    {"key": "service", "title": "Scheduled service", "months": 12, "km": 15000, "kinds": None, "category": None},
+    {"key": "registration", "title": "Registration renewal", "months": 12, "km": None, "kinds": None, "category": "Registration"},
+    {"key": "insurance", "title": "Insurance renewal", "months": 12, "km": None, "kinds": None, "category": "Insurance"},
+)
+
+
+def standard_for(kind):
+    """The standard reminders that apply to a type of car (BEV, ICE, PHEV or HEV)."""
+    return [s for s in STANDARD if s["kinds"] is None or kind in s["kinds"]]
+
+
 @dataclass(frozen=True)
 class Status:
     code: str

@@ -252,6 +252,205 @@ document.addEventListener("DOMContentLoaded", () => {
   window.addEventListener("popstate", () => { if (document.querySelector("form[data-live]")) showList(location.href, null, false); });
   if (document.querySelector("form[data-live]")) bindList();
 
+  // Add a reminder: a standard reminder fills in the title and how often it repeats, and the first due date
+  // and odometer reading from today and the car's odometer. A car's type decides which are offered: a battery
+  // electric car has no engine oil or air filter to change.
+  const standardBox = document.getElementById("standard-reminder");
+  if (standardBox) {
+    const pick = standardBox.querySelector("select");
+    const f = pick.form;
+    const carOption = () => (f.elements.car_id && f.elements.car_id.selectedOptions ? f.elements.car_id.selectedOptions[0] : null);
+    const offer = () => {
+      const kind = (carOption() && carOption().dataset.kind) || "";
+      [...pick.options].forEach((o) => {
+        const kinds = (o.dataset.kinds || "").split(" ").filter(Boolean);
+        o.hidden = o.disabled = Boolean(kinds.length && kind && !kinds.includes(kind));
+      });
+      if (pick.selectedOptions[0] && pick.selectedOptions[0].disabled) pick.value = "";
+    };
+    const addMonths = (iso, months) => {
+      const [y, m, d] = iso.split("-").map(Number);
+      const last = new Date(Date.UTC(y, m - 1 + months + 1, 0)).getUTCDate();
+      return new Date(Date.UTC(y, m - 1 + months, Math.min(d, last))).toISOString().slice(0, 10);
+    };
+    standardBox.hidden = false;
+    offer();
+    if (f.elements.car_id) f.elements.car_id.addEventListener("change", offer);
+    pick.addEventListener("change", () => {
+      const o = pick.selectedOptions[0];
+      if (!o || !o.value) return;
+      const odometer = parseFloat((carOption() && carOption().dataset.odometer) || "");
+      f.elements.title.value = o.dataset.title;
+      f.elements.every_months.value = o.dataset.months;
+      f.elements.every_km.value = o.dataset.km;
+      f.elements.due_date.value = o.dataset.months ? addMonths(standardBox.dataset.today, Number(o.dataset.months)) : "";
+      f.elements.due_km.value = o.dataset.km && Number.isFinite(odometer) ? String(Math.round(odometer + Number(o.dataset.km))) : "";
+      const category = [...f.elements.category_id.options].find((c) => c.textContent.trim() === o.dataset.category);
+      f.elements.category_id.value = category && o.dataset.category ? category.value : "";
+    });
+  }
+
+  // Add or edit a lease. The provider's lease form fills in the boxes (never one already typed in), the lease
+  // end follows the start and the term, and an associate lease hides what it has none of.
+  const leaseForm = document.getElementById("lease-form");
+  if (leaseForm) {
+    const el = leaseForm.elements;
+    const touched = new Set();
+    leaseForm.addEventListener("input", (ev) => { if (ev.isTrusted && ev.target.name) touched.add(ev.target.name); });
+    leaseForm.addEventListener("change", (ev) => { if (ev.isTrusted && ev.target.name) touched.add(ev.target.name); });
+
+    const showAssociate = () => leaseForm.querySelectorAll("[data-not-associate]").forEach((box) => {
+      box.hidden = el.associate_lease.checked;
+    });
+    el.associate_lease.addEventListener("change", showAssociate);
+    showAssociate();
+
+    // The last day of a lease: the day before the same day of the month, that many months on.
+    const endFor = (iso, months) => {
+      const [y, m, d] = iso.split("-").map(Number);
+      const last = new Date(Date.UTC(y, m - 1 + months + 1, 0)).getUTCDate();
+      const end = new Date(Date.UTC(y, m - 1 + months, Math.min(d, last)));
+      end.setUTCDate(end.getUTCDate() - 1);
+      return end.toISOString().slice(0, 10);
+    };
+    let endFilled = el.end_date.value === "";       // an end date that was typed or saved is never replaced
+    const fillEnd = () => {
+      const months = parseInt(el.term_months.value, 10);
+      if (!endFilled || !el.start_date.value || !(months >= 1 && months <= 120)) return;
+      el.end_date.value = endFor(el.start_date.value, months);
+    };
+    el.end_date.addEventListener("input", () => { endFilled = el.end_date.value === ""; });
+    el.start_date.addEventListener("change", fillEnd);
+    el.term_months.addEventListener("input", fillEnd);
+
+    const box = (doc) => leaseForm.querySelector(`[data-lease-document=${doc}]`);
+    const say = (doc, text) => { box(doc).querySelector("[data-doc-hint]").textContent = text; };
+    const labels = { associate_lease: "associate lease", package_name: "provider", start_date: "start", end_date: "end",
+      term_months: "term", pay_frequency: "pay frequency", pretax_payment: "payment", fbt_base_value: "FBT base value",
+      ev_exempt: "electric car exemption", estimated_km_per_year: "km per year" };
+    async function prefill(body) {
+      say("form", "Reading the lease form…");
+      try {
+        const res = await fetch(leaseForm.dataset.prefillUrl, { method: "POST", body });
+        const data = await res.json();
+        if (!res.ok) return say("form", data.error || "Couldn't read that file.");
+        const filled = [];
+        Object.entries(data.fields).forEach(([name, value]) => {
+          const input = el[name];
+          if (!input || touched.has(name)) return;
+          if (input.type === "checkbox") input.checked = Boolean(value);
+          else input.value = value;
+          filled.push(labels[name] || (name.startsWith("budget_") ? null : name));
+        });
+        if ("end_date" in data.fields) endFilled = false;
+        showAssociate();
+        fillEnd();
+        const named = [...new Set(filled.filter(Boolean))];
+        const budgets = filled.length - filled.filter(Boolean).length;
+        say("form", filled.length
+          ? "Filled from the lease form: " + named.concat(budgets ? ["yearly budgets"] : []).join(", ") + ". Check them before saving."
+          : "Nothing could be read from that PDF as a lease form; fill the boxes in.");
+      } catch (e) {
+        say("form", "Couldn't read the lease form.");
+      }
+    }
+    el.form_file.addEventListener("change", () => {
+      if (!el.form_file.files.length) return;
+      const body = new FormData();
+      body.append("form_file", el.form_file.files[0]);
+      prefill(body);
+    });
+
+    // Dropping a PDF onto either box is the same as choosing it with the button.
+    leaseForm.querySelectorAll("[data-lease-document] .drop").forEach((drop) => {
+      const input = drop.querySelector("input[type=file]");
+      ["dragenter", "dragover"].forEach((name) => drop.addEventListener(name, (ev) => { ev.preventDefault(); drop.classList.add("over"); }));
+      ["dragleave", "drop"].forEach((name) => drop.addEventListener(name, () => drop.classList.remove("over")));
+      drop.addEventListener("drop", (ev) => {
+        ev.preventDefault();
+        const pdf = [...((ev.dataTransfer && ev.dataTransfer.files) || [])].find((x) => x.type === "application/pdf" || /\.pdf$/i.test(x.name));
+        if (!pdf) return;
+        const chosen = new DataTransfer();
+        chosen.items.add(pdf);
+        input.files = chosen.files;
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+    });
+
+    // A PDF already in the car's storage: it isn't copied, the lease keeps its link (or its path in the folder).
+    const picker = document.getElementById("lease-picker");
+    if (picker && leaseForm.dataset.browseUrl) {
+      const status = document.getElementById("lease-picker-status");
+      const pathBox = document.getElementById("lease-picker-path");
+      const list = document.getElementById("lease-picker-list");
+      const kind = leaseForm.dataset.storage;
+      let wanted = null;
+      let loading = 0;
+      const entry = (label, onClick) => {
+        const li = document.createElement("li");
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "linklike";
+        b.textContent = label;
+        b.addEventListener("click", onClick);
+        li.append(b);
+        list.append(li);
+      };
+      async function show(folder) {
+        const ticket = ++loading;
+        status.textContent = "Loading…";
+        list.textContent = "";
+        let data;
+        try {
+          const res = await fetch(leaseForm.dataset.browseUrl + (folder ? "?folder=" + encodeURIComponent(folder) : ""));
+          data = await res.json();
+          if (!res.ok) throw new Error(data.error || "Couldn't open the folder.");
+        } catch (e) {
+          if (ticket === loading) status.textContent = e.message;
+          return;
+        }
+        if (ticket !== loading) return;
+        pathBox.textContent = data.path;
+        status.textContent = data.folders.length || data.files.length ? "" : "No folders or PDFs in here.";
+        if (!data.is_root) entry("⬑ Up", () => show(data.parent_id || "root"));
+        data.folders.forEach((x) => entry("📁 " + x.name, () => show(x.id)));
+        data.files.forEach((x) => entry("📄 " + x.name, () => choose(x)));
+      }
+      function choose(file) {
+        picker.close();
+        const doc = wanted;
+        el[doc + "_file"].value = "";
+        el[doc + "_url"].value = kind === "local" ? "" : file.web_url;
+        el[doc + "_path"].value = kind === "local" ? file.id : "";
+        el["remove_" + doc].checked = false;
+        const link = box(doc).querySelector("[data-doc-link]");
+        link.textContent = file.name;
+        link.href = kind === "local" ? leaseForm.dataset.fileUrl + "?path=" + encodeURIComponent(file.id) : file.web_url;
+        box(doc).querySelector("[data-doc-kept]").hidden = false;
+        if (doc === "form") {
+          const body = new FormData();
+          body.append(kind + "_id", file.id);
+          body.append("name", file.name);
+          prefill(body);
+        }
+      }
+      leaseForm.querySelectorAll("[data-pick]").forEach((button) => button.addEventListener("click", () => {
+        wanted = button.dataset.pick;
+        picker.showModal();
+        show(null);
+      }));
+      document.getElementById("lease-picker-close").addEventListener("click", () => picker.close());
+    }
+
+    // An upload can take a few seconds: say so, and stop a second click sending it twice.
+    leaseForm.addEventListener("submit", () => {
+      if (!el.form_file.files.length && !el.agreement_file.files.length) return;
+      const save = leaseForm.querySelector("button[type=submit]");
+      save.disabled = true;
+      save.textContent = "Uploading…";
+    });
+  }
+
   const form = document.getElementById("expense-form");
   if (!form) return;
 

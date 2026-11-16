@@ -14,18 +14,19 @@
     {% else %}Ended {{ -f.days_remaining }} day{{ '' if f.days_remaining == -1 else 's' }} ago{% endif %}
     · {{ l.start_date.strftime('%d %b %Y') }} to {{ l.end_date.strftime('%d %b %Y') }}</p>
 
-  <h3>Finance</h3>
+  <h3>Lease</h3>
   <dl class="facts">
-    <div><dt>Financier</dt><dd>{{ l.financier }}</dd></div>
-    {% if l.package_name %}<div><dt>Package</dt><dd>{{ l.package_name }}</dd></div>{% endif %}
+    {% if l.associate_lease %}<div><dt>Type</dt><dd class="associate">Associate lease</dd></div>{% endif %}
+    {% if l.package_name %}<div><dt>Provider</dt><dd>{{ l.package_name }}</dd></div>{% endif %}
+    {% if l.financier %}<div><dt>Financier</dt><dd>{{ l.financier }}</dd></div>{% endif %}
     <div><dt>Start</dt><dd>{{ l.start_date.strftime('%d %b %Y') }}</dd></div>
     <div><dt>End</dt><dd>{{ l.end_date.strftime('%d %b %Y') }}</dd></div>
-    <div><dt>Refinanced</dt><dd>{{ l.refinance_date.strftime('%d %b %Y') if l.refinance_date else '—' }}</dd></div>
+    {% if l.refinance_date %}<div><dt>Refinanced</dt><dd>{{ l.refinance_date.strftime('%d %b %Y') }}</dd></div>{% endif %}
     <div><dt>Term</dt><dd>{{ l.term_months }} months</dd></div>
     <div><dt>Car's cost</dt><dd>{{ money_or_dash(l.car_cost) }}</dd></div>
-    <div><dt>Residual</dt><dd class="residual">{{ money_or_dash(f.residual_amount) }} <small>({{ pct(f.residual_percent) }} of cost)</small></dd></div>
+    {% if not l.associate_lease %}<div><dt>Residual</dt><dd class="residual">{{ money_or_dash(f.residual_amount) }} <small>({{ pct(f.residual_percent) }} of cost)</small></dd></div>{% endif %}
   </dl>
-  {% if f.minimum_residual_percent is not none %}
+  {% if f.minimum_residual_percent is not none and not l.associate_lease %}
   <p class="{{ 'error' if f.residual_below_minimum else '' }}" id="residual-check-{{ l.id }}"><small>ATO minimum residual for {{ l.term_months // 12 }} year{{ '' if l.term_months == 12 else 's' }}:
     {{ pct(f.minimum_residual_percent) }}.
     {% if f.residual_percent is none %}Enter the car's cost and residual to compare.
@@ -54,6 +55,7 @@
     <div><dt>Estimated km per year</dt><dd>{{ (l.estimated_km_per_year|km) if l.estimated_km_per_year is not none else '—' }}</dd></div>
   </dl>
 
+  {% if budgets_on %}
   <h3>Yearly budgets</h3>
   {% if l.budgets %}
   <dl class="facts">
@@ -67,12 +69,25 @@
     {% else %}The budgets differ from that by {{ (f.budget_gap|abs)|money }} ({{ 'more' if f.budget_gap > 0 else 'less' }}): check them against the statement.{% endif %}</small></p>
   {% else %}<p class="empty">No budgets entered.</p>{% endif %}
   {% if l.later_budgets %}<p><small>Later budget changes: {{ l.later_budgets|length }}.</small></p>{% endif %}
+  {% endif %}
 
   <h3>Registration</h3>
   <dl class="facts">
     <div><dt>Registration expires</dt><dd>{{ l.rego_expiry.strftime('%d %b %Y') if l.rego_expiry else '—' }}</dd></div>
     <div><dt>Provider renews it</dt><dd>{{ 'Yes' if l.rego_renewed_by_provider else 'No' }}</dd></div>
   </dl>
+
+  {% if l.form_url or l.form_path or l.agreement_url or l.agreement_path %}
+  <h3>Documents</h3>
+  <ul class="plain lease-documents">
+    {% for doc, label in documents.items() %}{% if l[doc ~ '_url'] or l[doc ~ '_path'] %}
+    <li data-document="{{ doc }}">{% set href = doc_link(l, doc) %}
+      {% if href %}<a href="{{ href }}" target="_blank" rel="noopener noreferrer">{{ label }}</a>
+      {% else %}{{ label }}: <code>{{ l[doc ~ '_path'] }}</code> <small>can't be shown: <code>INVOICES_DIR</code> isn't set.</small>{% endif %}
+      {% if l[doc ~ '_path'] %}<small>{{ l[doc ~ '_path'].rsplit('/', 1)[-1] }}</small>{% endif %}</li>
+    {% endif %}{% endfor %}
+  </ul>
+  {% endif %}
 
   <div class="row actions">
     <a class="button secondary-link" href="{{ url_for('car_lease_edit', car_id=car.id, lease_id=l.id) }}">Edit</a>
@@ -94,11 +109,11 @@
 {% if others %}
 <h2>{{ 'Other leases' if shown else 'Leases' }}</h2>
 {% for l in others %}
-{{ lease_card(l, (l.package_name or l.financier) ~ ' · ' ~ l.start_date.strftime('%b %Y') ~ ' to ' ~ l.end_date.strftime('%b %Y')) }}
+{{ lease_card(l, (l.package_name or l.financier or 'Lease') ~ ' · ' ~ l.start_date.strftime('%b %Y') ~ ' to ' ~ l.end_date.strftime('%b %Y')) }}
 {% endfor %}
 {% endif %}
 <p><a class="button" href="{{ url_for('car_lease_new', car_id=car.id) }}">Add a lease</a></p>
-<p><small>This records what the provider's statement says. It is not tax advice. The bold totals are
+<p><small>This records what the provider's documents say. It is not tax advice. The bold totals are
   worked out from what you entered, shown so a typing mistake is easy to spot. No personal
   details are stored.</small></p>
 {% endblock %}

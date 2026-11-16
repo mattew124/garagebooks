@@ -1,13 +1,23 @@
 {% macro bad(e, name) %}{% if e.get(name) %}aria-invalid="true" aria-describedby="e-{{ name }}"{% endif %}{% endmacro %}
 {% macro note(e, name) %}{% if e.get(name) %}<span class="error" id="e-{{ name }}">{{ e[name] }}</span>{% endif %}{% endmacro %}
 {# The fields of a reminder, for the add form and the edit page. `v` is what to show, `e` the errors by field. #}
-{% macro fields(v, e, cars, categories, lead_days, lead_km, fixed_car=None) %}
+{% macro fields(v, e, cars, categories, lead_days, lead_km, fixed_car=None, standard=None, odometers=None, today=None) %}
   {% if not fixed_car %}
   <label for="f-car_id">Car
     <select id="f-car_id" name="car_id" required {{ bad(e, 'car_id') }}>
       {% if cars|length != 1 %}<option value="">Choose…</option>{% endif %}
-      {% for c in cars %}<option value="{{ c.id }}" {{ 'selected' if v.get('car_id')|string == c.id|string or cars|length == 1 }}>{{ c.name }}</option>{% endfor %}
+      {% for c in cars %}<option value="{{ c.id }}" data-kind="{{ c.kind }}"{% if odometers and c.id in odometers %} data-odometer="{{ odometers[c.id] }}"{% endif %} {{ 'selected' if v.get('car_id')|string == c.id|string or cars|length == 1 }}>{{ c.name }}</option>{% endfor %}
     </select>{{ note(e, 'car_id') }}</label>
+  {% endif %}
+  {% if standard %}
+  {# Shown by app.js, which fills the boxes below from the choice and leaves out what the car's type has no use for. #}
+  <label for="f-standard" id="standard-reminder" data-today="{{ today }}" hidden>Standard reminder <small>(optional: fills in the boxes below)</small>
+    <select id="f-standard">
+      <option value="">Choose one, or type your own below…</option>
+      {% for s in standard %}<option value="{{ s.key }}" data-title="{{ s.title }}" data-months="{{ s.months or '' }}" data-km="{{ s.km or '' }}"
+        data-kinds="{{ (s.kinds or [])|join(' ') }}" data-category="{{ s.category or '' }}">{{ s.title }}</option>{% endfor %}
+    </select>
+    <small>The intervals are common ones: check them against the car's handbook.</small></label>
   {% endif %}
   <label for="f-title">What is it for?
     <input id="f-title" name="title" maxlength="100" required value="{{ v.get('title', '') }}" autocomplete="off"

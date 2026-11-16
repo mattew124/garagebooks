@@ -51,9 +51,30 @@ def _without_teslamate(dash, teslamate):
     })
 
 
-def render(tz, base_path, source=SOURCE, start=None, teslamate=None):
-    """`teslamate` is a sources.TeslaMate; None means it is there and usable (the file as shipped)."""
+SOLD_PANEL = "Sold"
+
+
+def _without_sold(dash):
+    """Leave the Sold panel out, and give its place in the row to the panels beside it."""
+    sold = next((p for p in dash["panels"] if p["title"] == SOLD_PANEL), None)
+    if sold is None:
+        return
+    dash["panels"].remove(sold)
+    row = sorted((p for p in dash["panels"] if p["gridPos"]["y"] == sold["gridPos"]["y"]
+                  and p["gridPos"]["h"] == sold["gridPos"]["h"]), key=lambda p: p["gridPos"]["x"])
+    if row and 24 % len(row) == 0:
+        width = 24 // len(row)
+        for i, panel in enumerate(row):
+            panel["gridPos"].update(x=i * width, w=width)
+
+
+def render(tz, base_path, source=SOURCE, start=None, teslamate=None, sold=True):
+    """`teslamate` is a sources.TeslaMate; None means it is there and usable (the file as shipped).
+    `sold` is whether any car has been sold: with none, the Sold panel is left out (it would only ever
+    say "not sold"), and it comes back when a sale is recorded."""
     dash = json.loads(Path(source).read_text())
+    if not sold:
+        _without_sold(dash)
     if teslamate is not None and not teslamate.usable:
         _without_teslamate(dash, teslamate)
     if start is not None:
@@ -72,9 +93,9 @@ def render(tz, base_path, source=SOURCE, start=None, teslamate=None):
     return dash
 
 
-def export(directory, tz, base_path, source=SOURCE, start=None, teslamate=None):
+def export(directory, tz, base_path, source=SOURCE, start=None, teslamate=None, sold=True):
     """Write the dashboard if it differs from what's there. True if it wrote."""
-    text = json.dumps(render(tz, base_path, source, start, teslamate), indent=2) + "\n"
+    text = json.dumps(render(tz, base_path, source, start, teslamate, sold), indent=2) + "\n"
     target = Path(directory) / FILENAME
     if target.exists() and target.read_text() == text:
         return False

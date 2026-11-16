@@ -41,7 +41,7 @@
     <thead><tr><th>Lease</th><th class="num">Days held</th><th class="num">Taxable value</th><th class="num">Expected</th></tr></thead>
     <tbody>
     {% for row, budgets, f in report.leases %}
-    <tr><td>{{ row.package_name or row.financier }} <small>{{ row.start_date.strftime('%d %b %Y') }} to {{ row.end_date.strftime('%d %b %Y') }}</small></td>
+    <tr><td>{{ row.package_name or row.financier or 'Lease' }} <small>{{ row.start_date.strftime('%d %b %Y') }} to {{ row.end_date.strftime('%d %b %Y') }}</small></td>
       <td class="num">{{ f.days_held }}</td><td class="num">{{ amount(f.taxable_value) }}</td><td class="num">{{ f.expected|money }}</td></tr>
     {% endfor %}
     </tbody>
@@ -56,6 +56,7 @@
     week, fortnight or month after it (as the lease's pay frequency says); your provider's own pay dates may differ a little.</small></p>
 </section>
 
+{% if budgets_on %}
 <section class="card stack fbt" aria-labelledby="fbt-costs">
   <h2 id="fbt-costs">Running costs by pool</h2>
   <div class="table-wrap"><table id="fbt-pools">
@@ -82,6 +83,26 @@
     car was held; it is not a balance, and what each pool has paid out is not tracked here. A category that is in no pool is listed on its own line.
     Set a category's pool on the <a href="{{ url_for('categories') }}">Categories</a> page.</small></p>
 </section>
+{% else %}
+<section class="card stack fbt" aria-labelledby="fbt-costs">
+  <h2 id="fbt-costs">Running costs</h2>
+  <div class="table-wrap"><table id="fbt-categories">
+    <thead><tr><th>Category</th><th class="num">Spent</th></tr></thead>
+    <tbody>
+    {% for line in report.pools %}{% for name, total in line.categories %}
+    <tr><td>{{ name }}</td><td class="num">{{ total|money }}</td></tr>
+    {% endfor %}{% endfor %}
+    {% if report.teslamate_charging %}
+    <tr id="teslamate-charging"><td>Charging <small>from TeslaMate</small></td>
+      <td class="num">{{ amount(report.teslamate_charging.value, report.teslamate_charging.reason) }}</td></tr>
+    {% endif %}
+    {% if not report.pools %}<tr><td colspan="2" class="empty">No running costs in this FBT year.</td></tr>{% endif %}
+    </tbody>
+    <tfoot><tr id="pool-total"><th>Total running costs</th><td class="num"><strong>{{ amount(report.pool_total) }}</strong></td></tr></tfoot>
+  </table></div>
+  <p><small>Expenses are placed in the FBT year of their date.</small></p>
+</section>
+{% endif %}
 
 <section class="card stack fbt" id="purchases" aria-labelledby="fbt-purchases">
   <h2 id="fbt-purchases">Purchases</h2>

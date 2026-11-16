@@ -57,8 +57,8 @@
 {% endif %}
 
 <form method="post" action="{{ url_for('reminder_add') }}" class="card stack" id="add-reminder">
-  <h2>Add a reminder</h2>
-  {{ fields(values.get('new', {}), errors.get('new', {}), cars, categories, lead_days, lead_km) }}
+  <h2 class="card-title">Add a reminder</h2>
+  {{ fields(values.get('new', {}), errors.get('new', {}), cars, categories, lead_days, lead_km, standard=standard, odometers=odometers, today=today_iso) }}
   <button type="submit" class="button">Add reminder</button>
 </form>
 

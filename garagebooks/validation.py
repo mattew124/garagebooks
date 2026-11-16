@@ -10,6 +10,8 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
+from . import leaseform
+
 MAX_AMOUNT = Decimal("9999999999.99")  # numeric(12,2)
 MAX_ODOMETER = 9_999_999.9  # numeric(9,1)
 MAX_URL_LEN = 2048
@@ -299,14 +301,12 @@ MAX_CAR_TEXT_LEN = 60
 
 
 def parse_car_form(form, kinds):
-    """A car's name, type (one of `kinds`), make and model. -> (values, errors)."""
+    """A car's name, type (one of `kinds`), make and model. -> (values, errors). The name is optional:
+    a car without a nickname is called by its make and model, so one of the two must be there."""
     values, errors = {}, {}
     name = " ".join((form.get("name") or "").split())
-    if not name:
-        errors["name"] = "Enter a name for the car."
-    elif len(name) > MAX_CAR_NAME_LEN:
+    if len(name) > MAX_CAR_NAME_LEN:
         errors["name"] = f"The name is too long (max {MAX_CAR_NAME_LEN} characters)."
-    values["name"] = name
     values["kind"] = (form.get("kind") or "").strip()
     if values["kind"] not in kinds:
         errors["kind"] = "Choose the type of car."
@@ -315,16 +315,60 @@ def parse_car_form(form, kinds):
         if len(text) > MAX_CAR_TEXT_LEN:
             errors[field] = f"{label} is too long (max {MAX_CAR_TEXT_LEN} characters)."
         values[field] = text or None
+    values["name"] = name or car_name(values["make"], values["model"])
+    if not values["name"]:
+        errors["name"] = "Enter the make and model, or a name for the car."
     return values, errors
 
 
-def parse_sale(form, tz, now):
-    """A sale: the date it sold (a day in `tz`, not in the future) and the price. -> (values, errors).
-    Both blank is no sale (values None). The moment saved is the end of that day, or now for today."""
+def car_name(make, model):
+    """What a car with no name of its own is called: its make and model ('Tesla Model Y'), or '' with neither."""
+    return " ".join(part for part in (make, model) if part)
+
+
+def parse_purchase(form, tz, now):
+    """What the car cost to buy, as entered on the Cars page: the price, the date and, optionally, the odometer
+    then. -> (purchase or None, errors); None when no price is entered, which leaves the purchase as it is."""
+    price_raw = (form.get("purchase_price") or "").strip()
+    if not price_raw:
+        return None, {}
+    values, errors = {}, {}
+    try:
+        values["amount"] = parse_amount(price_raw)
+        if values["amount"] < 0:
+            raise ValueError("The purchase price can't be negative.")
+    except ValueError as exc:
+        errors["purchase_price"] = str(exc)
+    try:
+        if not (form.get("purchase_date") or "").strip():
+            raise ValueError("Enter the date you bought it.")
+        values["occurred_at"] = parse_local_datetime(form.get("purchase_date"), "12:00", tz)
+        if values["occurred_at"].date() > now.date():
+            raise ValueError("The purchase date can't be in the future.")
+    except ValueError as exc:
+        errors["purchase_date"] = str(exc)
+    try:
+        values["odometer_km"] = parse_odometer(form.get("purchase_km"))
+    except ValueError as exc:
+        errors["purchase_km"] = str(exc)
+    return values, errors
+
+
+def parse_sale(form, tz, now, km_required=False):
+    """A sale: the date it sold (a day in `tz`, not in the future), the price and the final odometer
+    (`km_required` for a car with no other source for it). -> (values, errors). All blank is no sale
+    (values None). The moment saved is the end of that day, or now for today."""
     date_raw, price_raw = (form.get("date") or "").strip(), (form.get("price") or "").strip()
-    if not date_raw and not price_raw:
-        return {"sold_at": None, "sale_price": None}, {}
+    km_raw = (form.get("km") or "").strip()
+    if not date_raw and not price_raw and not km_raw:
+        return {"sold_at": None, "sale_price": None, "sale_km": None}, {}
     errors, values = {}, {}
+    try:
+        values["sale_km"] = parse_odometer(km_raw)
+        if values["sale_km"] is None and km_required:
+            raise ValueError("Enter the odometer reading when it sold.")
+    except ValueError as exc:
+        errors["sold_km"] = str(exc)
     try:
         if not date_raw:
             raise ValueError("Enter the date it sold.")
@@ -398,6 +442,8 @@ def parse_expense_form(form, tz, valid_car_ids, valid_category_ids):
 # ---- a lease (roadmap L1) ----------------------------------------------------------
 
 MAX_LEASE_TEXT_LEN = 100
+# The documents a lease keeps for reference: the provider's form its details were read from, and the agreement.
+LEASE_DOCUMENTS = {"form": "Lease form", "agreement": "Lease agreement"}
 
 
 def _non_negative_money(raw, label):
@@ -424,11 +470,17 @@ def _percent(raw, label, places):
     return value.quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP)
 
 
-def parse_lease_form(form, pools, frequencies, fbt_methods, tax_treatments):
+def parse_lease_form(form, pools, frequencies, fbt_methods, tax_treatments, budgets_on=True):
     """A lease as typed from the provider's statement. -> (values, errors); `values` holds the lease
-    columns plus `budgets` ({pool: yearly amount}, blanks left out). Whether it overlaps another lease
-    of the car is for the caller to check: it needs the database."""
+    columns plus `budgets` ({pool: yearly amount}, blanks left out; None when lease budgets are turned
+    off, which leaves any already saved as they are). Whether it overlaps another lease of the car is
+    for the caller to check: it needs the database.
+
+    An associate lease (the car is owned outright and leased to the employer by an associate) has no
+    financier to name and no residual. The end date and the term fill each other in: an empty end date
+    is the start plus the term, and an empty term is the whole months between the two dates."""
     values, errors = {}, {}
+    associate = values["associate_lease"] = form.get("associate_lease") == "on"
 
     def attempt(field, fn, *args):
         try:
@@ -460,9 +512,21 @@ def parse_lease_form(form, pools, frequencies, fbt_methods, tax_treatments):
         attempt(field, _non_negative_money, form.get(field), label)
 
     text("package_name", "The package name")
-    text("financier", "The financier", required=True)
+    text("financier", "The financier", required=not associate)
     required_date("start_date", "start date")
-    required_date("end_date", "end date")
+    term_raw = (form.get("term_months") or "").strip()
+    try:
+        term = int(term_raw) if term_raw else None
+        if term is not None and not 1 <= term <= 120:
+            raise ValueError
+        values["term_months"] = term
+    except ValueError:
+        term = None
+        errors["term_months"] = "Enter the term in months, from 1 to 120."
+    if not (form.get("end_date") or "").strip() and values.get("start_date") and term:
+        values["end_date"] = leaseform.end_date(values["start_date"], term)
+    else:
+        required_date("end_date", "end date" if term_raw else "end date, or the term in months")
     attempt("refinance_date", parse_optional_date, form.get("refinance_date"))
     start, end, refi = values.get("start_date"), values.get("end_date"), values.get("refinance_date")
     if start and end and end <= start:
@@ -470,13 +534,11 @@ def parse_lease_form(form, pools, frequencies, fbt_methods, tax_treatments):
     if refi and start and end and not (start <= refi <= end):
         errors["refinance_date"] = "The refinance date must fall within the lease."
 
-    try:
-        term = int((form.get("term_months") or "").strip())
-        if not 1 <= term <= 120:
-            raise ValueError
-        values["term_months"] = term
-    except ValueError:
-        errors["term_months"] = "Enter the term in months, from 1 to 120."
+    if not term_raw:
+        if start and end and end > start:
+            values["term_months"] = min(leaseform.term_months(start, end), 120)
+        elif "end_date" not in errors and "start_date" not in errors:
+            errors["term_months"] = "Enter the term in months, from 1 to 120."
 
     choice("pay_frequency", frequencies, "Choose how often the lease is paid.")
     if values.get("pay_frequency") is None and "pay_frequency" not in errors:
@@ -492,6 +554,10 @@ def parse_lease_form(form, pools, frequencies, fbt_methods, tax_treatments):
     money("car_cost", "the car's cost")
     money("residual_amount", "the residual amount")
     attempt("residual_percent", _percent, form.get("residual_percent"), "The residual percentage", 3)
+    if associate:        # no balloon on an associate lease: whatever was in the hidden boxes is dropped
+        values["residual_amount"] = values["residual_percent"] = None
+        errors.pop("residual_amount", None)
+        errors.pop("residual_percent", None)
     cost, amount, percent = values.get("car_cost"), values.get("residual_amount"), values.get("residual_percent")
     if cost is not None and amount is not None and amount > cost:
         errors["residual_amount"] = "The residual can't be more than the car's cost."
@@ -522,16 +588,25 @@ def parse_lease_form(form, pools, frequencies, fbt_methods, tax_treatments):
     attempt("rego_expiry", parse_optional_date, form.get("rego_expiry"))
     values["rego_renewed_by_provider"] = form.get("rego_renewed_by_provider") == "on"
 
-    budgets = {}
-    for pool in pools:
-        try:
-            amount_ = _non_negative_money(form.get(f"budget_{pool}"), "the yearly budget")
-        except ValueError as exc:
-            errors[f"budget_{pool}"] = str(exc)
-            continue
-        if amount_ is not None:
-            budgets[pool] = amount_
-    values["budgets"] = budgets
+    # The documents kept with the lease: each a link, or a path in the invoice folder, or neither.
+    for doc in LEASE_DOCUMENTS:
+        attempt(f"{doc}_url", parse_invoice_url, form.get(f"{doc}_url"))
+        attempt(f"{doc}_path", parse_invoice_path, form.get(f"{doc}_path"))
+        if form.get(f"remove_{doc}"):
+            values[f"{doc}_url"] = values[f"{doc}_path"] = None     # the file itself stays where it is
+
+    values["budgets"] = None
+    if budgets_on:
+        budgets = {}
+        for pool in pools:
+            try:
+                amount_ = _non_negative_money(form.get(f"budget_{pool}"), "the yearly budget")
+            except ValueError as exc:
+                errors[f"budget_{pool}"] = str(exc)
+                continue
+            if amount_ is not None:
+                budgets[pool] = amount_
+        values["budgets"] = budgets
     return values, errors
 
 

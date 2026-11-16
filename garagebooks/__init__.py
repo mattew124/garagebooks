@@ -22,7 +22,7 @@ from flask import (Flask, abort, g, has_request_context, jsonify, make_response,
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from . import dashboard, db, docinfo, icons, invoices, lease, logs, onedrive, reminders, sources, storage, updates, validation
+from . import dashboard, db, docinfo, icons, invoices, lease, leaseform, logs, onedrive, reminders, sources, storage, updates, validation
 
 log = logging.getLogger("garagebooks.app")
 
@@ -47,10 +47,10 @@ MESSAGES = {
     "car_sold": "Sale saved.",
     "car_sold_early": "Sale saved. The sale date is before the car's first expense, so its figures may look odd.",
     "car_unsold": "Sale cleared.",
-    "reading_added": "Odometer reading saved.",
-    "reading_deleted": "Odometer reading deleted.",
     "lease_added": "Lease added.",
     "lease_saved": "Lease saved.",
+    "lease_added_not_uploaded": "Lease added. The PDF wasn't kept: choose a folder for this car on the Invoice storage page first.",
+    "lease_saved_not_uploaded": "Lease saved. The PDF wasn't kept: choose a folder for this car on the Invoice storage page first.",
     "lease_deleted": "Lease deleted.",
     "reminder_added": "Reminder added.",
     "reminder_saved": "Reminder saved.",
@@ -78,6 +78,7 @@ MESSAGES = {
 TESLAMATE_RECHECK_SECONDS = 60   # how often the app looks again at whether TeslaMate is there and readable
 TOKEN_MARGIN_SECONDS = 120   # a kept access token is dropped this long before it expires
 IMPORT_BATCH = 10
+LEASE_FOLDER = "Lease"       # the subfolder of a car's folder that its lease documents are saved in
 # ...and stop reading more files once a round has taken this long (OCR can take 10+ seconds a file,
 # and a request that outlasts gunicorn's 120 s timeout is killed), leaving the rest for the next round.
 IMPORT_BUDGET_SECONDS = 75
@@ -189,8 +190,13 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             except Exception as exc:    # no data yet, or no database: Grafana's own default range then
                 log.info("Dashboard time range left at its default (%s)", exc)
                 start = None
+            try:
+                with connect() as conn:
+                    sold = any(car["sold_at"] is not None for car in db.cars(conn))
+            except Exception:           # noqa: BLE001 - no database yet: the panel is left out until a sale is known
+                sold = False
             wrote = dashboard.export(dashboard_dir, tz, os.environ.get("BASE_PATH", "").rstrip("/"), start=start,
-                                     teslamate=known["teslamate"])
+                                     teslamate=known["teslamate"], sold=sold)
             log.info("Grafana dashboard %s in %s", "written" if wrote else "already up to date", dashboard_dir)
         except OSError as exc:
             log.warning("Could not write the Grafana dashboard to %s: %s", dashboard_dir, exc)
@@ -717,7 +723,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 error = str(exc)
         with connect() as conn:
             cats = db.categories(conn)
-        return render_template("categories.html", categories=cats, error=error, pools=lease.POOLS,
+            budgets_on = db.lease_budgets_on(conn)
+        return render_template("categories.html", categories=cats, error=error, pools=lease.POOLS, budgets_on=budgets_on,
                                message=MESSAGES.get(request.args.get("msg", ""))), (400 if error else 200)
 
     # ---- cars ----------------------------------------------------------------
@@ -737,40 +744,70 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
     def cars_page():
         return render_cars()
 
+    def parse_car():
+        """The car's own details and, when a price is entered, its purchase. -> (values, purchase, errors)."""
+        values, errors = validation.parse_car_form(request.form, db.CAR_KINDS)
+        purchase, more = validation.parse_purchase(request.form, tz, datetime.now(ZoneInfo(tz)))
+        return values, purchase, {**errors, **more}
+
+    def save_purchase(conn, car_id, purchase):
+        """-> an error for the price box, or None. Nothing entered leaves the purchase as it is."""
+        if purchase is None:
+            return None
+        outcome = db.set_purchase(conn, car_id, purchase)
+        if outcome == "several":
+            return "This car has more than one purchase expense, so the total can't be changed here: edit them in the expense list."
+        if outcome == "no_category":
+            return "There is no purchase category to record it in."
+        return None
+
     @app.post("/cars")
     def car_add():
-        values, errors = validation.parse_car_form(request.form, db.CAR_KINDS)
+        values, purchase, errors = parse_car()
         if errors:
             return render_cars({"new": errors}, {"new": request.form}, 400)
         with connect() as conn:
             car_id = db.add_car(conn, values)
+            save_purchase(conn, car_id, purchase)
+        refresh_dashboard()
         log.info("car %s added by hand", car_id)
         return redirect(url_for("cars_page", msg="car_added"), 303)
 
     @app.post("/cars/<int:car_id>")
     def car_update(car_id):
         car_or_404(car_id)
-        values, errors = validation.parse_car_form(request.form, db.CAR_KINDS)
+        values, purchase, errors = parse_car()
+        if not errors:
+            try:
+                with connect() as conn:
+                    db.update_car(conn, car_id, values)
+                    problem = save_purchase(conn, car_id, purchase)
+                    if problem:
+                        raise ValueError(problem)       # nothing is saved: the car's details wait with the price
+            except ValueError as exc:
+                errors["purchase_price"] = str(exc)
         if errors:
             return render_cars({car_id: errors}, {car_id: request.form}, 400)
-        with connect() as conn:
-            db.update_car(conn, car_id, values)
+        refresh_dashboard()
         log.info("car %s updated", car_id)
         return redirect(url_for("cars_page", msg="car_saved"), 303)
 
     @app.post("/cars/<int:car_id>/sale")
     def car_sale(car_id):
-        car_or_404(car_id)
+        car = car_or_404(car_id)
         now = datetime.now(ZoneInfo(tz))
         if request.form.get("action") == "clear":
-            values, errors = {"sold_at": None, "sale_price": None}, {}
+            values, errors = {"sold_at": None, "sale_price": None, "sale_km": None}, {}
         else:
-            values, errors = validation.parse_sale(request.form, tz, now)
+            # The final odometer is asked for; a car TeslaMate tracks may leave it to TeslaMate.
+            values, errors = validation.parse_sale(request.form, tz, now,
+                                                   km_required=car["teslamate_car_id"] is None)
         if errors:
             return render_cars({car_id: errors}, {car_id: request.form}, 400)
         with connect() as conn:
-            db.set_sale(conn, car_id, values["sold_at"], values["sale_price"])
+            db.set_sale(conn, car_id, values["sold_at"], values["sale_price"], values["sale_km"])
             first = db.first_expense_at(conn, car_id)
+        refresh_dashboard()
         log.info("car %s sale %s", car_id, "recorded" if values["sold_at"] else "cleared")
         if values["sold_at"] is None:
             msg = "car_unsold"
@@ -791,48 +828,28 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         log.info("car %s deleted", car_id)
         return redirect(url_for("cars_page", msg="car_deleted"), 303)
 
-    @app.post("/cars/<int:car_id>/readings")
-    def reading_add(car_id):
-        car_or_404(car_id)
-        errors = {}
-        try:
-            # A reading is for a day: noon, or this moment for today's (noon may still be ahead).
-            read_at = min(validation.parse_local_datetime(request.form.get("date"), "12:00", tz),
-                          datetime.now(ZoneInfo(tz)).replace(microsecond=0)) \
-                if request.form.get("date") == datetime.now(ZoneInfo(tz)).date().isoformat() \
-                else validation.parse_local_datetime(request.form.get("date"), "12:00", tz)
-        except ValueError as exc:
-            errors["date"] = str(exc)
-        try:
-            km = validation.parse_odometer(request.form.get("km"))
-            if km is None:
-                raise ValueError("Enter the odometer reading.")
-        except ValueError as exc:
-            errors["km"] = str(exc)
-        if errors:
-            return render_cars({car_id: errors}, {car_id: request.form}, 400)
-        with connect() as conn:
-            db.add_reading(conn, car_id, read_at, km)
-        refresh_dashboard()
-        log.info("odometer reading added for car %s", car_id)
-        return redirect(url_for("cars_page", msg="reading_added"), 303)
-
-    @app.post("/cars/<int:car_id>/readings/<int:reading_id>/delete")
-    def reading_delete(car_id, reading_id):
-        with connect() as conn:
-            if not db.delete_reading(conn, car_id, reading_id):
-                abort(404)
-        return redirect(url_for("cars_page", msg="reading_deleted"), 303)
-
     # ---- leases (roadmap L1) -------------------------------------------------------
 
     def today_here():
         return datetime.now(ZoneInfo(tz)).date()
 
     def lease_context(car, **extra):
+        with connect() as conn:
+            budgets_on = db.lease_budgets_on(conn)
+            folder = db.car_folders(conn).get(car["id"])
+            kind = folder["backend"] if folder and store_for(folder["backend"]) and connected(conn, folder["backend"]) else None
         return dict(car=car, pools=lease.POOLS, frequencies={k: v[0] for k, v in lease.FREQUENCIES.items()},
-                    fbt_methods=lease.FBT_METHODS, tax_treatments=lease.TAX_TREATMENTS,
+                    fbt_methods=lease.FBT_METHODS, tax_treatments=lease.TAX_TREATMENTS, budgets_on=budgets_on,
+                    documents=validation.LEASE_DOCUMENTS, storage_kind=kind, doc_link=lease_doc_link,
                     message=MESSAGES.get(request.args.get("msg", "")), **extra)
+
+    def lease_doc_link(row, doc):
+        """Where a lease's kept document opens: its link, or the app's own address for a file in the folder."""
+        if row.get(f"{doc}_url"):
+            return row[f"{doc}_url"]
+        if row.get(f"{doc}_path") and local is not None:
+            return url_for("local_file", path=row[f"{doc}_path"])
+        return None
 
     def lease_view(conn, row, today):
         """A lease with its budgets and the read-only figures worked out from them."""
@@ -856,13 +873,19 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
     def lease_form_values(row, budgets):
         """A saved lease as the form's text fields."""
         values = {k: ("" if v is None else v) for k, v in row.items()}
+        values["associate_lease"] = "on" if row["associate_lease"] else ""
         for pool, amount in budgets.items():
             values[f"budget_{pool}"] = amount
         return values
 
-    def parse_lease(car_id, lease_id=None):
+    def parse_lease(car, lease_id=None):
+        """-> (values, errors). A PDF chosen for the lease form or the agreement is saved to the car's folder
+        once everything else is right; with no folder to save to, the lease is still saved (g.lease_note)."""
+        car_id = car["id"]
+        with connect() as conn:
+            budgets_on = db.lease_budgets_on(conn)
         values, errors = validation.parse_lease_form(request.form, lease.POOLS, lease.FREQUENCIES,
-                                                     lease.FBT_METHODS, lease.TAX_TREATMENTS)
+                                                     lease.FBT_METHODS, lease.TAX_TREATMENTS, budgets_on)
         if not errors:
             with connect() as conn:
                 clash = db.overlapping_lease(conn, car_id, values["start_date"], values["end_date"], lease_id)
@@ -870,7 +893,53 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 errors["start_date"] = (f"These dates overlap the lease from {clash['start_date']:%d %b %Y} "
                                         f"to {clash['end_date']:%d %b %Y}. A car has one current lease: "
                                         "end that one first, or change these dates.")
+        chosen = {}
+        for doc in validation.LEASE_DOCUMENTS:
+            upload = request.files.get(f"{doc}_file")
+            try:
+                pdf = validation.parse_invoice_pdf(upload and upload.filename, upload.read() if upload else b"")
+            except ValueError as exc:
+                errors[f"{doc}_file"] = str(exc)
+                continue
+            if pdf is not None:
+                chosen[doc] = pdf
+        if errors:
+            for doc in chosen:
+                errors.setdefault(f"{doc}_file", "Fix the details below, then choose the PDF again.")
+            return values, errors
+        if chosen and not upload_ready(car_id):
+            log.info("lease documents not saved: no invoice storage is set up for car %s", car_id)
+            g.lease_note = "not_uploaded"
+            return values, errors
+        for doc, pdf in chosen.items():
+            try:
+                store, ref = upload_lease_document(car, values, doc, pdf)
+            except storage.StorageError as exc:
+                log.warning("lease document upload failed: %s", exc)
+                errors[f"{doc}_file"] = exc.user_message
+                return values, errors
+            values[f"{doc}_url"] = values[f"{doc}_path"] = None
+            values[f"{doc}_{'path' if store.ref_field == 'invoice_path' else 'url'}"] = ref
+            log.info("lease document (%s) saved to %s (%d bytes)", doc, store.name, len(pdf))
         return values, errors
+
+    def upload_lease_document(car, values, doc, pdf):
+        """Save a lease document in the "Lease" subfolder of the car's folder. -> (the storage, the file's reference)."""
+        with connect() as conn:
+            folder = db.car_folders(conn).get(car["id"])
+            store = store_for(folder["backend"]) if folder else None
+            settings_row = db.get_settings(conn)
+        if store is None:
+            raise storage.StorageError("Choose a folder for this car on the Invoice storage page first.")
+        start = values["start_date"]
+        name = validation.invoice_filename(
+            datetime(start.year, start.month, start.day), validation.LEASE_DOCUMENTS[doc],
+            values.get("package_name") or values.get("financier"), settings_row["invoice_date_format"],
+            settings_row["invoice_name_format"], car=car["name"])
+        return store, store.upload(store.ensure_subfolder(folder["folder_id"], LEASE_FOLDER), name, pdf)
+
+    def lease_msg(base):
+        return base + "_not_uploaded" if getattr(g, "lease_note", None) else base
 
     @app.get("/cars/<int:car_id>/lease")
     def car_lease(car_id):
@@ -880,12 +949,12 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
     def car_lease_new(car_id):
         car = car_or_404(car_id)
         return render_lease_form(car, None, {"fbt_method": "statutory", "statutory_percent": "20",
-                                             "tax_treatment": "employee_contribution", "start_date": today_here().isoformat()}, {})
+                                             "tax_treatment": "employee_contribution"}, {})
 
     @app.post("/cars/<int:car_id>/lease/new")
     def car_lease_create(car_id):
         car = car_or_404(car_id)
-        values, errors = parse_lease(car_id)
+        values, errors = parse_lease(car)
         if errors:
             return render_lease_form(car, None, request.form, errors, 400)
         with connect() as conn:
@@ -893,7 +962,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         if lease_id is None:      # another lease was added between the check and the save
             return render_lease_form(car, None, request.form, {"start_date": "These dates overlap another lease of this car."}, 400)
         log.info("lease %s added to car %s", lease_id, car_id)
-        return redirect(url_for("car_lease", car_id=car_id, msg="lease_added"), 303)
+        return redirect(url_for("car_lease", car_id=car_id, msg=lease_msg("lease_added")), 303)
 
     def lease_or_404(car_id, lease_id):
         with connect() as conn:
@@ -914,7 +983,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
     def car_lease_update(car_id, lease_id):
         car = car_or_404(car_id)
         lease_or_404(car_id, lease_id)
-        values, errors = parse_lease(car_id, lease_id)
+        values, errors = parse_lease(car, lease_id)
         if errors:
             return render_lease_form(car, lease_id, request.form, errors, 400)
         with connect() as conn:
@@ -924,7 +993,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         if outcome == "overlap":
             return render_lease_form(car, lease_id, request.form, {"start_date": "These dates overlap another lease of this car."}, 400)
         log.info("lease %s of car %s updated", lease_id, car_id)
-        return redirect(url_for("car_lease", car_id=car_id, msg="lease_saved"), 303)
+        return redirect(url_for("car_lease", car_id=car_id, msg=lease_msg("lease_saved")), 303)
 
     @app.post("/cars/<int:car_id>/lease/<int:lease_id>/delete")
     def car_lease_delete(car_id, lease_id):
@@ -934,6 +1003,35 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 abort(404)
         log.info("lease %s of car %s deleted", lease_id, car_id)
         return redirect(url_for("car_lease", car_id=car_id, msg="lease_deleted"), 303)
+
+    @app.post("/api/lease-prefill")
+    def api_lease_prefill():
+        """Read a provider's lease form and propose the Add a lease page's fields: the PDF just chosen on the
+        computer, or one already in a storage (onedrive_id or local_id). Only the lease's own figures are
+        read (leaseform.py); nothing is saved here."""
+        upload = request.files.get("form_file")
+        filename = upload and upload.filename
+        data = upload.read() if upload else b""
+        kind = next((k for k in STORES if request.form.get(f"{k}_id") and store_for(k)), None)
+        if not upload and kind:
+            filename = request.form.get("name", "")
+            try:
+                data = store_for(kind).download(request.form[f"{kind}_id"])
+            except storage.StorageError as exc:
+                log.warning("lease prefill from %s failed: %s", STORES[kind]["label"], exc)
+                return jsonify(error=exc.user_message), 502
+        try:
+            pdf = validation.parse_invoice_pdf(filename, data)
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
+        if pdf is None:
+            return jsonify(error="Choose a PDF first."), 400
+        found = leaseform.read(invoices.extract_text(pdf))
+        with connect() as conn:
+            if not db.lease_budgets_on(conn):
+                found = {k: v for k, v in found.items() if not k.startswith("budget_")}
+        log.debug("lease prefill file=%s bytes=%d found=%s", docinfo.quote(filename), len(pdf), sorted(found))
+        return jsonify(fields=found)
 
     # ---- the FBT year report (roadmap L2) -------------------------------------------
 
@@ -952,7 +1050,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             rows = db.car_leases(conn, car_id)
             if not rows:
                 return render_template("fbt.html", car=car, report=None, today=today)
-            leases = [(row, db.lease_budgets(conn, row["id"])) for row in rows]
+            budgets_on = db.lease_budgets_on(conn)
+            leases = [(row, db.lease_budgets(conn, row["id"]) if budgets_on else []) for row in rows]
             costs = db.fbt_costs(conn, car_id, year, tz)
             years = lease.fbt_years(rows, db.fbt_years_with_expenses(conn, car_id, tz))
             # TeslaMate's charging for the year (only its part: what was entered by hand is already in the costs)
@@ -960,7 +1059,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                                              datetime(year + 1, 4, 1, tzinfo=zone), include_manual=False)
         report = lease.fbt_report(leases, costs, charging, year, today)
         earlier, later = [y for y in years if y < year], [y for y in years if y > year]
-        return render_template("fbt.html", car=car, report=report, today=today, frequencies={k: v[0] for k, v in lease.FREQUENCIES.items()},
+        return render_template("fbt.html", car=car, report=report, today=today, budgets_on=budgets_on, frequencies={k: v[0] for k, v in lease.FREQUENCIES.items()},
                                previous=earlier[-1] if earlier else None, following=later[0] if later else None,
                                label=lease.fbt_label)
     # ---- reminders (roadmap item 4) ------------------------------------------------
@@ -987,8 +1086,14 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         return {"reminder_attention": {"overdue": overdue, "total": attention}}
 
     def reminder_form_context(conn):
-        return dict(cars=db.cars(conn), categories=db.categories(conn), lead_days=reminders.DEFAULT_LEAD_DAYS,
-                    lead_km=reminders.DEFAULT_LEAD_KM)
+        now = datetime.now(ZoneInfo(tz))
+        cars = db.cars(conn)
+        state = teslamate(conn)
+        # Each car's odometer now, so a standard reminder's first due reading can be worked out on the page.
+        odometers = {c["id"]: sources.odometer_at(conn, state, c["id"], now) for c in cars}
+        return dict(cars=cars, categories=db.categories(conn), lead_days=reminders.DEFAULT_LEAD_DAYS,
+                    lead_km=reminders.DEFAULT_LEAD_KM, standard=reminders.STANDARD,
+                    odometers={k: v.km for k, v in odometers.items() if v}, today_iso=now.date().isoformat())
 
     def render_reminders(errors=None, values=None, status=200):
         page = max(request.args.get("page", 1, type=int) or 1, 1)
@@ -1827,6 +1932,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 values["invoice_name_format"] = validation.parse_name_format(raw)
             except ValueError as exc:
                 errors["invoice_name_format"] = str(exc)
+            values["lease_budgets"] = bool(request.form.get("lease_budgets"))
             raw = request.form.get("multi_amount", "max")
             values["multi_amount"] = raw
             try:
@@ -1841,7 +1947,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                     db.save_settings(conn, values["app_url"], values["grafana_url"],
                                      None if date_pattern == validation.DEFAULT_DATE_PATTERN else date_pattern,
                                      None if name_format == validation.DEFAULT_NAME_FORMAT else name_format,
-                                     values["multi_amount"])
+                                     values["multi_amount"], values["lease_budgets"])
                 log.info("settings saved")
                 return redirect(url_for("settings", msg="settings"), 303)
         else:

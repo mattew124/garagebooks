@@ -318,10 +318,17 @@ dl.facts dd.derived { font-weight: 600; }
 .lease .actions form { margin: 0; }
 .lease button.danger { margin-top: 0; }
 a.secondary-link { background: var(--surface); color: var(--text); border: 1px solid var(--line); }
-.lease-form fieldset { min-width: 0; margin: 0 0 1rem; }
-.lease-form legend { font-weight: 700; padding: 0 .4rem; }
-.lease-form label.check { display: flex; align-items: center; gap: .5rem; }
-.lease-form label.check input { flex: none; }
+.lease-form .kept { display: grid; gap: .2rem; font-size: .9rem; }
+.lease-form [hidden], .lease-form .kept[hidden] { display: none; }
+/* Boxes side by side line up at the top, whatever hint sits under one of them. */
+.lease-form .row, .car form .row, #add-car .row { align-items: start; }
+.lease .lease-documents li { display: flex; gap: .3rem 1rem; align-items: baseline; flex-wrap: wrap; }
+/* A page of cards under its own heading: the same gap between them as the Add expense form's. */
+.cards + form.card, .cards + .card { margin-top: 1rem; }
+.car details + details { margin-top: -.25rem; }
+.car details > summary { margin-bottom: 0; }
+.car details[open] > summary { margin-bottom: .75rem; }
+.car details form.stack + form, .car details form + p { margin-top: .75rem; }
 
 /* ---- reminders ---- */
 nav a .count { display: inline-block; min-width: 1.3rem; padding: 0 .35rem; border-radius: 99px; background: var(--bad); color: #fff;
@@ -345,8 +352,14 @@ nav a .count { display: inline-block; min-width: 1.3rem; padding: 0 .35rem; bord
 .status-due_soon, .status-unknown { color: var(--warn); background: var(--warn-soft); }
 .status-upcoming, .status-info, .status-resolved { color: var(--muted); background: var(--sunken); }
 .status-resolved { color: var(--good); background: var(--good-soft); }
-fieldset.due-fields { border: 1px solid var(--line); border-radius: var(--r-small); padding: .6rem .9rem .9rem; min-width: 0; display: grid; gap: .75rem; }
-label.check { display: flex; align-items: center; gap: .5rem; font-weight: 500; }
+/* A group of fields inside a card: a small heading over a rule, as the cards' own titles are, rather than a
+   boxed fieldset whose legend sits across the border. The legend floats so it lays out as an ordinary block. */
+fieldset.due-fields { border: 0; border-top: 1px solid var(--line); border-radius: 0; margin: 0; padding: .9rem 0 0; min-width: 0; display: grid; gap: .75rem; }
+fieldset.due-fields > legend { float: left; width: 100%; padding: 0; font-size: .75rem; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--muted); font-weight: 600; }
+fieldset.due-fields > legend + * { clear: both; margin: 0; }
+label.check { display: flex; align-items: flex-start; gap: .5rem; font-weight: 500; }
+label.check input { flex: none; margin-top: .3rem; }
 .pager { margin: 0 0 1rem; }
 #add-reminder { margin-top: 1.5rem; }
 #resolved { margin-top: 2rem; }

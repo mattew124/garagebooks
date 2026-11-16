@@ -589,3 +589,23 @@ CREATE TRIGGER append_only BEFORE UPDATE OR DELETE ON garagebooks.change_log
 DROP TRIGGER IF EXISTS append_only_truncate ON garagebooks.change_log;
 CREATE TRIGGER append_only_truncate BEFORE TRUNCATE ON garagebooks.change_log
     FOR EACH STATEMENT EXECUTE FUNCTION garagebooks.change_log_append_only();
+
+-- Lease details, second pass. Added to databases made before them; safe to run again.
+--   associate_lease  the car is owned outright and leased to the employer by an associate: there is
+--                    no financier and no residual (balloon), so those are left empty
+--   form_url / form_path            the provider's lease form the details were read from, kept for reference
+--   agreement_url / agreement_path  the lease agreement, kept for reference and never read
+-- Each document is a link (OneDrive) or a path in the invoice folder on the server, as an expense's invoice is.
+ALTER TABLE garagebooks.lease ALTER COLUMN financier DROP NOT NULL;
+ALTER TABLE garagebooks.lease ADD COLUMN IF NOT EXISTS associate_lease boolean NOT NULL DEFAULT false;
+ALTER TABLE garagebooks.lease ADD COLUMN IF NOT EXISTS form_url text
+    CHECK (form_url IS NULL OR form_url ~* '^https://[^[:space:]]+$');
+ALTER TABLE garagebooks.lease ADD COLUMN IF NOT EXISTS form_path text
+    CHECK (form_path IS NULL OR (form_path LIKE '/_%' AND length(form_path) <= 1024));
+ALTER TABLE garagebooks.lease ADD COLUMN IF NOT EXISTS agreement_url text
+    CHECK (agreement_url IS NULL OR agreement_url ~* '^https://[^[:space:]]+$');
+ALTER TABLE garagebooks.lease ADD COLUMN IF NOT EXISTS agreement_path text
+    CHECK (agreement_path IS NULL OR (agreement_path LIKE '/_%' AND length(agreement_path) <= 1024));
+-- Lease budgets (the provider's yearly budget pools) are optional and off until turned on in Settings:
+-- the lease pages, the Categories page and the FBT year report leave them out while this is false.
+ALTER TABLE garagebooks.setting ADD COLUMN IF NOT EXISTS lease_budgets boolean NOT NULL DEFAULT false;
