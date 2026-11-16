@@ -59,6 +59,12 @@ The app looks at the database once a minute and is in one of four states, shown 
 
 Held-back figures are shown as *unavailable*, never as zero, and nothing else stops. When TeslaMate appears, is repaired or is upgraded past, the app notices within a minute, with no restart: it adds TeslaMate's cars, and rewrites the dashboard and the `garagebooks.ownership` view to match. GarageBooks only ever reads TeslaMate's `cars`, `positions` and `charging_processes` tables, and none of its own tables points at them, so TeslaMate can be removed, or delete a car, without touching your expenses.
 
+## Scheduled jobs
+
+`SCHEDULER` (in `.env`, restart to apply) says where the periodic work runs: `app` (the default, a background
+thread in the app), `worker` (a second container from the same image, started with `docker compose --profile
+worker up -d`) or `off`. See [Scheduled jobs](scheduled-jobs.md).
+
 ## Logs
 
 `docker logs` shows gunicorn's request lines plus the app's own events. `LOG_LEVEL` (`debug`, `info` the default, `warning`, `error`; set in `.env`, restart to change) sets both. `info` records startup, the update check's result, schema changes, expenses saved, updated or deleted, OneDrive sign-in and upload results, and anything the invoice folder on the server refuses (a missing folder, no permission). `debug` adds detail such as retries. Tokens, secrets, vendors, notes and amounts are never logged, except that file names, which can contain a vendor, appear at `debug`.

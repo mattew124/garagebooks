@@ -119,7 +119,8 @@ It needs the `gh` CLI and `zstd`. Databases and SARIF results go to `.dev/codeql
 
 `scripts/dev.sh` runs the UI and Grafana on their own test database, not on the TeslaMate
 network, so it can't touch live data. It listens on localhost unless `dev.env` says otherwise
-(see `dev.env.example`).
+(see `dev.env.example`). The scheduled jobs run in the app; set `SCHEDULER=worker` in `dev.env` to run them in a
+`dev-worker` container instead, as in production (see [Scheduled jobs](scheduled-jobs.md)).
 
 ```bash
 scripts/dev.sh up             # http://localhost:8089/garagebooks-dev/ and :8090/garagebooks-dev/grafana/
@@ -131,7 +132,7 @@ scripts/dev.sh sample-expenses  # add made-up expenses to try the app with; `cle
 scripts/dev.sh sample-invoices  # write made-up invoice PDFs into the stack's invoice folder
 scripts/dev.sh setup          # in a new worktree: create .venv
 scripts/dev.sh down           # stop the stack, keeping its data
-scripts/dev.sh logs           # follow the app's log
+scripts/dev.sh logs           # follow the app's log (and the worker's, with SCHEDULER=worker in dev.env)
 scripts/dev.sh psql           # a psql shell on the test database
 scripts/dev.sh onedrive-save  # save a OneDrive sign-in for the dev stack to reuse
 ```
