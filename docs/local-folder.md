@@ -229,6 +229,6 @@ folder and the folders below it that have no expense yet. See [Importing invoice
   to 20 MB, checked by content when uploaded). Files and folders whose names start with a dot, such
   as a NAS's recycle bin, are left out.
 - **Backups.** The PDFs are not in the TeslaMate database, only their paths are. Back the folder up
-  with whatever backs up the share, `.garagebooks` included.
+  with whatever backs up the share, `.garagebooks` included (see [Backup and restore](backup.md)).
 - **Turning it off.** Remove the compose file from the command and start the app again. The files stay
   where they are; expenses that point at them show no working link until it is back on.

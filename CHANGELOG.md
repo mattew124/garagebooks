@@ -79,6 +79,10 @@ and keeps your existing role when you set `GARAGEBOOKS_DB_USER` (or the old `EXP
   when a page or the dashboard is viewed; nothing is sent. See [Reminders](docs/reminders.md). The app
   adds the new `garagebooks.reminder` table and `garagebooks.reminder_due` view on start; with the
   restricted database role, re-run `scripts/provision-db.sh` first.
+- **Backup and restore:** a new guide ([Backup and restore](https://mattew124.github.io/garagebooks/backup/)) and
+  `scripts/backup.sh`, which dumps and restores only the `garagebooks` schema, and checks whether an existing
+  TeslaMate backup includes it. It never writes to the database except for `restore`, which refuses to replace a
+  schema that has tables unless you add `--replace`. Nothing to do to upgrade.
 - **Schema:** `expenses` is now `garagebooks`. Grafana panels or queries of your own that name
   `expenses.` need the new name.
 - **Dashboard address:** the uid is now `garagebooks-tco` (was `tm-expenses-tco`), so its address is
