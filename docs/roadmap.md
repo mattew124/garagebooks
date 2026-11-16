@@ -288,7 +288,7 @@ These are in main since 2026-11-16 and not yet in a release:
 - **2. Selling the car.** A sale date and price per car; TCO and cost per day stop at the sale (#80).
 - **L1. Lease details per car.** The novated lease behind a car (#81).
 - **L2. FBT year and taxable value.** Costs by FBT year, and the car's taxable value and contribution (#82).
-- **L4. Kilometre pace.** The km the lease estimate expects this FBT year against the odometer, in the app and on the dashboard (#PRNUM).
+- **L4. Kilometre pace.** The km the lease estimate expects this FBT year against the odometer, in the app and on the dashboard (#88).
 - **3. Change history.** An append-only log of every add, edit and delete, with a page to view it (#76).
 - **4. Reminders by date or odometer.** Recurring reminders, resolved by linking the expense that did the job (#83).
 - **5. Payment calculator.** Work out a payment made of several parts on the amount field (#77).
