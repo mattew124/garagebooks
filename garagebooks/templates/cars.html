@@ -27,7 +27,7 @@
   {% endif %}</small></p>
 {% if teslamate.reason %}<p class="{{ 'notice' if teslamate.state == 'ok' else 'error' }}" id="teslamate-reason">{{ teslamate.reason }}</p>{% endif %}
 <div class="cards">
-{% for c in cars %}{% set e = errors.get(c.id, {}) %}{% set v = values.get(c.id) %}
+{% for c in cars %}{% set e = errors.get(c.id, {}) %}{% set v = values.get(c.id) %}{% set sale_err = e.sold_date or e.sold_price %}
 <section class="card stack car" id="car-{{ c.id }}">
   <h2>{{ c.name }} <small>{{ 'from TeslaMate' if c.teslamate_car_id is not none else 'added by hand' }}</small></h2>
   <p class="car-odometer">Odometer:
@@ -37,10 +37,11 @@
     {% else %}<strong>not recorded</strong>{% endif %}
     · {{ c.expenses }} expense{{ '' if c.expenses == 1 else 's' }}</p>
   <p class="car-lease"><a href="{{ url_for('car_lease', car_id=c.id) }}">Lease{% if c.leases %} <small>({{ c.leases }} recorded)</small>{% else %} <small>(none recorded)</small>{% endif %}</a></p>
-  <details{{ ' open' if e and not (e.km or e.date) }}>
+  {% if c.sold_at %}<p class="car-sold">Sold <strong>{{ c.sold_at|day }}</strong> for <strong>{{ c.sale_price|money }}</strong></p>{% endif %}
+  <details{{ ' open' if e and not (e.km or e.date or sale_err) }}>
     <summary>Edit</summary>
     <form method="post" action="{{ url_for('car_update', car_id=c.id) }}" class="stack">
-      {{ car_fields(v if v and not (e.km or e.date) else c, e) }}
+      {{ car_fields(v if v and not (e.km or e.date or sale_err) else c, e) }}
       <button type="submit" class="secondary">Save car</button>
     </form>
     {% if c.teslamate_car_id is none and c.expenses == 0 %}
@@ -49,6 +50,18 @@
     </form>
     {% endif %}
     {% if e.delete %}<span class="error">{{ e.delete }}</span>{% endif %}
+  </details>
+  <details{{ ' open' if sale_err }} class="car-sale">
+    <summary>{{ 'Sale' if c.sold_at else 'Sold this car?' }}</summary>
+    <form method="post" action="{{ url_for('car_sale', car_id=c.id) }}" class="row">
+      <label>Date sold <input type="date" name="date" max="{{ today }}" value="{{ (v.date if v and sale_err else (c.sold_at|isodate if c.sold_at)) or '' }}">
+        {% if e.sold_date %}<span class="error">{{ e.sold_date }}</span>{% endif %}</label>
+      <label>Sale price ($) <input name="price" inputmode="decimal" value="{{ (v.price if v and sale_err else (c.sale_price if c.sold_at)) or '' }}" autocomplete="off">
+        {% if e.sold_price %}<span class="error">{{ e.sold_price }}</span>{% endif %}</label>
+      <button type="submit" class="secondary">Save sale</button>
+      {% if c.sold_at %}<button type="submit" name="action" value="clear" class="secondary">Clear sale</button>{% endif %}
+    </form>
+    <p><small>Total cost of ownership is net of the sale price, and the time owned and distance stop at the sale. A sold car can still take expenses, such as a late bill.</small></p>
   </details>
   <details{{ ' open' if e.km or e.date }}>
     <summary>Odometer readings</summary>

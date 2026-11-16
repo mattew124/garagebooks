@@ -125,13 +125,13 @@ CAR_KINDS = {"BEV": "Battery electric", "ICE": "Petrol or diesel", "PHEV": "Plug
 
 def cars(conn):
     """The app's own car list: the cars TeslaMate tracks (sources.sync_cars adds them) and those added by hand."""
-    return conn.execute("SELECT id, name, kind, make, model, teslamate_car_id FROM garagebooks.car ORDER BY id").fetchall()
+    return conn.execute("SELECT id, name, kind, make, model, teslamate_car_id, sold_at, sale_price FROM garagebooks.car ORDER BY id").fetchall()
 
 
 def car_details(conn):
     """The cars as the Cars page shows them: with how many expenses each has and its readings entered by hand."""
     rows = conn.execute(
-        "SELECT c.id, c.name, c.kind, c.make, c.model, c.teslamate_car_id,"
+        "SELECT c.id, c.name, c.kind, c.make, c.model, c.teslamate_car_id, c.sold_at, c.sale_price,"
         " (SELECT count(*) FROM garagebooks.expense e WHERE e.car_id = c.id) AS expenses,"
         " (SELECT count(*) FROM garagebooks.lease l WHERE l.car_id = c.id) AS leases "
         "FROM garagebooks.car c ORDER BY c.id").fetchall()
@@ -155,6 +155,16 @@ def update_car(conn, car_id, v):
         "UPDATE garagebooks.car SET kind = %(kind)s, make = %(make)s, model = %(model)s, "
         "name_from_teslamate = name_from_teslamate AND name = %(name)s, name = %(name)s WHERE id = %(id)s",
         {**v, "id": car_id}).rowcount == 1
+
+
+def set_sale(conn, car_id, sold_at, sale_price):
+    """Record the sale of a car, or clear it (both None). Returns False when there is no such car."""
+    return conn.execute("UPDATE garagebooks.car SET sold_at = %s, sale_price = %s WHERE id = %s",
+                        (sold_at, sale_price, car_id)).rowcount == 1
+
+
+def first_expense_at(conn, car_id):
+    return conn.execute("SELECT MIN(occurred_at) AS at FROM garagebooks.expense WHERE car_id = %s", (car_id,)).fetchone()["at"]
 
 
 def delete_car(conn, car_id):

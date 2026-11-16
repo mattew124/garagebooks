@@ -50,6 +50,22 @@ configured, or unavailable and why.
 A car paid for through a novated lease has a **Lease** link: the details from the provider's
 statement, its yearly budgets and a few checks on them. See [Leases](leases.md).
 
+### Selling a car
+
+When you sell a car, open **Sold this car?** on its card and enter the date it sold and what it sold
+for (0 if it was given away), then **Save sale**. The card then reads *Sold 12 Mar 2026 for $31,000.00*.
+**Clear sale** takes it back if you entered it by mistake. The date can't be in the future; a date
+before the car's first expense is accepted, with a warning.
+
+A sold car is not removed. Its total cost of ownership is the purchase price plus running costs and
+charging, **less the sale price**; the time owned, and so every per-day and per-month figure, stops at
+the sale date; and the distance stops at the last odometer reading on or before it. You can still add
+an expense to a sold car (a late bill, say), but it goes after your other cars in the Add form's car
+list, marked *(sold)*. The dashboard names the car *(sold)* in its **Car** box and shows a **Sold**
+tile. See [What the dashboard counts](dashboard.md).
+
+<!-- screenshot: cars-sold - A car marked as sold on the Cars page, with its sale date and price -->
+
 ## Adding an expense
 
 Category, date, time, amount, odometer, vendor, notes and the invoice. The odometer can be filled in

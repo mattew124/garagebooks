@@ -38,7 +38,7 @@ def _without_teslamate(dash, teslamate):
     if not teslamate.installed:
         return
     for panel in dash["panels"]:
-        if panel["type"] == "stat":
+        if panel["type"] == "stat" and panel["title"] != "Sold":     # the sale is ours, not TeslaMate's
             panel["fieldConfig"]["defaults"]["noValue"] = "unavailable"
         panel["gridPos"]["y"] += 3
     dash["panels"].insert(0, {

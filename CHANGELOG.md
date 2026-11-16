@@ -44,6 +44,13 @@ and keeps your existing role when you set `GARAGEBOOKS_DB_USER` (or the old `EXP
   not tax advice; no personal details are stored. See [Leases](docs/leases.md). The app adds the new
   `garagebooks.lease` and `garagebooks.lease_budget` tables and `category.budget_pool` on start; with
   the restricted database role, re-run `scripts/provision-db.sh` first.
+- **Selling a car.** Record a sale date and price on the **Cars** page (**Sold this car?**). A sold car's
+  total cost of ownership is net of the sale price, its time owned, per-day and per-month figures stop at
+  the sale date, and its distance stops at the last odometer reading on or before it. The dashboard adds
+  a **Sold** tile and names the car *(sold)* in the Car box; the Add form lists sold cars last. The
+  `garagebooks.car` table gains `sold_at` and `sale_price`, and the `garagebooks.ownership` view gains
+  `sale_price`, `sold_at` and `owned_until` (its `tco` and `current_km` change for a sold car). Both apply
+  themselves on start; with the restricted database role, nothing more is needed.
 - **Schema:** `expenses` is now `garagebooks`. Grafana panels or queries of your own that name
   `expenses.` need the new name.
 - **Dashboard address:** the uid is now `garagebooks-tco` (was `tm-expenses-tco`), so its address is
