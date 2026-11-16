@@ -6,12 +6,13 @@ import json
 import re
 from datetime import datetime, timezone
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 import psycopg
 import pytest
 from psycopg.rows import dict_row
 
-from garagebooks import compat, create_app, dashboard, sources
+from garagebooks import compat, create_app, dashboard, db, sources, validation
 from tests.conftest import TESLAMATE
 
 ORIGIN = {"Origin": "http://localhost"}
@@ -58,9 +59,9 @@ def test_the_app_starts_and_works_on_a_database_with_no_teslamate(empty_db, monk
                                           "time": "09:00", "amount": amount, "odometer_km": odo, "vendor": "",
                                           "invoice_url": "", "notes": ""}, headers=ORIGIN)
         assert saved.status_code == 303
-    assert client.post(f"/cars/{car['id']}/readings", data={"date": "2026-11-01", "km": "151,000"},
-                       headers=ORIGIN).status_code == 303
     with connect(empty_db) as conn:
+        conn.execute("INSERT INTO garagebooks.odometer_reading (car_id, read_at, km) VALUES (%s, '2026-11-01+10', 151000)",
+                     (car["id"],))
         own = conn.execute("SELECT * FROM garagebooks.ownership").fetchone()
     assert (own["car_name"], own["running_total"], own["charging_total"], own["tco"]) == ("Old ute", 800, Decimal("95.50"), Decimal("895.50"))
     assert (own["start_km"], own["current_km"], own["distance_km"]) == (150000, 151000, 1000)
@@ -122,35 +123,144 @@ def test_a_car_added_by_hand_can_be_edited_and_deleted_until_it_has_expenses(emp
         assert conn.execute("SELECT count(*) AS n FROM garagebooks.car").fetchone()["n"] == 0
 
 
-def test_odometer_readings_are_validated_and_can_be_deleted(empty_db, monkeypatch):
+def test_the_manual_odometer_reading_routes_are_gone_but_saved_readings_still_count(empty_db, monkeypatch):
     client = start(empty_db, monkeypatch)
     client.post("/cars", data={"name": "Car", "kind": "HEV"}, headers=ORIGIN)
     with connect(empty_db) as conn:
         car_id = conn.execute("SELECT id FROM garagebooks.car").fetchone()["id"]
-    for data in ({"date": "bad", "km": "5"}, {"date": "2026-01-01", "km": ""}, {"date": "2026-01-01", "km": "-4"}):
-        assert client.post(f"/cars/{car_id}/readings", data=data, headers=ORIGIN).status_code == 400
-    assert client.post("/cars/9999/readings", data={"date": "2026-01-01", "km": "5"}, headers=ORIGIN).status_code == 404
-    client.post(f"/cars/{car_id}/readings", data={"date": "2026-01-01", "km": "5000"}, headers=ORIGIN)
-    client.post(f"/cars/{car_id}/readings", data={"date": "2026-01-01", "km": "5100"}, headers=ORIGIN)   # same moment: replaced
+    for path in (f"/cars/{car_id}/readings", f"/cars/{car_id}/readings/1/delete"):
+        assert client.post(path, data={"date": "2026-01-01", "km": "5"}, headers=ORIGIN).status_code in (404, 405)
     with connect(empty_db) as conn:
-        (row,) = conn.execute("SELECT id, km FROM garagebooks.odometer_reading").fetchall()
-    assert row["km"] == 5100
-    assert client.post(f"/cars/{car_id}/readings/{row['id']}/delete", headers=ORIGIN).status_code == 303
-    assert client.post(f"/cars/{car_id}/readings/{row['id']}/delete", headers=ORIGIN).status_code == 404
+        assert conn.execute("SELECT count(*) AS n FROM garagebooks.odometer_reading").fetchone()["n"] == 0
+        conn.execute("INSERT INTO garagebooks.odometer_reading (car_id, read_at, km) VALUES (%s, '2026-01-01+10', 5000)", (car_id,))
+    page = client.get("/cars").data.decode()
+    assert "5,000 km" in page                                     # the table is still read
+    assert "Odometer readings" not in page and "/readings" not in page
 
 
-def test_a_reading_entered_today_counts_straight_away(empty_db, monkeypatch):
-    """Even before noon: it is never stamped later than now."""
-    from zoneinfo import ZoneInfo
+def test_a_car_without_a_name_is_called_by_its_make_and_model(empty_db, monkeypatch):
     client = start(empty_db, monkeypatch)
-    client.post("/cars", data={"name": "Car", "kind": "BEV"}, headers=ORIGIN)
+    assert client.post("/cars", data={"name": "", "kind": "BEV", "make": "Tesla", "model": "Model Y"},
+                       headers=ORIGIN).status_code == 303
+    assert client.post("/cars", data={"name": "  ", "kind": "ICE", "make": "Toyota"}, headers=ORIGIN).status_code == 303
+    assert client.post("/cars", data={"kind": "ICE", "model": "HiLux"}, headers=ORIGIN).status_code == 303
+    refused = client.post("/cars", data={"name": "", "kind": "ICE"}, headers=ORIGIN)
+    assert refused.status_code == 400 and "make and model, or a name" in refused.data.decode()
+    with connect(empty_db) as conn:
+        assert [r["name"] for r in conn.execute("SELECT name FROM garagebooks.car ORDER BY id")] == ["Tesla Model Y", "Toyota", "HiLux"]
+    assert client.post("/cars", data={"name": "x" * 101, "kind": "ICE", "make": "A"}, headers=ORIGIN).status_code == 400
+
+
+def test_the_car_name_helper_and_form_parser():
+    assert validation.car_name("Tesla", "Model Y") == "Tesla Model Y"
+    assert validation.car_name("Tesla", None) == "Tesla" and validation.car_name(None, "Model Y") == "Model Y"
+    assert validation.car_name(None, None) == "" and validation.car_name("", "") == ""
+    values, errors = validation.parse_car_form({"kind": "BEV", "make": "Tesla", "model": "Model Y"}, db.CAR_KINDS)
+    assert errors == {} and values["name"] == "Tesla Model Y"
+    values, errors = validation.parse_car_form({"name": " My  car ", "kind": "BEV"}, db.CAR_KINDS)
+    assert errors == {} and values["name"] == "My car"
+    _values, errors = validation.parse_car_form({"kind": "BEV"}, db.CAR_KINDS)
+    assert "name" in errors
+
+
+# ---- the purchase on the Cars page ----------------------------------------------------------------
+
+NOW = datetime(2026, 6, 1, 12, tzinfo=UTC)
+
+
+def test_parse_purchase():
+    tz = "Australia/Brisbane"
+    assert validation.parse_purchase({}, tz, NOW) == (None, {})                     # nothing entered: left as it is
+    assert validation.parse_purchase({"purchase_date": "2025-01-01", "purchase_km": "5"}, tz, NOW) == (None, {})
+    values, errors = validation.parse_purchase({"purchase_price": "$41,500.50", "purchase_date": "2025-01-31",
+                                                "purchase_km": "12,000"}, tz, NOW)
+    assert errors == {} and values["amount"] == Decimal("41500.50") and values["odometer_km"] == 12000
+    assert values["occurred_at"].date().isoformat() == "2025-01-31" and values["occurred_at"].hour == 12
+    values, errors = validation.parse_purchase({"purchase_price": "0", "purchase_date": "2025-01-31"}, tz, NOW)
+    assert errors == {} and values["odometer_km"] is None
+    for form, field in (({"purchase_price": "-1", "purchase_date": "2025-01-01"}, "purchase_price"),
+                        ({"purchase_price": "lots", "purchase_date": "2025-01-01"}, "purchase_price"),
+                        ({"purchase_price": "1", "purchase_date": ""}, "purchase_date"),
+                        ({"purchase_price": "1", "purchase_date": "2999-01-01"}, "purchase_date"),
+                        ({"purchase_price": "1", "purchase_date": "nope"}, "purchase_date"),
+                        ({"purchase_price": "1", "purchase_date": "2025-01-01", "purchase_km": "-5"}, "purchase_km")):
+        assert field in validation.parse_purchase(form, tz, NOW)[1], form
+
+
+def purchases(url):
+    with connect(url) as conn:
+        return conn.execute("SELECT e.amount, e.odometer_km, e.occurred_at, k.name AS category FROM garagebooks.expense e "
+                            "JOIN garagebooks.category k ON k.id = e.category_id WHERE k.kind = 'purchase' ORDER BY e.id").fetchall()
+
+
+def test_a_purchase_entered_with_the_car_is_an_expense_in_a_purchase_category_and_can_be_changed(empty_db, monkeypatch):
+    client = start(empty_db, monkeypatch)
+    data = {"name": "Ute", "kind": "ICE", "purchase_price": "41,500", "purchase_date": "2025-01-31", "purchase_km": "12000"}
+    assert client.post("/cars", data=data, headers=ORIGIN).status_code == 303
+    (row,) = purchases(empty_db)
+    assert (row["amount"], row["odometer_km"], row["category"]) == (Decimal("41500.00"), 12000, "Initial purchase")
     with connect(empty_db) as conn:
         car_id = conn.execute("SELECT id FROM garagebooks.car").fetchone()["id"]
-    today = datetime.now(ZoneInfo("Australia/Brisbane")).date().isoformat()
-    client.post(f"/cars/{car_id}/readings", data={"date": today, "km": "777"}, headers=ORIGIN)
+        details = db.car_details(conn)[0]
+    assert details["purchases"] == 1 and details["purchase_price"] == 41500 and details["purchase_km"] == 12000
+    assert details["purchased_at"].date().isoformat() == "2025-01-31"
+    # saved again unchanged with other details: the expense is untouched, to the time of day
     with connect(empty_db) as conn:
-        assert conn.execute("SELECT read_at <= now() AS past FROM garagebooks.odometer_reading").fetchone()["past"]
-    assert b"777 km" in client.get("/cars").data
+        conn.execute("UPDATE garagebooks.expense SET occurred_at = '2025-01-31 08:15+10'")
+    assert client.post(f"/cars/{car_id}", data={**data, "make": "Toyota"}, headers=ORIGIN).status_code == 303
+    assert purchases(empty_db)[0]["occurred_at"].isoformat().startswith("2025-01-30T22:15")
+    # changed: the one expense is updated, not another added
+    changed = {**data, "purchase_price": "40000", "purchase_date": "2025-02-01", "purchase_km": ""}
+    assert client.post(f"/cars/{car_id}", data=changed, headers=ORIGIN).status_code == 303
+    (row,) = purchases(empty_db)
+    assert (row["amount"], row["odometer_km"]) == (40000, None)
+    # no price entered: the purchase is left as it is
+    assert client.post(f"/cars/{car_id}", data={"name": "Ute", "kind": "ICE"}, headers=ORIGIN).status_code == 303
+    assert len(purchases(empty_db)) == 1 and purchases(empty_db)[0]["amount"] == 40000
+    page = client.get("/cars").data.decode()
+    assert 'name="purchase_price"' in page and 'name="purchase_date"' in page and 'name="purchase_km"' in page
+
+
+def test_a_purchase_with_a_mistake_saves_nothing_and_keeps_what_was_typed(empty_db, monkeypatch):
+    client = start(empty_db, monkeypatch)
+    bad = client.post("/cars", data={"name": "Ute", "kind": "ICE", "purchase_price": "5", "purchase_date": ""}, headers=ORIGIN)
+    assert bad.status_code == 400 and "Enter the date you bought it." in bad.data.decode() and b'value="5"' in bad.data
+    with connect(empty_db) as conn:
+        assert conn.execute("SELECT count(*) AS n FROM garagebooks.car").fetchone()["n"] == 0
+    assert purchases(empty_db) == []
+
+
+def test_more_than_one_purchase_expense_is_not_merged_by_the_cars_page(empty_db, monkeypatch):
+    client = start(empty_db, monkeypatch)
+    client.post("/cars", data={"name": "Ute", "kind": "ICE"}, headers=ORIGIN)
+    with connect(empty_db) as conn:
+        car_id = conn.execute("SELECT id FROM garagebooks.car").fetchone()["id"]
+        cat = category(conn, "Initial purchase")
+        conn.execute("INSERT INTO garagebooks.expense (car_id, category_id, occurred_at, amount, odometer_km) VALUES "
+                     "(%s, %s, '2025-01-01+10', 30000, 10), (%s, %s, '2025-02-01+10', 500, NULL)", (car_id, cat, car_id, cat))
+        details = db.car_details(conn)[0]
+    assert (details["purchases"], details["purchase_price"], details["purchase_km"]) == (2, 30500, 10)
+    resp = client.post(f"/cars/{car_id}", data={"name": "Renamed", "kind": "ICE", "purchase_price": "1",
+                                                "purchase_date": "2025-03-01"}, headers=ORIGIN)
+    assert resp.status_code == 400          # (the form offers no price box for such a car, so there is nothing to mark)
+    assert "2 purchase expenses" in client.get("/cars").data.decode()
+    with connect(empty_db) as conn:
+        assert conn.execute("SELECT name FROM garagebooks.car").fetchone()["name"] == "Ute"     # nothing saved with it
+    assert [r["amount"] for r in purchases(empty_db)] == [30000, 500]
+
+
+def test_set_purchase_reports_what_it_did(empty_db, monkeypatch):
+    start(empty_db, monkeypatch)
+    zone = ZoneInfo("Australia/Brisbane")
+    value = {"amount": Decimal("100"), "occurred_at": datetime(2025, 1, 1, 12, tzinfo=zone), "odometer_km": None}
+    with connect(empty_db) as conn:
+        conn.execute("INSERT INTO garagebooks.car (id, name) VALUES (7, 'Car')")
+        assert db.set_purchase(conn, 7, value) == "ok" and db.set_purchase(conn, 7, value) == "ok"
+        assert conn.execute("SELECT count(*) AS n FROM garagebooks.expense").fetchone()["n"] == 1
+        conn.execute("DELETE FROM garagebooks.expense")
+        conn.execute("UPDATE garagebooks.category SET kind = 'running' WHERE kind = 'purchase'")
+        assert db.set_purchase(conn, 7, value) == "no_category"
+        conn.execute("UPDATE garagebooks.category SET kind = 'purchase' WHERE name = 'Initial purchase'")
 
 
 def test_sources_answer_from_what_was_entered_by_hand(empty_db, monkeypatch):

@@ -222,7 +222,7 @@ def test_the_page_lists_the_most_urgent_first_with_a_word_for_each_status(app):
     add(client, url, car_id, title="By km", due_date="", due_km="30000")
     page = client.get("/reminders").data.decode()
     assert statuses(page)[:4] == ["overdue", "due_soon", "unknown", "upcoming"]
-    assert [m for m in re.findall(r'data-title="([^"]+)"', page)][:4] == ["Late", "Soon", "By km", "Later"]
+    assert [m for m in re.findall(r'class="reminder card"[^>]*data-title="([^"]+)"', page)][:4] == ["Late", "Soon", "By km", "Later"]
     assert "Overdue" in page and "Due soon" in page and "Upcoming" in page
     assert "3 days overdue" in page and "due in 10 days" in page
     assert "Odometer unknown" in page and "not recorded" in page          # said, never treated as not due
@@ -532,7 +532,7 @@ def test_a_car_teslamate_tracks_uses_its_odometer_and_a_car_by_hand_uses_its_rea
     page = client.get("/reminders").data.decode()
     assert "900 km" in page and "from TeslaMate" in page          # 900 of 1000: due soon (within 1000)
     assert "4,800 km" in page and "entered" in page
-    by_title = dict(zip(re.findall(r'data-title="([^"]+)"', page), statuses(page), strict=True))
+    by_title = dict(zip(re.findall(r'class="reminder card"[^>]*data-title="([^"]+)"', page), statuses(page), strict=True))
     assert by_title == {"Service 1": "due_soon", "Service 1500": "due_soon"}
 
 
@@ -615,3 +615,47 @@ def test_the_panel_says_odometer_unknown_and_leaves_out_resolved_and_other_cars(
         none = conn.execute(runnable(raw.replace("$car_id", "-1"))).fetchall()
     assert [(r["Reminder"], r["Status"], r["Km left"]) for r in rows] == [("NoKm", "Odometer unknown", None)]
     assert none == []
+
+
+# ---- standard reminders on the Add a reminder form -----------------------------------------------------
+
+def test_the_standard_reminders_are_well_formed_and_an_electric_car_gets_no_engine_items():
+    keys = [s["key"] for s in reminders.STANDARD]
+    assert len(keys) == len(set(keys)) and len(keys) >= 10
+    for item in reminders.STANDARD:
+        assert item["title"] and (item["months"] or item["km"]), item           # each repeats by time, distance or both
+        assert item["kinds"] is None or set(item["kinds"]) <= {"BEV", "ICE", "PHEV", "HEV"}
+    engine = {"engine_oil", "oil_filter", "air_filter", "spark_plugs", "timing_belt"}
+    for kind in ("ICE", "PHEV", "HEV"):
+        assert engine <= {s["key"] for s in reminders.standard_for(kind)}
+    bev = {s["key"] for s in reminders.standard_for("BEV")}
+    assert not (engine & bev) and {"tyre_rotation", "wheel_alignment", "cabin_air_filter", "registration", "insurance"} <= bev
+    assert reminders.standard_for("BEV") == [s for s in reminders.STANDARD if s["kinds"] is None]
+    assert len(reminders.standard_for("ICE")) == len(reminders.STANDARD)
+    assert len(reminders.standard_for("something else")) == len(reminders.standard_for("BEV"))
+
+
+def test_the_form_offers_the_standard_reminders_with_the_car_types_they_apply_to(app):
+    client, _url, car_id = app
+    page = client.get("/reminders").data.decode()
+    block = re.search(r'<label[^>]*id="standard-reminder".*?</label>', page, re.S).group(0)
+    assert "data-today=" in block and f'data-today="{today_here().isoformat()}"' in block
+    options = re.findall(r'<option value="(\w+)" data-title="([^"]+)" data-months="(\d*)" data-km="(\d*)"\s+data-kinds="([^"]*)"', block)
+    assert [o[0] for o in options] == [s["key"] for s in reminders.STANDARD]
+    by_key = {o[0]: o for o in options}
+    assert by_key["engine_oil"][1:] == ("Engine oil", "12", "10000", "ICE PHEV HEV")
+    assert by_key["tyre_rotation"][1:] == ("Tyre rotation", "", "10000", "")           # every car: no kinds
+    assert 'data-category="Tyre rotation"' in block
+    assert f'<option value="{car_id}" data-kind="BEV"' in page
+
+
+def test_each_car_option_carries_its_type_and_current_odometer(empty_db, monkeypatch):
+    client = start(empty_db, monkeypatch)
+    client.post("/cars", data={"name": "Ute", "kind": "ICE"}, headers=ORIGIN)
+    client.post("/cars", data={"name": "Bike", "kind": "HEV"}, headers=ORIGIN)
+    with connect(empty_db) as conn:
+        ute, bike = [r["id"] for r in conn.execute("SELECT id FROM garagebooks.car ORDER BY id")]
+    reading(empty_db, ute, 12_345)
+    page = client.get("/reminders").data.decode()
+    assert re.search(rf'<option value="{ute}" data-kind="ICE" data-odometer="12345', page)
+    assert re.search(rf'<option value="{bike}" data-kind="HEV" ', page) and f'<option value="{bike}" data-kind="HEV" data-odometer' not in page

@@ -141,6 +141,7 @@ def admin(pg):
                      " garagebooks.odometer_reading, garagebooks.reminder RESTART IDENTITY CASCADE")
         if TESLAMATE:
             conn.execute("TRUNCATE positions, charging_processes RESTART IDENTITY CASCADE")   # CASCADE: real TeslaMate tables (drives...) reference them
+        conn.execute("DELETE FROM garagebooks.lease")          # a test's lease on the first car; its budgets go with it
         conn.execute("DELETE FROM garagebooks.car WHERE id <> 1")
         if not TESLAMATE:
             conn.execute(OWN_CAR)       # a test may have deleted it
@@ -152,7 +153,7 @@ def admin(pg):
         conn.execute("ALTER TABLE garagebooks.change_log DISABLE TRIGGER USER;"
                      " TRUNCATE garagebooks.change_log RESTART IDENTITY;"
                      " ALTER TABLE garagebooks.change_log ENABLE TRIGGER USER")
-        conn.execute("UPDATE garagebooks.setting SET invoice_date_format = NULL, invoice_name_format = NULL, multi_amount = NULL")
+        conn.execute("UPDATE garagebooks.setting SET invoice_date_format = NULL, invoice_name_format = NULL, multi_amount = NULL, lease_budgets = false")
         yield conn
 
 

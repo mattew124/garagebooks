@@ -25,6 +25,7 @@
   {% if several %}
   <p class="car-purchases"><small>Bought for <strong>{{ c.purchase_price|money }}</strong>, in {{ c.purchases }} purchase expenses:
     change them in the <a href="{{ url_for('index') }}">expense list</a>.</small></p>
+  {% if e.purchase_price %}<span class="error">{{ e.purchase_price }}</span>{% endif %}
   {% else %}
   <div class="row">
     <label>Purchase price ($)

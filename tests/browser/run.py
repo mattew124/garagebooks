@@ -391,13 +391,17 @@ def local_folder_checks(page, pdf_page, car):
     shot(page, "local-import")
 
 
-def remove_marked(page):
+def remove_expenses(page):
     page.goto(UI)
     while page.locator(f"tr:has-text('{MARKER}') a:has-text('Edit')").count():
         page.locator(f"tr:has-text('{MARKER}') a:has-text('Edit')").first.click()
         page.once("dialog", lambda d: d.accept())
         page.click("button.danger")
         page.wait_for_url(re.compile(r"msg=deleted"))
+
+
+def remove_marked(page):
+    remove_expenses(page)
     page.goto(UI + "cars")                      # and a car a stopped run added by hand
     while page.locator(".car", has_text=MARKER).count():
         car = page.locator(".car", has_text=MARKER).first
@@ -904,8 +908,15 @@ def test_folder_browser(page):
 
 
 def test_cars_page(page):
-    """The app's own car list: TeslaMate's cars are there, and one can be added by hand, given an
-    odometer reading, and deleted again."""
+    """The app's own car list: TeslaMate's cars are there, and one can be added by hand, given an odometer
+    reading from an expense, sold, and deleted again. The name is optional (the make and model name it)."""
+    try:
+        cars_checks(page)
+    finally:
+        remove_marked(page)
+
+
+def cars_checks(page):
     page.goto(UI + "cars")
     expect(page.locator("#teslamate-status")).to_have_attribute("data-state", "ok")
     expect(page.locator(".car small", has_text="from TeslaMate").first).to_be_visible()
@@ -917,30 +928,38 @@ def test_cars_page(page):
     car = page.locator(".car", has_text=MARKER)
     expect(car).to_contain_text("added by hand")
     expect(car.locator(".car-odometer")).to_contain_text("not recorded")
-    car.locator("summary", has_text="Odometer readings").click()
-    car.locator("input[name=km]").fill("12,345")
-    car.get_by_role("button", name="Add reading").click()
-    page.wait_for_url(re.compile(r"msg=reading_added"))
+    page.goto(UI + "new")                                         # an odometer reading now comes from an expense
+    page.select_option("select[name=car_id]", label=MARKER)
+    page.wait_for_load_state("networkidle")                       # the odometer fills itself in on choosing a car
+    page.select_option("select[name=category_id]", label="Tyres")
+    page.fill("input[name=amount]", "50")
+    page.fill("input[name=vendor]", MARKER)
+    page.fill("input[name=odometer_km]", "12,345")
+    page.click("button[type=submit].button")
+    page.wait_for_url(re.compile(r"msg=saved"))
+    page.goto(UI + "cars")
     car = page.locator(".car", has_text=MARKER)
     expect(car.locator(".car-odometer")).to_contain_text("12,345 km")
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "sideways scroll on a phone"
-    car.locator("summary", has_text="Odometer readings").click()
+    expect(page.locator("summary", has_text="Odometer readings")).to_have_count(0)   # the readings section is gone
     shot(page, "cars-phone")
-    page.goto(UI + "new")                                         # the new car can be chosen for an expense
-    assert MARKER in page.locator("select[name=car_id]").inner_text()
-    page.goto(UI + "cars")
-    car = page.locator(".car", has_text=MARKER)
     car.locator("summary", has_text="Sold this car?").click()      # sell it: marked sold, then un-sold
     car.locator(".car-sale input[name=date]").fill("2020-01-02")
     car.locator(".car-sale input[name=price]").fill("-1")
     car.get_by_role("button", name="Save sale").click()
-    expect(page.locator(".car", has_text=MARKER).locator(".error")).to_contain_text("negative")
+    expect(page.locator(".car", has_text=MARKER).locator(".error", has_text="negative")).to_be_visible()
     car = page.locator(".car", has_text=MARKER)
     car.locator(".car-sale input[name=price]").fill("$7,500")
+    car.locator(".car-sale input[name=km]").fill("")               # a car without TeslaMate needs its final odometer
+    car.get_by_role("button", name="Save sale").click()
+    expect(page.locator(".car", has_text=MARKER).locator(".error").first).to_be_visible()
+    car = page.locator(".car", has_text=MARKER)
+    car.locator(".car-sale input[name=km]").fill("13,000")
     car.get_by_role("button", name="Save sale").click()
     page.wait_for_url(re.compile(r"msg=car_sold"))
     car = page.locator(".car", has_text=MARKER)
     expect(car.locator(".car-sold")).to_contain_text("Sold 02 Jan 2020 for $7,500.00")
+    expect(car.locator(".car-sold")).to_contain_text("13,000 km")
     shot(page, "cars-sold-phone")
     page.goto(UI + "new")
     assert MARKER + " (sold)" in page.locator("select[name=car_id]").inner_text()
@@ -950,6 +969,7 @@ def test_cars_page(page):
     car.get_by_role("button", name="Clear sale").click()
     page.wait_for_url(re.compile(r"msg=car_unsold"))
     expect(page.locator(".car", has_text=MARKER).locator(".car-sold")).to_have_count(0)
+    remove_expenses(page)                                          # a car with expenses can't be deleted
     page.goto(UI + "cars")
     car = page.locator(".car", has_text=MARKER)
     car.locator("summary", has_text="Edit").click()
@@ -959,11 +979,70 @@ def test_cars_page(page):
     expect(page.locator(".car", has_text=MARKER)).to_have_count(0)
 
 
-def test_lease_page(page):
+def test_car_without_a_name(page):
+    """A car added with only a make and a model is listed as "Make Model"; a purchase price and date typed
+    into its Edit form show on the card as "Bought ... for ..."."""
     try:
+        page.goto(UI + "cars")
+        page.fill("#add-car input[name=make]", MARKER)
+        page.fill("#add-car input[name=model]", "Model Q")
+        assert page.input_value("#add-car input[name=name]") == ""
+        page.click("#add-car button[type=submit]")
+        page.wait_for_url(re.compile(r"msg=car_added"))
+        car = page.locator(".car", has_text=MARKER)
+        expect(car.locator("h2")).to_contain_text(f"{MARKER} Model Q")
+        expect(car.locator(".car-bought")).to_have_count(0)
+        car.locator("summary", has_text="Edit").click()
+        car.locator("input[name=purchase_price]").fill("$41,234.56")
+        car.locator("input[name=purchase_date]").fill("2024-05-06")
+        car.locator("input[name=purchase_km]").fill("10")
+        car.get_by_role("button", name="Save car").click()
+        page.wait_for_url(re.compile(r"msg=car_saved"))
+        car = page.locator(".car", has_text=MARKER)
+        expect(car.locator(".car-bought")).to_contain_text("Bought 06 May 2024 for $41,234.56")
+        expect(car.locator("h2")).to_contain_text(f"{MARKER} Model Q")
+        shot(page, "cars-bought-phone")
+        # The purchase is an expense with no vendor: give it the marker so the clean-up finds it.
+        page.goto(UI)
+        row = page.locator("tbody tr", has_text="41,234.56").first
+        row.locator("a:has-text('Edit')").click()
+        page.fill("input[name=vendor]", MARKER)
+        page.click("button[type=submit].button")
+        page.wait_for_url(re.compile(r"msg=updated"))
+    finally:
+        remove_marked(page)
+    expect(page.locator(".car", has_text=MARKER)).to_have_count(0)
+
+
+def lease_budgets(page, on):
+    """Settings > Track lease budgets: the yearly budget boxes only exist while it is on."""
+    page.goto(UI + "settings")
+    box = page.locator("input[name=lease_budgets]")
+    if box.is_checked() != on:
+        box.set_checked(on)
+        page.click("button[type=submit].button")
+        page.wait_for_url(re.compile(r"msg=settings"))
+
+
+def add_marked_car(page):
+    page.goto(UI + "cars")
+    page.fill("#add-car input[name=name]", MARKER)
+    page.click("#add-car button[type=submit]")
+    page.wait_for_url(re.compile(r"msg=car_added"))
+    return page.locator(".car", has_text=MARKER)
+
+
+def test_lease_page(page):
+    was_on = None
+    try:
+        page.goto(UI + "settings")
+        was_on = page.locator("input[name=lease_budgets]").is_checked()
+        lease_budgets(page, True)             # the budget boxes this test fills only exist with the setting on
         lease_checks(page)
     finally:
         remove_marked(page)       # a failed run leaves no car behind to confuse the next checks
+        if was_on is not None:
+            lease_budgets(page, was_on)
 
 
 def lease_checks(page):
@@ -971,19 +1050,17 @@ def lease_checks(page):
     delete it. The car is deleted at the end, which takes anything left with it."""
     from datetime import date, timedelta
     today = date.today()
-    page.goto(UI + "cars")
-    page.fill("#add-car input[name=name]", MARKER)
-    page.click("#add-car button[type=submit]")
-    page.wait_for_url(re.compile(r"msg=car_added"))
-    car = page.locator(".car", has_text=MARKER)
+    car = add_marked_car(page)
     car.get_by_role("link", name="Lease").click()
     expect(page.locator("#no-lease")).to_be_visible()
-    page.get_by_role("link", name="Add a lease").click()
-    page.get_by_label("Financier").fill("Example Finance")
+    page.click("#add-lease-top")
+    expect(page.locator("#f-start_date")).to_have_value("")        # not pre-filled any more
+    expect(page.locator("#lease-budgets")).to_be_visible()          # the setting is on
+    page.locator("#f-financier").fill("Example Finance")
     page.get_by_label("Lease start").fill((today - timedelta(days=30)).isoformat())
-    page.get_by_label("Lease end").fill((today + timedelta(days=1065)).isoformat())
+    page.locator("#f-end_date").fill((today + timedelta(days=1065)).isoformat())
     page.get_by_label("Term (months)").fill("36")
-    page.get_by_label("Car's cost or financed amount").fill("60000")
+    page.get_by_label("Car's cost, value or financed amount").fill("60000")
     page.get_by_label("Residual percentage of cost").fill("46.875")
     page.get_by_label("Paid").select_option("fortnightly")
     page.get_by_label("Pre-tax part, per pay").fill("300")
@@ -991,7 +1068,7 @@ def lease_checks(page):
     page.get_by_label("Provider's admin fee, per pay").fill("-5")
     page.get_by_role("button", name="Add lease").click()
     expect(page.locator("#e-admin_fee")).to_contain_text("negative")         # the error is beside the field...
-    assert page.get_by_label("Financier").input_value() == "Example Finance"  # ...and nothing typed is lost
+    assert page.locator("#f-financier").input_value() == "Example Finance"    # ...and nothing typed is lost
     page.get_by_label("Provider's admin fee, per pay").fill("5")
     page.get_by_label("Pre-tax part, per pay").fill("300")
     page.get_by_label("Lease payments").fill("8450")
@@ -1006,7 +1083,7 @@ def lease_checks(page):
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "sideways scroll on a phone"
     shot(page, "lease-phone")
     page.get_by_role("link", name="Edit").click()
-    page.get_by_label("Financier").fill("Another Finance")
+    page.locator("#f-financier").fill("Another Finance")
     page.get_by_role("button", name="Save lease").click()
     page.wait_for_url(re.compile(r"msg=lease_saved"))
     expect(page.locator(".lease")).to_contain_text("Another Finance")
@@ -1025,6 +1102,196 @@ def lease_checks(page):
     page.wait_for_url(re.compile(r"msg=car_deleted"))
 
 
+def lease_form_pdf(lines):
+    """A one-page text PDF with one line of `lines` to a row: what `pdftotext -layout` reads back as the
+    label and value lines of a provider's lease form (invented figures)."""
+    esc = lambda t: t.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+    stream = ("BT /F1 11 Tf 14 TL 40 760 Td " + " T* ".join(f"({esc(t)}) Tj" for t in lines) + " ET").encode()
+    objects = [b"<< /Type /Catalog /Pages 2 0 R >>", b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+               b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R "
+               b"/Resources << /Font << /F1 5 0 R >> >> >>",
+               b"<< /Length %d >>\nstream\n%s\nendstream" % (len(stream), stream),
+               b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"]
+    out, offsets = b"%PDF-1.4\n", []
+    for n, body in enumerate(objects, 1):
+        offsets.append(len(out))
+        out += b"%d 0 obj\n%s\nendobj\n" % (n, body)
+    xref = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
+    out += b"".join(b"%010d 00000 n \n" % o for o in offsets)
+    return out + b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objects) + 1, xref)
+
+
+LEASE_FORM_LINES = [
+    "Mail To: Example Packaging Pty Ltd", "Associate Lease Form", "Section B - Vehicle Details",
+    "Nominated Annual", "Kilometres 15,000", "FBT Base Cost $ 61,000", "Eligible EV -",
+    "Section D - Lease Details", "Annual Lease Payment $13,000.00",
+    "Lease Start Date 01-Jun-25", "Lease End Date 31-May-27", "Instalment Amount (ex GST) $ 500.00"]
+LEASE_FORM_FILE = {"name": "browser-test-lease-form.pdf", "mimeType": "application/pdf",
+                   "buffer": lease_form_pdf(LEASE_FORM_LINES)}
+
+
+def car_id_of(car):
+    return car.get_attribute("id").removeprefix("car-")
+
+
+def open_add_lease(page, car):
+    car.get_by_role("link", name="Lease").click()
+    page.click("#add-lease-top")
+    expect(page.locator("#lease-form")).to_be_visible()
+
+
+def fill_basic_lease(page, start, term, financier=None):
+    """The least a lease needs, typed in: the end date is worked out from the start and the term."""
+    if financier:
+        page.locator("#f-financier").fill(financier)
+    page.get_by_label("Lease start").fill(start)
+    page.get_by_label("Term (months)").fill(str(term))
+    page.get_by_label("Paid").select_option("monthly")
+    page.get_by_label("Pre-tax part, per pay").fill("100")
+
+
+def test_lease_associate(page):
+    """Associate lease: the financier and residual boxes go, the end follows the start and the term, a lease
+    saves with no financier, and the page says what it is. Also the layout of the Add a lease page."""
+    try:
+        car = add_marked_car(page)
+        open_add_lease(page, car)
+        form = page.locator("#lease-form")
+        assert form.locator("legend").count() == 0, "a legend is left inside the lease form"
+        cards = form.locator("section.card")
+        assert cards.count() >= 5
+        for i in range(cards.count()):
+            expect(cards.nth(i).locator("h2.card-title")).to_be_visible()
+        expect(page.locator("#lease-budgets")).to_have_count(0)                  # budgets are off unless the setting is
+        shot(page, "lease-add-phone")
+        expect(page.locator("#f-financier")).to_be_visible()
+        expect(page.locator("#f-residual_percent")).to_be_visible()
+        page.locator("#f-associate_lease").check()
+        expect(page.locator("#f-financier")).to_be_hidden()
+        expect(page.locator("#f-residual_amount")).to_be_hidden()
+        expect(page.locator("#f-residual_percent")).to_be_hidden()
+        page.locator("#f-associate_lease").uncheck()
+        expect(page.locator("#f-financier")).to_be_visible()
+        page.locator("#f-associate_lease").check()
+        fill_basic_lease(page, "2025-06-15", 24)
+        expect(page.locator("#f-end_date")).to_have_value("2027-06-14")            # the day before the same date two years on
+        page.get_by_role("button", name="Add lease").click()
+        page.wait_for_url(re.compile(r"msg=lease_added"))
+        expect(page.locator(".lease .associate")).to_have_text("Associate lease")
+        assert page.locator(".lease dt", has_text="Financier").count() == 0
+        assert page.locator(".lease dt", has_text="Residual").count() == 0
+        # Edit: the box is ticked and the financier stays hidden.
+        page.get_by_role("link", name="Edit").first.click()
+        expect(page.locator("#f-associate_lease")).to_be_checked()
+        expect(page.locator("#f-financier")).to_be_hidden()
+    finally:
+        remove_marked(page)
+
+
+def local_test_folder(page):
+    """The id of the invoice folder's "Browser test" folder (made if need be), or None when this stack has
+    no invoice folder. Nothing is ever deleted from it."""
+    page.goto(UI + "storage")
+    link = page.locator("ul.folders a[href*='local/browse/']").first
+    if not link.count():
+        return None
+    first = re.search(r"local/browse/(\d+)", link.get_attribute("href")).group(1)
+    top = page.request.get(UI + f"api/local/browse/{first}?folder=root")
+    if top.status != 200:
+        return None
+    for _attempt in range(2):
+        found = [f for f in top.json()["folders"] if f["name"] == LOCAL_FOLDER]
+        if found:
+            return found[0]["id"]
+        made = page.request.post(UI + f"local/browse/{first}/new-folder", headers=ORIGIN,
+                                 form={"parent_id": top.json()["id"], "name": LOCAL_FOLDER})
+        assert made.ok, f"couldn't make the {LOCAL_FOLDER} folder: HTTP {made.status}"
+        top = page.request.get(UI + f"api/local/browse/{first}?folder=root")
+    return None
+
+
+def test_lease_form_import(page):
+    """A lease form PDF chosen on the Add a lease page fills the boxes; with an invoice folder, the form and
+    an agreement are kept and linked on the lease page."""
+    try:
+        car = add_marked_car(page)
+        car_id = car_id_of(car)
+        folder = local_test_folder(page)
+        if folder is not None:
+            chosen = page.request.post(UI + f"local/folders/{car_id}", headers=ORIGIN, form={"folder_id": folder})
+            assert chosen.ok, f"couldn't choose the car's folder: HTTP {chosen.status}"
+        page.goto(UI + "cars")
+        open_add_lease(page, page.locator(".car", has_text=MARKER))
+        # What the app reads from the PDF, before looking at the page.
+        read = page.request.post(UI + "api/lease-prefill", headers=ORIGIN, multipart={"form_file": LEASE_FORM_FILE})
+        assert read.ok, f"/api/lease-prefill: HTTP {read.status}"
+        fields = read.json()["fields"]
+        assert fields.get("start_date") == "2025-06-01" and fields.get("term_months") == "24", fields
+        page.set_input_files("#f-form_file", LEASE_FORM_FILE)
+        expect(page.locator("#lease-form [data-lease-document=form] [data-doc-hint]")).to_contain_text("Filled from the lease form")
+        expect(page.locator("#f-start_date")).to_have_value("2025-06-01")
+        expect(page.locator("#f-end_date")).to_have_value("2027-05-31")
+        expect(page.locator("#f-term_months")).to_have_value("24")
+        expect(page.locator("#f-pay_frequency")).to_have_value("fortnightly")
+        expect(page.locator("#f-pretax_payment")).to_have_value("500.00")
+        expect(page.locator("#f-fbt_base_value")).to_have_value("61000.00")
+        expect(page.locator("#f-package_name")).to_have_value("Example Packaging")
+        expect(page.locator("#f-estimated_km_per_year")).to_have_value("15000")
+        expect(page.locator("#f-associate_lease")).to_be_checked()               # the form is an associate lease form
+        expect(page.locator("#f-financier")).to_be_hidden()
+        if folder is None:
+            page.get_by_role("button", name="Add lease").click()
+            page.wait_for_url(re.compile(r"msg=lease_added"))
+            expect(page.locator(".lease")).to_contain_text("Example Packaging")
+            raise Skip("the invoice folder isn't on in this stack, so the lease documents weren't saved")
+        page.set_input_files("#f-agreement_file", {"name": "browser-test-lease-agreement.pdf", "mimeType": "application/pdf",
+                                                   "buffer": readable_pdf(MARKER + " lease agreement")})
+        page.get_by_role("button", name="Add lease").click()
+        page.wait_for_url(re.compile(r"msg=lease_added"))
+        docs = page.locator(".lease-documents")
+        expect(docs.locator("li[data-document=form] a")).to_be_visible()
+        expect(docs.locator("li[data-document=agreement] a")).to_be_visible()
+        for doc in ("form", "agreement"):
+            href = docs.locator(f"li[data-document={doc}] a").get_attribute("href")
+            resp = page.request.get(UI.rstrip("/") + href[len(BASE):])
+            assert resp.status == 200 and resp.headers["content-type"] == "application/pdf", f"{doc}: HTTP {resp.status}"
+        shot(page, "lease-documents-phone")
+    finally:
+        remove_marked(page)
+
+
+def test_lease_periods(page):
+    """Two lease periods on one car, one after the other: the one that isn't current is folded away under
+    "Other lease periods"."""
+    try:
+        car = add_marked_car(page)
+        open_add_lease(page, car)
+        fill_basic_lease(page, "2023-03-15", 24, financier="Example Finance")
+        page.get_by_role("button", name="Add lease").click()
+        page.wait_for_url(re.compile(r"msg=lease_added"))
+        page.click("#add-lease-top")
+        fill_basic_lease(page, "2025-06-01", 24, financier="Second Finance")
+        page.get_by_role("button", name="Add lease").click()
+        page.wait_for_url(re.compile(r"msg=lease_added"))
+        expect(page.locator("section.lease")).to_have_count(2)
+        expect(page.locator("h2.lease-others")).to_have_text("Other lease periods")
+        period = page.locator("details.lease-period")
+        expect(period).to_have_count(1)
+        assert period.get_attribute("open") is None, "the other period should be folded"
+        expect(period.locator("summary")).to_contain_text("15 Mar 2023 to 14 Mar 2025")
+        expect(page.locator("#lease-form")).to_have_count(0)
+        expect(page.locator(".lease").first).to_contain_text("Second Finance")      # the current one is on show
+        expect(period.locator(".lease")).to_be_hidden()
+        period.locator("summary").click()
+        expect(period.locator(".lease")).to_be_visible()
+        expect(period.locator(".lease")).to_contain_text("Example Finance")
+        assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "sideways scroll on a phone"
+        shot(page, "lease-periods-phone")
+    finally:
+        remove_marked(page)
+
+
 def test_fbt_report(page):
     try:
         fbt_checks(page)
@@ -1037,24 +1304,20 @@ def fbt_checks(page):
     the taxable value, the pool the expense falls in, and the year links. The car is deleted at the end."""
     from datetime import date, timedelta
     today = date.today()
-    page.goto(UI + "cars")
-    page.fill("#add-car input[name=name]", MARKER)
-    page.click("#add-car button[type=submit]")
-    page.wait_for_url(re.compile(r"msg=car_added"))
-    page.locator(".car", has_text=MARKER).get_by_role("link", name="Lease").click()
+    add_marked_car(page).get_by_role("link", name="Lease").click()
     expect(page.locator("#no-lease")).to_be_visible()
     page.get_by_role("link", name="Costs, taxable value and contributions by FBT year").click()
     expect(page.locator("#fbt-nolease")).to_be_visible()          # no lease yet: a helpful message, not an error
-    page.get_by_role("link", name="Add a lease").click()
-    page.get_by_label("Financier").fill("Example Finance")
+    page.go_back()
+    page.click("#add-lease-top")
+    page.locator("#f-financier").fill("Example Finance")
     page.get_by_label("Lease start").fill((today - timedelta(days=60)).isoformat())
-    page.get_by_label("Lease end").fill((today + timedelta(days=1035)).isoformat())
+    page.locator("#f-end_date").fill((today + timedelta(days=1035)).isoformat())
     page.get_by_label("Term (months)").fill("36")
     page.get_by_label("Paid").select_option("fortnightly")
     page.get_by_label("Pre-tax part, per pay").fill("300")
     page.get_by_label("Post-tax part, per pay").fill("20")
     page.get_by_label("FBT base value").fill("62000")
-    page.get_by_label("Insurance").fill("1500")
     page.get_by_role("button", name="Add lease").click()
     page.wait_for_url(re.compile(r"msg=lease_added"))
     page.goto(UI + "new")                                        # an expense in the Insurance pool, today
@@ -1071,9 +1334,10 @@ def fbt_checks(page):
     expect(page.locator("#fbt-year")).to_have_text(f"FBT {year}–{(year + 1) % 100:02d}")
     body = page.inner_text("body")
     for shown in ("Taxable value", "Contribution required", "Expected by the end of the year", "$321.00",
-                  "not tax advice", "Running costs by pool"):
+                  "not tax advice", "Running costs"):
         assert shown in body, f"{shown!r} is not on the FBT report"
-    expect(page.locator("tr[data-pool=insurance]")).to_contain_text("$321.00")
+    expect(page.locator("#fbt-pools")).to_have_count(0)                  # budgets are off: costs by category only
+    expect(page.locator("#fbt-categories tr", has_text="Insurance")).to_contain_text("$321.00")
     expect(page.locator("#purchases")).to_contain_text("No purchases")
     expect(page.locator("#pool-total")).to_contain_text("$321.00")
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "sideways scroll on a phone"
@@ -1101,15 +1365,28 @@ def reminder_checks(page):
     page.wait_for_url(re.compile(r"msg=car_added"))
     car = page.locator(".car", has_text=MARKER)
     car_id = car.get_attribute("id").removeprefix("car-")
-    car.locator("summary", has_text="Odometer readings").click()
     from datetime import date, timedelta
-    car.locator("form[action$=\"/readings\"] input[name=date]").fill((date.today() - timedelta(days=3)).isoformat())   # before the expense below
-    car.locator("input[name=km]").fill("12,345")
-    car.get_by_role("button", name="Add reading").click()
-    page.wait_for_url(re.compile(r"msg=reading_added"))
+    page.goto(UI + "new")                                                             # the odometer comes from an expense
+    page.select_option("select[name=car_id]", label=MARKER)
+    page.wait_for_load_state("networkidle")
+    page.select_option("select[name=category_id]", label="Tyres")
+    page.fill("input[name=date]", (date.today() - timedelta(days=3)).isoformat())     # before the expense below
+    page.fill("input[name=amount]", "40")
+    page.fill("input[name=vendor]", MARKER)
+    page.fill("input[name=odometer_km]", "12,345")
+    page.click("button[type=submit].button")
+    page.wait_for_url(re.compile(r"msg=saved"))
 
     page.goto(UI + "reminders")
     page.select_option("#add-reminder select[name=car_id]", label=MARKER)
+    standard = page.locator("#standard-reminder select")                              # standard reminders, by the car's type
+    expect(standard).to_be_visible()
+    assert page.locator("#standard-reminder option", has_text="Engine oil").evaluate("o => o.disabled || o.hidden"), \
+        "a battery electric car shouldn't be offered an engine oil change"
+    standard.select_option(label="Tyre rotation")
+    expect(page.get_by_label("What is it for?")).to_have_value("Tyre rotation")
+    expect(page.get_by_label("Every (km)")).to_have_value("10000")
+    shot(page, "reminders-add-phone")
     page.get_by_label("What is it for?").fill(title)
     page.get_by_label("Category").select_option(label="Tyre rotation")
     page.get_by_label("At this odometer reading (km)").fill("12800")
@@ -1199,6 +1476,48 @@ def test_dashboard(page):
     expect(table_link).to_be_visible()
 
 
+def test_sold_panel(page, dash_page):
+    """The dashboard has a "Sold" panel only once some car is sold: the app rewrites the dashboard when a sale
+    is saved, and Grafana re-reads its provisioned files on an interval, so it can take a little while."""
+    page.goto(UI + "cars")
+    if page.locator(".car-sold").count():
+        raise Skip("a car in this stack is already sold")
+    dash_page.set_viewport_size({"width": 1600, "height": 2800})
+    url = GRAFANA + "d/garagebooks-tco/cost-of-ownership"
+    dash_page.goto(url)
+    expect(dash_page.get_by_text("Total cost", exact=True)).to_be_visible(timeout=30000)
+    dash_page.wait_for_timeout(2000)
+    assert dash_page.get_by_text("Sold", exact=True).count() == 0, "the Sold panel shows with no car sold"
+    try:
+        car = add_marked_car(page)
+        car.locator("summary", has_text="Sold this car?").click()
+        car.locator(".car-sale input[name=date]").fill("2020-01-02")
+        car.locator(".car-sale input[name=price]").fill("7500")
+        car.locator(".car-sale input[name=km]").fill("13000")
+        car.get_by_role("button", name="Save sale").click()
+        page.wait_for_url(re.compile(r"msg=car_sold"))
+        appeared = False
+        for _ in range(12):                              # Grafana looks at the file again every few seconds
+            dash_page.wait_for_timeout(8000)
+            dash_page.goto(url)
+            try:
+                expect(dash_page.get_by_text("Sold", exact=True).first).to_be_visible(timeout=8000)
+                appeared = True
+                break
+            except AssertionError:
+                continue
+        assert appeared, "the Sold panel didn't appear within two minutes of a sale"
+        shot(dash_page, "dashboard-sold")
+    finally:
+        page.goto(UI + "cars")                           # un-sell it, so the dashboard goes back to having no Sold panel
+        sold = page.locator(".car", has_text=MARKER)
+        if sold.locator(".car-sold").count():
+            sold.locator("summary", has_text="Sale").click()
+            sold.get_by_role("button", name="Clear sale").click()
+            page.wait_for_url(re.compile(r"msg=car_unsold"))
+        remove_marked(page)
+
+
 def main():
     with sync_playwright() as p:
         browser = p.chromium.launch()
@@ -1221,7 +1540,11 @@ def main():
         step("rows on a phone show whole dates, categories and amounts", test_rows_on_a_phone_show_whole_values, page)
         step("no sideways scroll on a phone", test_phone_layout_has_no_sideways_scroll, page)
         step("cars: TeslaMate's are listed, one is added by hand, read and deleted", test_cars_page, page)
+        step("cars: a car with no name is listed by make and model, bought and sold details", test_car_without_a_name, page)
         step("lease: add from a statement, see the figures, edit, delete", test_lease_page, page)
+        step("lease: associate lease hides financier and residual, end follows the term", test_lease_associate, page)
+        step("lease: a lease form PDF fills the boxes, documents are kept", test_lease_form_import, page)
+        step("lease: several periods, the others folded", test_lease_periods, page)
         step("reminders: add, see them due, resolve from an expense, next one made, reopen",
              test_reminders, page)
         step("FBT year report: taxable value, costs by pool, year links", test_fbt_report, page)
@@ -1251,6 +1574,7 @@ def main():
         desktop = browser.new_context(viewport={"width": 1280, "height": 900}, device_scale_factor=2)
         dash_page = desktop.new_page()
         step("dashboard renders with data and invoice links", test_dashboard, dash_page)
+        step("dashboard: the Sold panel appears once a car is sold", test_sold_panel, page, dash_page)
         step("history page at desktop width, light and dark", test_history_desktop, desktop.new_page())
         step("payment calculator on a desktop", test_payment_calculator_on_a_desktop, desktop.new_page())
         step("header is one row on a desktop", test_header_on_a_desktop, desktop.new_page())

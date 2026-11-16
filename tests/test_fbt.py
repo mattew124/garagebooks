@@ -13,7 +13,7 @@ from psycopg.rows import dict_row
 
 from garagebooks import dashboard, lease, sources
 from tests.conftest import ROOT, TESLAMATE
-from tests.test_lease import ORIGIN, app, connect, good_form, start, today_here  # noqa: F401 - app is a fixture
+from tests.test_lease import ORIGIN, app, budgets_on, connect, good_form, start, today_here  # noqa: F401 - app is a fixture
 from tests.test_sources import STAND_IN, category, queries, runnable
 
 
@@ -259,6 +259,7 @@ def test_the_lease_page_links_to_the_report(app):
 
 def test_the_report_groups_costs_by_pool_and_keeps_what_is_not_in_one(app):
     client, url, car_id = app
+    budgets_on(url)
     add_lease(client, car_id)
     with connect(url) as conn:
         expense(conn, car_id, "Insurance", "2025-11-10T00:00+10", 1200)
@@ -342,7 +343,8 @@ def test_two_leases_in_one_year_add_their_days_and_taxable_values(app):
 
 
 def test_the_budget_for_each_pool_is_shown_pro_rated_for_reference(app):
-    client, _, car_id = app
+    client, url, car_id = app
+    budgets_on(url)
     add_lease(client, car_id, budget_tyres="730", budget_insurance="")
     body = client.get(f"/cars/{car_id}/fbt?year=2025").data.decode()
     assert "$364.00" in pool_line(body, "tyres")                                # 730 x 182 / 365
@@ -371,6 +373,7 @@ def test_charging_cost_can_leave_out_what_was_entered_by_hand(empty_db, monkeypa
 
 def test_a_car_by_hand_has_no_teslamate_line_in_the_charging_pool(app):
     client, url, car_id = app
+    budgets_on(url)
     add_lease(client, car_id)
     with connect(url) as conn:
         expense(conn, car_id, "Charging", "2026-01-05T00:00+10", 40)
@@ -391,6 +394,7 @@ def tessie(url, monkeypatch):
 
 def test_teslamates_charging_is_added_to_the_fuel_or_charging_pool(empty_db, monkeypatch):
     client, car_id = tessie(empty_db, monkeypatch)
+    budgets_on(empty_db)
     add_lease(client, car_id)
     with connect(empty_db) as conn:
         expense(conn, car_id, "Charging", "2026-01-05T00:00+10", 40)            # entered by hand, counted once
@@ -403,6 +407,7 @@ def test_teslamates_charging_is_added_to_the_fuel_or_charging_pool(empty_db, mon
 
 def test_when_teslamate_cannot_answer_the_charging_pool_and_the_totals_are_unavailable(empty_db, monkeypatch):
     client, car_id = tessie(empty_db, monkeypatch)
+    budgets_on(empty_db)
     add_lease(client, car_id)
     with connect(empty_db) as conn:
         expense(conn, car_id, "Insurance", "2026-02-10T00:00+10", 100)
@@ -471,3 +476,46 @@ def test_every_panel_query_still_runs_with_the_new_one(empty_db, monkeypatch):
     with connect(empty_db) as conn:
         for sql in queries(dash):
             conn.execute(runnable(sql)).fetchall()
+
+
+# ---- with lease budgets turned off (the default) --------------------------------------------------------
+
+def test_with_budgets_off_the_report_lists_costs_by_category_and_has_no_budget_column(app):
+    client, url, car_id = app
+    add_lease(client, car_id)
+    with connect(url) as conn:
+        expense(conn, car_id, "Insurance", "2025-11-10T00:00+10", 1200)
+        expense(conn, car_id, "Insurance", "2026-02-10T00:00+10", 30)
+        expense(conn, car_id, "Tyres", "2025-12-01T00:00+10", 800)
+        expense(conn, car_id, "Insurance", "2026-04-02T00:00+10", 999)          # the next FBT year
+    page = client.get(f"/cars/{car_id}/fbt?year=2025")
+    body, shown = page.data.decode(), text(page)
+    assert 'id="fbt-categories"' in body and 'id="fbt-pools"' not in body and "data-pool=" not in body
+    table = re.search(r'id="fbt-categories".*?</table>', body, re.S).group(0)
+    rows = {text_of(r[0]).strip(): text_of(r[1]).strip() for r in re.findall(r"<tr><td>(.*?)</td><td[^>]*>(.*?)</td></tr>", table, re.S)}
+    assert rows == {"Insurance": "$1,230.00", "Tyres": "$800.00"}
+    assert "$2,030.00" in total_line(body) and "$999.00" not in shown
+    assert "Budget" not in table and "budget" not in shown.lower() and "pool" not in shown.lower()
+    assert "Running costs" in shown and "$62,000.00" not in total_line(body)
+
+
+def test_with_budgets_off_a_year_without_costs_says_so_and_budgets_already_entered_stay_out_of_the_report(app):
+    client, url, car_id = app
+    budgets_on(url)
+    add_lease(client, car_id, budget_tyres="730")
+    budgets_on(url, False)
+    body = client.get(f"/cars/{car_id}/fbt?year=2025").data.decode()
+    assert "No running costs in this FBT year." in body and "$364.00" not in body and 'id="fbt-pools"' not in body
+    budgets_on(url)
+    assert "$364.00" in pool_line(client.get(f"/cars/{car_id}/fbt?year=2025").data.decode(), "tyres")      # back when turned on
+
+
+def test_with_budgets_off_teslamates_charging_is_still_listed(empty_db, monkeypatch):
+    client, car_id = tessie(empty_db, monkeypatch)
+    add_lease(client, car_id)
+    with connect(empty_db) as conn:
+        expense(conn, car_id, "Charging", "2026-01-05T00:00+10", 40)
+    body = client.get(f"/cars/{car_id}/fbt?year=2025").data.decode()
+    assert 'id="fbt-categories"' in body and 'id="teslamate-charging"' in body
+    assert "$12.50" in text_of(re.search(r'id="teslamate-charging".*?</tr>', body, re.S).group(0))
+    assert "$40.00" in text_of(re.search(r'id="fbt-categories".*?</table>', body, re.S).group(0))

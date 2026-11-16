@@ -2,17 +2,20 @@
 category-to-pool mapping, the least-privilege role and the figures shown beside an entry.
 All figures are invented. Runs on a database with no TeslaMate, so it passes both ways."""
 
+import io
 import re
 from datetime import date, timedelta
 from datetime import datetime
 from decimal import Decimal
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import psycopg
 import pytest
 from psycopg.rows import dict_row
 
-from garagebooks import create_app, db, lease, validation
+from garagebooks import create_app, db, invoices, lease, validation
+from tests.test_validation import PDF
 
 def today_here():
     """Today as the app sees it (APP_TZ, which these tests set to Brisbane), not the runner's UTC date."""
@@ -45,6 +48,12 @@ def app(empty_db, monkeypatch):
     return client, empty_db, car_id
 
 
+def budgets_on(url, on=True):
+    """Turn the lease budgets setting on (it is off by default): each test has its own database."""
+    with connect(url) as conn:
+        conn.execute("UPDATE garagebooks.setting SET lease_budgets = %s", (on,))
+
+
 def good_form(**over):
     today = today_here()
     data = {"financier": "Example Finance", "package_name": "Example package",
@@ -71,6 +80,7 @@ def add(client, car_id, **over):
 def test_the_schema_can_be_applied_twice_and_keeps_a_lease(empty_db, monkeypatch):
     client = start(empty_db, monkeypatch)
     client.post("/cars", data={"name": "Car", "kind": "BEV"}, headers=ORIGIN)
+    budgets_on(empty_db)
     with connect(empty_db) as conn:
         car_id = conn.execute("SELECT id FROM garagebooks.car").fetchone()["id"]
     assert add(client, car_id).status_code == 303
@@ -173,9 +183,9 @@ def test_a_statement_parses():
 @pytest.mark.parametrize("field, value, shown", [
     ("financier", "", "financier"), ("financier", "x" * 101, "too long"),
     ("start_date", "", "start date"), ("start_date", "2026-02-30", "isn't valid"),
-    ("end_date", "", "end date"), ("end_date", "nope", "isn't valid"),
+    ("end_date", "nope", "isn't valid"),
     ("refinance_date", "2026-13-01", "isn't valid"),
-    ("term_months", "", "term"), ("term_months", "0", "term"), ("term_months", "121", "term"), ("term_months", "x", "term"),
+    ("term_months", "0", "term"), ("term_months", "121", "term"), ("term_months", "x", "term"),
     ("pay_frequency", "", "how often"), ("pay_frequency", "daily", "how often"),
     ("pretax_payment", "abc", "number"), ("pretax_payment", "-5", "negative"),
     ("posttax_payment", "-5", "negative"), ("admin_fee", "-1", "negative"), ("admin_fee", "lots", "number"),
@@ -189,6 +199,17 @@ def test_a_statement_parses():
 def test_every_field_is_checked(field, value, shown):
     _values, errors = parse(**{field: value})
     assert field in errors and shown in errors[field].lower().replace("’", "'")
+
+
+def test_the_end_date_and_the_term_fill_each_other_in_but_one_of_them_is_needed():
+    values, errors = parse(end_date="", term_months="36", start_date="2026-01-01")
+    assert errors == {} and values["end_date"] == date(2028, 12, 31) and values["term_months"] == 36
+    values, errors = parse(end_date="2028-12-31", term_months="", start_date="2026-01-01")
+    assert errors == {} and values["term_months"] == 36 and values["end_date"] == date(2028, 12, 31)
+    _values, errors = parse(end_date="", term_months="")
+    assert "end date" in errors["end_date"]
+    _values, errors = parse(end_date="", term_months="", start_date="")
+    assert "start_date" in errors and "term_months" not in errors
 
 
 def test_dates_must_run_the_right_way_round():
@@ -294,6 +315,7 @@ def test_a_car_without_a_lease_says_so_and_offers_to_add_one(app):
 
 def test_add_shows_the_lease_with_its_figures(app):
     client, url, car_id = app
+    budgets_on(url)
     resp = add(client, car_id)
     assert resp.status_code == 303 and resp.headers["Location"].endswith(f"/cars/{car_id}/lease?msg=lease_added")
     page = client.get(f"/cars/{car_id}/lease?msg=lease_added").data.decode()
@@ -333,7 +355,7 @@ def test_overlapping_leases_are_refused_but_a_refinance_from_the_next_day_is_not
 
 
 def test_past_and_next_leases_are_listed_below_the_current_one(app):
-    client, _url, car_id = app
+    client, url, car_id = app
     today = today_here()
     add(client, car_id, financier="Old Finance", start_date=(today - timedelta(days=2000)).isoformat(),
         end_date=(today - timedelta(days=400)).isoformat())
@@ -341,12 +363,13 @@ def test_past_and_next_leases_are_listed_below_the_current_one(app):
         end_date=(today + timedelta(days=500)).isoformat())
     page = client.get(f"/cars/{car_id}/lease").data.decode()
     assert page.index("Current Finance") < page.index("Old Finance")
-    assert "Other leases" in page and "Ended 400 days ago" in page and "500</strong> days remaining" in page
+    assert "Other lease periods" in page and "Ended 400 days ago" in page and "500</strong> days remaining" in page
     assert page.count('data-confirm="Delete this lease') == 2
 
 
 def test_edit_changes_the_lease_and_its_first_budgets_only(app):
     client, url, car_id = app
+    budgets_on(url)
     add(client, car_id)
     with connect(url) as conn:
         row = conn.execute("SELECT id, start_date FROM garagebooks.lease").fetchone()
@@ -405,6 +428,7 @@ def test_delete_removes_the_lease_and_its_budgets(app):
 def test_reading_functions(app):
     client, url, car_id = app
     today = today_here()
+    budgets_on(url)
     add(client, car_id)
     with connect(url) as conn:
         assert db.current_lease(conn, car_id, today)["financier"] == "Example Finance"
@@ -418,6 +442,7 @@ def test_reading_functions(app):
 
 def test_a_category_can_be_given_a_pool_and_cleared(app):
     client, url, _car = app
+    budgets_on(url)
     with connect(url) as conn:
         cat = conn.execute("SELECT id FROM garagebooks.category WHERE name = 'Tyres'").fetchone()["id"]
     page = client.get("/categories").data.decode()
@@ -448,3 +473,340 @@ def test_the_restricted_role_can_use_leases_and_pools(pg, admin):
             conn.execute("UPDATE garagebooks.category SET name = 'x' WHERE name = 'Insurance'")
         conn.execute("DELETE FROM garagebooks.lease WHERE id = %s", (lease_id,))
     assert pg.provision().returncode == 0          # and provisioning again is safe
+
+
+# ---- lease budgets are optional (Settings) -------------------------------------------------------
+
+def count(url, table):
+    with connect(url) as conn:
+        return conn.execute(f"SELECT count(*) AS n FROM garagebooks.{table}").fetchone()["n"]
+
+
+def test_lease_budgets_are_off_until_turned_on_in_settings(app):
+    client, url, _car = app
+    with connect(url) as conn:
+        assert db.lease_budgets_on(conn) is False and db.get_settings(conn)["lease_budgets"] is False
+    assert 'name="lease_budgets"' in client.get("/settings").data.decode()
+    assert 'name="lease_budgets" value="1" checked' not in client.get("/settings").data.decode()
+    assert client.post("/settings", data={"app_url": "", "grafana_url": "", "lease_budgets": "1"}, headers=ORIGIN).status_code == 303
+    with connect(url) as conn:
+        assert db.lease_budgets_on(conn) is True
+    assert "checked" in re.search(r'<input[^>]*name="lease_budgets"[^>]*>', client.get("/settings").data.decode()).group(0)
+    assert client.post("/settings", data={"app_url": "", "grafana_url": ""}, headers=ORIGIN).status_code == 303   # unticked
+    with connect(url) as conn:
+        assert db.lease_budgets_on(conn) is False
+
+
+def test_with_budgets_off_the_lease_form_has_no_budget_boxes_and_what_is_posted_is_ignored(app):
+    client, url, car_id = app
+    form = client.get(f"/cars/{car_id}/lease/new").data.decode()
+    assert "budget_tyres" not in form and "Yearly budgets" not in form
+    assert add(client, car_id).status_code == 303                 # good_form still carries budget_* values
+    assert count(url, "lease") == 1 and count(url, "lease_budget") == 0
+    page = client.get(f"/cars/{car_id}/lease").data.decode()
+    assert "Yearly budgets" not in page and "No budgets entered" not in page and "$13,050.00" not in page
+    with connect(url) as conn:
+        lease_id = conn.execute("SELECT id FROM garagebooks.lease").fetchone()["id"]
+    assert "budget_tyres" not in client.get(f"/cars/{car_id}/lease/{lease_id}/edit").data.decode()
+
+
+def test_parsing_with_budgets_off_leaves_them_out_and_with_them_on_reads_them():
+    off = validation.parse_lease_form(good_form(budget_tyres="-5"), lease.POOLS, lease.FREQUENCIES, lease.FBT_METHODS,
+                                      lease.TAX_TREATMENTS, budgets_on=False)
+    assert off[1] == {} and off[0]["budgets"] is None                   # not even a mistake in them is reported
+    on, errors = validation.parse_lease_form(good_form(), lease.POOLS, lease.FREQUENCIES, lease.FBT_METHODS,
+                                             lease.TAX_TREATMENTS, budgets_on=True)
+    assert errors == {} and on["budgets"]["lease"] == Decimal("8450.00")
+
+
+def test_editing_with_budgets_off_keeps_the_saved_budgets_and_moves_them_with_the_start_date(app):
+    client, url, car_id = app
+    budgets_on(url)
+    add(client, car_id)
+    budgets_on(url, False)
+    with connect(url) as conn:
+        row = conn.execute("SELECT id, start_date FROM garagebooks.lease").fetchone()
+        later = row["start_date"] + timedelta(days=400)
+        conn.execute("INSERT INTO garagebooks.lease_budget VALUES (%s, 'tyres', 650, %s)", (row["id"], later))
+    new_start = row["start_date"] + timedelta(days=10)
+    resp = client.post(f"/cars/{car_id}/lease/{row['id']}/edit", headers=ORIGIN,
+                       data=good_form(start_date=new_start.isoformat(), budget_tyres="1", budget_lease=""))
+    assert resp.status_code == 303
+    with connect(url) as conn:
+        budgets = {(b["pool"], b["effective_from"]): b["yearly_amount"] for b in conn.execute("SELECT * FROM garagebooks.lease_budget")}
+    assert len(budgets) == 7                                            # none dropped, none added
+    assert budgets[("tyres", new_start)] == 400 and budgets[("lease", new_start)] == Decimal("8450.00")   # as saved, now from the new start
+    assert budgets[("tyres", later)] == 650
+    assert all(start in (new_start, later) for _pool, start in budgets)
+    budgets_on(url)                                                     # turned on again: they are all there
+    assert "$13,050.00" in client.get(f"/cars/{car_id}/lease").data.decode()
+
+
+def test_with_budgets_off_the_categories_page_has_no_pool_selectors(app):
+    client, url, _car = app
+    page = client.get("/categories").data.decode()
+    assert "Lease budget pool" not in page and 'name="budget_pool"' not in page and "yearly budget" not in page
+    budgets_on(url)
+    page = client.get("/categories").data.decode()
+    assert "Lease budget pool" in page and 'name="budget_pool"' in page and "yearly budget" in page
+
+
+# ---- associate leases, the end date and the term ----------------------------------------------------
+
+def associate_form(**over):
+    return good_form(**{"associate_lease": "on", "financier": "", "residual_amount": "30000", "residual_percent": "", **over})
+
+
+def test_an_associate_lease_needs_no_financier_and_keeps_no_residual(app):
+    client, url, car_id = app
+    assert add(client, car_id, financier="").status_code == 400            # a financier is needed otherwise
+    resp = client.post(f"/cars/{car_id}/lease/new", data=associate_form(), headers=ORIGIN)
+    assert resp.status_code == 303
+    with connect(url) as conn:
+        row = conn.execute("SELECT * FROM garagebooks.lease").fetchone()
+    assert row["associate_lease"] is True and row["financier"] is None
+    assert row["residual_amount"] is None and row["residual_percent"] is None
+    page = client.get(f"/cars/{car_id}/lease").data.decode()
+    assert "Associate lease" in page and "Residual" not in page and "ATO minimum residual" not in page
+    assert "Financier" not in page and "Example package" in page
+    form = client.get(f"/cars/{car_id}/lease/{row['id']}/edit").data.decode()
+    assert re.search(r'name="associate_lease"\s+checked|checked[^>]*name="associate_lease"|name="associate_lease"[^>]*checked', form)
+
+
+def test_an_associate_lease_ignores_residual_mistakes_in_the_hidden_boxes():
+    values, errors = validation.parse_lease_form(
+        associate_form(residual_amount="999999999", residual_percent="500"), lease.POOLS, lease.FREQUENCIES,
+        lease.FBT_METHODS, lease.TAX_TREATMENTS)
+    assert errors == {} and values["residual_amount"] is None and values["residual_percent"] is None and values["financier"] is None
+
+
+def test_a_lease_without_a_financier_can_be_saved_in_the_database(app):
+    _client, url, _car = app
+    with connect(url) as conn:
+        conn.execute(lease_sql(financier="NULL"))
+    with connect(url) as conn:
+        with pytest.raises(psycopg.errors.CheckViolation):
+            conn.execute(lease_sql(financier="' '", start_date="'2030-01-01'", end_date="'2033-01-01'"))   # blank still refused
+
+
+def test_the_end_date_is_filled_from_the_start_and_the_term_and_the_term_from_the_dates(app):
+    client, url, car_id = app
+    assert add(client, car_id, start_date="2026-01-01", end_date="", term_months="24").status_code == 303
+    assert add(client, car_id, start_date="2028-03-15", end_date="2031-03-14", term_months="").status_code == 303
+    with connect(url) as conn:
+        rows = conn.execute("SELECT start_date, end_date, term_months FROM garagebooks.lease ORDER BY start_date").fetchall()
+    assert (rows[0]["end_date"], rows[0]["term_months"]) == (date(2027, 12, 31), 24)
+    assert (rows[1]["end_date"], rows[1]["term_months"]) == (date(2031, 3, 14), 36)
+    refused = add(client, car_id, start_date="2040-01-01", end_date="", term_months="")
+    assert refused.status_code == 400 and "end date, or the term" in refused.data.decode()
+    assert add(client, car_id, start_date="2040-01-01", end_date="", term_months="121").status_code == 400
+
+
+def test_the_new_lease_page_does_not_guess_the_start_date(app):
+    client, _url, car_id = app
+    page = client.get(f"/cars/{car_id}/lease/new").data.decode()
+    assert re.search(r'id="f-start_date"[^>]*value=""', page, re.S)
+    assert 'data-prefill-url="/api/lease-prefill"' in page and 'name="form_file"' in page and 'name="agreement_file"' in page
+    assert 'value="20"' in page and "statutory" in page            # the other defaults remain
+
+
+# ---- documents kept with a lease -------------------------------------------------------------------------
+
+def test_documents_can_be_linked_shown_and_removed(app):
+    client, url, car_id = app
+    assert add(client, car_id, form_url="https://files.example.test/form.pdf",
+               agreement_url="https://files.example.test/agreement.pdf").status_code == 303
+    page = client.get(f"/cars/{car_id}/lease").data.decode()
+    assert 'href="https://files.example.test/form.pdf"' in page and 'href="https://files.example.test/agreement.pdf"' in page
+    assert "Lease form" in page and "Lease agreement" in page and 'data-document="form"' in page
+    with connect(url) as conn:
+        lease_id = conn.execute("SELECT id FROM garagebooks.lease").fetchone()["id"]
+    edit = client.get(f"/cars/{car_id}/lease/{lease_id}/edit").data.decode()
+    assert 'value="https://files.example.test/form.pdf"' in edit and 'name="remove_form"' in edit
+    resp = client.post(f"/cars/{car_id}/lease/{lease_id}/edit", headers=ORIGIN, data=good_form(
+        form_url="https://files.example.test/form.pdf", agreement_url="https://files.example.test/agreement.pdf", remove_form="1"))
+    assert resp.status_code == 303
+    with connect(url) as conn:
+        row = conn.execute("SELECT form_url, form_path, agreement_url FROM garagebooks.lease").fetchone()
+    assert row["form_url"] is None and row["form_path"] is None and row["agreement_url"] == "https://files.example.test/agreement.pdf"
+    page = client.get(f"/cars/{car_id}/lease").data.decode()
+    assert 'data-document="form"' not in page and 'data-document="agreement"' in page
+
+
+def test_a_document_link_that_is_not_https_is_refused(app):
+    client, url, car_id = app
+    for field in ("form_url", "agreement_url"):
+        resp = add(client, car_id, **{field: "javascript:alert(1)"})
+        assert resp.status_code == 400
+    assert count(url, "lease") == 0
+    assert add(client, car_id, form_path="/../outside.pdf").status_code == 400
+    assert add(client, car_id, form_path="/Cars/x/Lease/form.pdf").status_code == 303
+
+
+def test_the_database_refuses_a_document_that_is_not_a_link_or_a_path(app):
+    _client, url, _car = app
+    with connect(url) as conn:
+        for bad in ({"form_url": "'http://insecure.example.test/a.pdf'"}, {"agreement_url": "'not a link'"},
+                    {"form_path": "'relative.pdf'"}, {"agreement_path": "'/'"}):
+            with pytest.raises(psycopg.errors.CheckViolation):
+                conn.execute(lease_sql(**bad))
+
+
+@pytest.fixture()
+def folder(empty_db, monkeypatch, tmp_path):
+    """The app with INVOICES_DIR set and a folder for the car, in the temporary directory."""
+    root = tmp_path / "invoices"
+    (root / "Cars" / "Lease car").mkdir(parents=True)
+    monkeypatch.setenv("INVOICES_DIR", str(root))
+    client = start(empty_db, monkeypatch)
+    client.post("/cars", data={"name": "Lease car", "kind": "BEV"}, headers=ORIGIN)
+    with connect(empty_db) as conn:
+        car_id = conn.execute("SELECT id FROM garagebooks.car").fetchone()["id"]
+    return client, empty_db, car_id, root
+
+
+def choose_folder(client, car_id):
+    assert client.post(f"/local/folders/{car_id}", data={"folder_id": "/Cars/Lease car"}, headers=ORIGIN).status_code == 303
+
+
+def pdf_upload(name="form.pdf", content=PDF):
+    return (io.BytesIO(content), name, "application/pdf")
+
+
+def lease_files(root):
+    return sorted(p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file() and p.name != ".garagebooks")
+
+
+def test_uploaded_lease_documents_go_to_the_lease_folder_of_the_cars_folder(folder):
+    client, url, car_id, root = folder
+    choose_folder(client, car_id)
+    assert "Choose from the invoice folder" in client.get(f"/cars/{car_id}/lease/new").data.decode()
+    resp = client.post(f"/cars/{car_id}/lease/new", headers=ORIGIN, content_type="multipart/form-data",
+                       data={**good_form(), "form_file": pdf_upload("a.pdf"), "agreement_file": pdf_upload("b.pdf", PDF + b"2")})
+    assert resp.status_code == 303 and resp.headers["Location"].endswith("msg=lease_added")
+    saved = lease_files(root)
+    assert len(saved) == 2 and all(f.startswith("Cars/Lease car/Lease/") and f.endswith(".pdf") for f in saved)
+    with connect(url) as conn:
+        row = conn.execute("SELECT form_path, form_url, agreement_path, agreement_url FROM garagebooks.lease").fetchone()
+    assert row["form_url"] is None and row["agreement_url"] is None
+    assert row["form_path"].startswith("/Cars/Lease car/Lease/") and "Lease form" in row["form_path"]
+    assert row["agreement_path"].startswith("/Cars/Lease car/Lease/") and "Lease agreement" in row["agreement_path"]
+    page = client.get(f"/cars/{car_id}/lease").data.decode()
+    assert "/local/file?path=" in page and "Lease form" in page
+    link = re.search(r'href="(/local/file\?path=[^"]+)"', page).group(1)
+    served = client.get(link.replace("&amp;", "&"))
+    assert served.status_code == 200 and served.data.startswith(b"%PDF")
+
+
+def test_a_lease_saved_without_a_folder_says_the_pdf_was_not_kept(folder):
+    client, url, car_id, root = folder                                 # no folder chosen for the car
+    resp = client.post(f"/cars/{car_id}/lease/new", headers=ORIGIN, content_type="multipart/form-data",
+                       data={**good_form(), "form_file": pdf_upload()})
+    assert resp.status_code == 303 and resp.headers["Location"].endswith("msg=lease_added_not_uploaded")
+    assert "The PDF wasn't kept" in client.get(resp.headers["Location"]).data.decode().replace("&#39;", "'")
+    assert count(url, "lease") == 1 and lease_files(root) == []
+    with connect(url) as conn:
+        lease_id = conn.execute("SELECT id FROM garagebooks.lease").fetchone()["id"]
+    again = client.post(f"/cars/{car_id}/lease/{lease_id}/edit", headers=ORIGIN, content_type="multipart/form-data",
+                        data={**good_form(), "agreement_file": pdf_upload()})
+    assert again.headers["Location"].endswith("msg=lease_saved_not_uploaded")
+
+
+def test_a_lease_document_that_is_not_a_pdf_is_refused_and_nothing_is_saved(folder):
+    client, url, car_id, root = folder
+    choose_folder(client, car_id)
+    resp = client.post(f"/cars/{car_id}/lease/new", headers=ORIGIN, content_type="multipart/form-data",
+                       data={**good_form(), "form_file": pdf_upload("notes.pdf", b"just text")})
+    assert resp.status_code == 400 and 'aria-describedby="e-form_file"' in resp.data.decode()
+    assert count(url, "lease") == 0 and lease_files(root) == []
+    bad = client.post(f"/cars/{car_id}/lease/new", headers=ORIGIN, content_type="multipart/form-data",
+                      data={**good_form(admin_fee="-1"), "agreement_file": pdf_upload("b.pdf")})
+    assert bad.status_code == 400 and "choose the PDF again" in bad.data.decode()
+    assert lease_files(root) == []                                      # not saved while the form has a mistake
+
+
+# ---- reading a lease form ---------------------------------------------------------------------------------
+
+FORM_TEXT = (Path(__file__).parent / "fixtures" / "associate-lease-form.txt").read_text()
+
+
+def prefill(client, content=PDF, name="form.pdf", **extra):
+    data = {**extra}
+    if content is not None:
+        data["form_file"] = pdf_upload(name, content)
+    return client.post("/api/lease-prefill", data=data, headers=ORIGIN, content_type="multipart/form-data")
+
+
+def test_a_lease_form_is_read_into_the_forms_fields(app, monkeypatch):
+    client, url, _car = app
+    monkeypatch.setattr(invoices, "extract_text", lambda pdf: FORM_TEXT)
+    budgets_on(url)
+    resp = prefill(client)
+    assert resp.status_code == 200
+    fields = resp.get_json()["fields"]
+    assert fields["associate_lease"] is True and fields["start_date"] == "2026-07-01" and fields["end_date"] == "2028-06-30"
+    assert fields["term_months"] == "24" and fields["pay_frequency"] == "fortnightly" and fields["pretax_payment"] == "500.00"
+    assert fields["budget_lease"] == "13000.00" and fields["budget_insurance"] == "1150.00"
+    for private in ("Alex", "Sample", "0400", "000AAA"):
+        assert private not in resp.get_data(as_text=True)
+
+
+def test_budgets_are_left_out_of_a_read_lease_form_while_the_setting_is_off(app, monkeypatch):
+    client, _url, _car = app
+    monkeypatch.setattr(invoices, "extract_text", lambda pdf: FORM_TEXT)
+    fields = prefill(client).get_json()["fields"]
+    assert not [k for k in fields if k.startswith("budget_")] and fields["fbt_base_value"] == "61000.00"
+
+
+def test_a_pdf_that_is_not_a_lease_form_gives_no_fields_and_a_bad_request_is_refused(app, monkeypatch):
+    client, _url, _car = app
+    monkeypatch.setattr(invoices, "extract_text", lambda pdf: "Tax invoice\nTotal $10.00\n")
+    assert prefill(client).get_json() == {"fields": {}}
+    assert prefill(client, content=None).status_code == 400                     # nothing chosen
+    assert prefill(client, content=b"not a pdf").status_code == 400
+    assert client.post("/api/lease-prefill", data={}, headers={"Origin": "http://evil.example.test"}).status_code in (400, 403)
+    assert client.get("/api/lease-prefill").status_code == 405
+
+
+def test_a_lease_form_in_the_invoice_folder_can_be_read_without_uploading_it(folder, monkeypatch):
+    client, _url, car_id, root = folder
+    choose_folder(client, car_id)
+    (root / "Cars" / "Lease car" / "form.pdf").write_bytes(PDF)
+    monkeypatch.setattr(invoices, "extract_text", lambda pdf: FORM_TEXT)
+    resp = client.post("/api/lease-prefill", headers=ORIGIN, data={"local_id": "/Cars/Lease car/form.pdf", "name": "form.pdf"})
+    assert resp.status_code == 200 and resp.get_json()["fields"]["start_date"] == "2026-07-01"
+    gone = client.post("/api/lease-prefill", headers=ORIGIN, data={"local_id": "/Cars/Lease car/gone.pdf", "name": "gone.pdf"})
+    assert gone.status_code == 502 and "error" in gone.get_json()
+
+
+# ---- several lease periods ----------------------------------------------------------------------------------
+
+def test_a_car_can_hold_three_lease_periods_each_with_its_own_documents(app):
+    client, url, car_id = app
+    today = today_here()
+    periods = [(today - timedelta(days=1500), today - timedelta(days=801)), (today - timedelta(days=800), today + timedelta(days=100)),
+               (today + timedelta(days=101), today + timedelta(days=900))]
+    for n, (start, end) in enumerate(periods, 1):
+        resp = add(client, car_id, financier=f"Finance {n}", start_date=start.isoformat(), end_date=end.isoformat(),
+                   form_url=f"https://files.example.test/form-{n}.pdf", agreement_url=f"https://files.example.test/agreement-{n}.pdf")
+        assert resp.status_code == 303
+    assert add(client, car_id, start_date=(today - timedelta(days=900)).isoformat(),
+               end_date=(today - timedelta(days=700)).isoformat()).status_code == 400          # overlaps: still refused
+    with connect(url) as conn:
+        rows = conn.execute("SELECT financier, form_url, agreement_url FROM garagebooks.lease ORDER BY start_date").fetchall()
+    assert [(r["form_url"], r["agreement_url"]) for r in rows] == [
+        (f"https://files.example.test/form-{n}.pdf", f"https://files.example.test/agreement-{n}.pdf") for n in (1, 2, 3)]
+    page = client.get(f"/cars/{car_id}/lease").data.decode()
+    assert "Other lease periods" in page and 'id="add-lease-top"' in page
+    assert len(re.findall(r'<details class="lease-period"', page)) == 2
+    assert page.count("Current lease") >= 1 and page.count("Add a lease</a>") == 1       # the bottom button, with a lease present
+    for n in (1, 2, 3):
+        assert f'href="https://files.example.test/form-{n}.pdf"' in page and f'href="https://files.example.test/agreement-{n}.pdf"' in page
+    assert page.index("Finance 2") < page.index("Finance 1")                              # current first
+
+
+def test_the_page_offers_one_add_button_while_the_car_has_no_lease(app):
+    client, _url, car_id = app
+    page = client.get(f"/cars/{car_id}/lease").data.decode()
+    assert 'id="add-lease-top"' in page and "Add a lease period" in page and "Add a lease</a>" not in page
+    assert "<details" not in page
