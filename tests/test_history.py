@@ -95,6 +95,7 @@ def test_the_schema_can_be_applied_again_and_keeps_the_log(admin):
 
 # ---- upgrade, and the least-privilege role -------------------------------------
 
+@pytest.mark.teslamate   # the old schema pointed at TeslaMate's cars
 def test_an_old_install_starts_logging_after_the_upgrade(blank_db, monkeypatch):
     old_install(blank_db)
     monkeypatch.setenv("DATABASE_URL", blank_db)

@@ -12,6 +12,9 @@ import pytest
 
 from tests.test_dev_stack import ROOT
 
+# TODO(after T1): these dump and restore a TeslaMate database; make them work on plain PostgreSQL too.
+pytestmark = pytest.mark.teslamate
+
 SCRIPT = ROOT / "scripts" / "backup.sh"
 SCHEMA = (ROOT / "garagebooks" / "schema.sql").read_text()
 KEY = "dGVzdC1rZXktdGhhdC1tdXN0LW5ldmVyLWFwcGVhci0xMjM0NTY="

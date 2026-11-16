@@ -142,6 +142,8 @@ def admin(pg):
         if TESLAMATE:
             conn.execute("TRUNCATE positions, charging_processes RESTART IDENTITY CASCADE")   # CASCADE: real TeslaMate tables (drives...) reference them
         conn.execute("DELETE FROM garagebooks.car WHERE id <> 1")
+        if not TESLAMATE:
+            conn.execute(OWN_CAR)       # a test may have deleted it
         conn.execute("UPDATE garagebooks.car SET name = 'Test car', kind = 'BEV', name_from_teslamate = %s WHERE id = 1",
                      (TESLAMATE,))
         conn.execute("SELECT garagebooks.build_ownership(true)")
