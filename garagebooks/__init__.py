@@ -22,7 +22,7 @@ from flask import (Flask, abort, g, has_request_context, jsonify, make_response,
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from . import dashboard, db, docinfo, icons, invoices, jobs, lease, leaseform, logs, onedrive, reminders, sources, storage, updates, validation
+from . import dashboard, db, docinfo, icons, invoices, jobs, jobtext, lease, leaseform, logs, onedrive, reminders, sources, storage, updates, validation
 
 log = logging.getLogger("garagebooks.app")
 
@@ -303,6 +303,9 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
     @app.template_filter("when")
     def when(value):
         return value.astimezone(ZoneInfo(tz)).strftime("%d %b %Y %H:%M")
+
+    app.jinja_env.filters["every"] = jobtext.every_in_words
+    app.jinja_env.filters["job_state"] = jobtext.state
 
     @app.template_filter("isodate")
     def isodate(value):
@@ -1975,7 +1978,10 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         else:
             with connect() as conn:
                 values = db.get_settings(conn)
+        with connect() as conn:
+            job_list = scheduler.status(conn)
         return render_template("settings.html", values=values, errors=errors, aliases=validation.NAME_ALIASES,
+                               job_list=job_list, jobs_mode=jobs_mode,
                                date_default=validation.DEFAULT_DATE_PATTERN, name_default=validation.DEFAULT_NAME_FORMAT,
                                multi_choices=validation.MULTI_AMOUNT_CHOICES, example=name_example(values),
                                message=MESSAGES.get(request.args.get("msg", ""))), (400 if errors else 200)
