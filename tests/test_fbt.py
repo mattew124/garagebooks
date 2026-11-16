@@ -434,7 +434,7 @@ def panel(dash):
 def test_the_panel_sits_below_the_charts_and_above_the_expenses_table():
     dash = shipped()
     new, table = panel(dash), next(p for p in dash["panels"] if p["title"] == "Expenses")
-    others = [p for p in dash["panels"] if p is not new and p is not table and p["title"] != "Reminders"]   # it sits between the two
+    others = [p for p in dash["panels"] if p is not new and p is not table and p["title"] not in ("Reminders", "Kilometre pace")]   # it sits between the two
     assert new["gridPos"]["x"] == 0 and new["gridPos"]["w"] == 24
     assert new["gridPos"]["y"] >= max(p["gridPos"]["y"] + p["gridPos"]["h"] for p in others)
     assert table["gridPos"]["y"] >= new["gridPos"]["y"] + new["gridPos"]["h"]

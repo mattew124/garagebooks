@@ -609,3 +609,54 @@ ALTER TABLE garagebooks.lease ADD COLUMN IF NOT EXISTS agreement_path text
 -- Lease budgets (the provider's yearly budget pools) are optional and off until turned on in Settings:
 -- the lease pages, the Categories page and the FBT year report leave them out while this is false.
 ALTER TABLE garagebooks.setting ADD COLUMN IF NOT EXISTS lease_budgets boolean NOT NULL DEFAULT false;
+
+-- Kilometre pace (roadmap L4): the odometer at a moment, for the dashboard's panel, with the same answer
+-- as sources.odometer_at in the app. A car TeslaMate tracks gets TeslaMate's last position at or before
+-- the moment, else (and for any other car) the latest reading entered by hand or on an expense at or
+-- before it; NULL when nothing is known, never 0. Built in two forms by build_odometer_at(), as
+-- build_ownership() is: with TeslaMate's positions, or without them (there is no TeslaMate, or the app
+-- is holding its figures back), when only what was entered by hand answers. Same arguments and result
+-- either way. Both are SECURITY DEFINER, so the dashboard's reader needs no access to TeslaMate's tables
+-- and the app's least-privilege role can switch forms; their only inputs are a car, a moment and a boolean.
+CREATE OR REPLACE FUNCTION garagebooks.build_odometer_at(use_teslamate boolean DEFAULT true) RETURNS boolean
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $fn$
+DECLARE
+    tm      boolean := COALESCE(use_teslamate, false) AND to_regclass('public.positions') IS NOT NULL;
+    teslamate text;
+BEGIN
+  LOOP
+    teslamate := 'NULL::double precision';
+    IF tm THEN
+        teslamate := '(SELECT round(p.odometer::numeric, 1)::double precision FROM public.positions p
+                       WHERE p.car_id = (SELECT c.teslamate_car_id FROM garagebooks.car c WHERE c.id = p_car)
+                         AND p.odometer IS NOT NULL AND p.date <= (p_at AT TIME ZONE ''UTC'')
+                       ORDER BY p.date DESC LIMIT 1)';
+    END IF;
+    BEGIN
+        EXECUTE format($def$
+CREATE OR REPLACE FUNCTION garagebooks.odometer_at(p_car integer, p_at timestamptz) RETURNS double precision
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $body$
+    SELECT COALESCE(
+        %s,
+        (SELECT r.km::double precision FROM (
+            SELECT o.km, o.read_at AS taken FROM garagebooks.odometer_reading o WHERE o.car_id = p_car AND o.read_at <= p_at
+            UNION ALL
+            SELECT e.odometer_km, e.occurred_at FROM garagebooks.expense e
+            WHERE e.car_id = p_car AND e.odometer_km IS NOT NULL AND e.occurred_at <= p_at
+        ) r ORDER BY r.taken DESC, r.km DESC LIMIT 1))
+$body$$def$, teslamate);
+        RETURN tm;
+    EXCEPTION WHEN OTHERS THEN
+        -- TeslaMate's tables are not as expected: build the form without them, so a TeslaMate that
+        -- changed never stops GarageBooks starting.
+        IF NOT tm THEN
+            RAISE;
+        END IF;
+        RAISE WARNING 'garagebooks.odometer_at is built without TeslaMate: %', SQLERRM;
+        tm := false;
+    END;
+  END LOOP;
+END
+$fn$;
+REVOKE ALL ON FUNCTION garagebooks.build_odometer_at(boolean) FROM PUBLIC;
+SELECT garagebooks.build_odometer_at(true);

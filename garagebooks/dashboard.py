@@ -68,13 +68,24 @@ def _without_sold(dash):
             panel["gridPos"].update(x=i * width, w=width)
 
 
-def render(tz, base_path, source=SOURCE, start=None, teslamate=None, sold=True):
+PACE_PANEL = "Kilometre pace"
+
+
+def _without_pace(dash):
+    """Leave the Kilometre pace panel out: it is the last row, so nothing needs to move."""
+    dash["panels"] = [p for p in dash["panels"] if p["title"] != PACE_PANEL]
+
+
+def render(tz, base_path, source=SOURCE, start=None, teslamate=None, sold=True, pace=True):
     """`teslamate` is a sources.TeslaMate; None means it is there and usable (the file as shipped).
     `sold` is whether any car has been sold: with none, the Sold panel is left out (it would only ever
-    say "not sold"), and it comes back when a sale is recorded."""
+    say "not sold"), and it comes back when a sale is recorded. `pace` is whether any lease has an estimated
+    km per year: with none, the Kilometre pace panel is left out, and it comes back when one is entered."""
     dash = json.loads(Path(source).read_text())
     if not sold:
         _without_sold(dash)
+    if not pace:
+        _without_pace(dash)
     if teslamate is not None and not teslamate.usable:
         _without_teslamate(dash, teslamate)
     if start is not None:
@@ -93,9 +104,9 @@ def render(tz, base_path, source=SOURCE, start=None, teslamate=None, sold=True):
     return dash
 
 
-def export(directory, tz, base_path, source=SOURCE, start=None, teslamate=None, sold=True):
+def export(directory, tz, base_path, source=SOURCE, start=None, teslamate=None, sold=True, pace=True):
     """Write the dashboard if it differs from what's there. True if it wrote."""
-    text = json.dumps(render(tz, base_path, source, start, teslamate, sold), indent=2) + "\n"
+    text = json.dumps(render(tz, base_path, source, start, teslamate, sold, pace), indent=2) + "\n"
     target = Path(directory) / FILENAME
     if target.exists() and target.read_text() == text:
         return False
