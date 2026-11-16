@@ -13,7 +13,17 @@ short notice when something needs a look. Notifications are a later part of the
 
 ## Adding a reminder
 
-Choose a car and say what it is for, then give **a date, an odometer reading, or both**. With both, it
+Choose a car and say what it is for. A **Standard reminder** list offers common jobs: engine oil, oil
+filter, engine air filter, spark plugs, timing belt, tyre rotation, wheel alignment, cabin air filter,
+brake fluid, brake pads and discs check, coolant, wiper blades, 12 V battery check, scheduled service,
+registration renewal and insurance renewal. Choosing one fills in the title, how often it repeats and the
+first due date or odometer. The intervals are common ones: check them against the car's handbook. Engine
+items are not offered for a battery electric car. You can change anything it fills in, or skip the list
+and type your own.
+
+<!-- screenshot: reminder-standard - The Add a reminder form with the Standard reminder list open -->
+
+Then give **a date, an odometer reading, or both**. With both, it
 falls due on whichever comes first.
 
 | Field | What it does |
@@ -39,9 +49,8 @@ Each reminder shows a word as well as a colour:
 | **Resolved** | Done. Resolved reminders are kept. |
 
 The page shows the car's current odometer and where it came from. That is TeslaMate's, when it tracks
-the car and can be read, or else your latest reading from the **Cars** page (an odometer entered on an
-expense counts as one). TeslaMate isn't needed: with none, enter readings by hand and odometer reminders
-work the same.
+the car and can be read, or else the odometer on your latest expense. TeslaMate isn't needed: with none, enter the odometer on your expenses
+and odometer reminders work the same.
 
 ## Resolving a reminder
 
@@ -63,7 +72,7 @@ When you resolve a repeating reminder, the next one is created for you:
 - its **date** is the day it was done plus the months you chose, in calendar months (31 October plus
   six months is 30 April: it never runs past the end of the month);
 - its **odometer reading** is the odometer when it was done plus the distance you chose. That is the
-  expense's odometer, else the one you entered, else the best known on that date, else the previous
+  expense's odometer, else the best known on that date, else the previous
   reading it was due at;
 - the title, category, lead times, repeat and notes carry over.
 

@@ -14,7 +14,7 @@ All of them come from the `garagebooks.ownership` view (`garagebooks/schema.sql`
 |---|---|
 | Total cost | purchase + running expenses + charging, less the sale price once the car is sold (see [Selling a car](#selling-a-car)) |
 | Charging | TeslaMate's `charging_processes.cost` for a car it tracks, plus expenses in a charging or fuel category (**Charging**, **Fuel**) |
-| Distance | latest odometer (for a sold car, the highest known on or before the sale date) − odometer on the purchase expense (else the lowest odometer known). The odometer is TeslaMate's, a reading entered on the Cars page, or the one on an expense |
+| Distance | latest odometer (for a sold car, the highest known on or before the sale date) − odometer on the purchase expense (else the lowest odometer known). The odometer is TeslaMate's, or the odometer on an expense (or the final odometer of a sold car) |
 | Cost per km — all-in | total cost ÷ distance |
 | Cost per km — running | (running + charging) ÷ distance, excludes the purchase price |
 | Per day and per month | running (or total) cost, or distance, ÷ the time since purchase, or until the sale date for a sold car (at least one day, or one month) |
@@ -40,8 +40,8 @@ Record the sale on the Cars page (see [Cars](index.md#selling-a-car)). For a sol
 - **Time owned** and every per-day and per-month figure divide by the time from purchase to the sale
   date, not to today, so they stop growing once the car has gone.
 - **Distance** stops at the sale: the highest odometer known on or before the sale date, whether
-  TeslaMate's or one you entered. A reading or drive after the sale is ignored.
-- The **Sold** tile reads *Sold 12 Mar 2026 · $31,000*, and shows a dash for a car you still own. The
+  TeslaMate's, the odometer on an expense, or the final odometer you entered with the sale. A reading or drive after the sale is ignored.
+- The **Sold** tile reads *Sold 12 Mar 2026 · $31,000*. It is on the dashboard only once a car has been sold. The
   **Car** box adds *(sold)* after the car's name.
 - Charging or expenses dated after the sale still count: they are real costs.
 

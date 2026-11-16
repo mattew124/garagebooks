@@ -101,18 +101,24 @@
 {% block content %}
 <h1>Lease: {{ car.name }}</h1>
 <p><a href="{{ url_for('cars_page') }}">← Cars</a> · <a id="fbt-link" href="{{ url_for('car_fbt', car_id=car.id) }}">Costs, taxable value and contributions by FBT year</a></p>
+<p class="row lease-add"><a class="button" id="add-lease-top" href="{{ url_for('car_lease_new', car_id=car.id) }}">Add a lease period</a>
+  <small>A car can have several lease periods, one after another. Each keeps its own lease form and lease agreement.</small></p>
 {% if shown %}
 {{ lease_card(shown, 'Current lease' if shown.figures.status == 'current' else 'Next lease') }}
 {% else %}
 <p class="empty" id="no-lease">No lease recorded for this car.</p>
 {% endif %}
 {% if others %}
-<h2>{{ 'Other leases' if shown else 'Leases' }}</h2>
+<h2 class="card-title lease-others">{{ 'Other lease periods' if shown else 'Lease periods' }}</h2>
 {% for l in others %}
+<details class="lease-period" id="lease-period-{{ l.id }}">
+  <summary>{{ l.start_date.strftime('%d %b %Y') }} to {{ l.end_date.strftime('%d %b %Y') }}
+    <small>{{ l.package_name or l.financier or 'Lease' }} · {{ {'upcoming': 'not started', 'current': 'current', 'past': 'ended'}[l.figures.status] }}{% if l.form_url or l.form_path or l.agreement_url or l.agreement_path %} · documents kept{% endif %}</small></summary>
 {{ lease_card(l, (l.package_name or l.financier or 'Lease') ~ ' · ' ~ l.start_date.strftime('%b %Y') ~ ' to ' ~ l.end_date.strftime('%b %Y')) }}
+</details>
 {% endfor %}
 {% endif %}
-<p><a class="button" href="{{ url_for('car_lease_new', car_id=car.id) }}">Add a lease</a></p>
+{% if shown or others %}<p><a class="button" href="{{ url_for('car_lease_new', car_id=car.id) }}">Add a lease</a></p>{% endif %}
 <p><small>This records what the provider's documents say. It is not tax advice. The bold totals are
   worked out from what you entered, shown so a typing mistake is easy to spot. No personal
   details are stored.</small></p>

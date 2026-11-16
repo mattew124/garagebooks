@@ -7,6 +7,38 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+**Lease and car page changes.** Nothing to do on upgrade: the app adds the new columns itself.
+
+- **Lease form import.** The Add a lease page starts with a **Documents** card. Choose the provider's lease
+  form or package confirmation (from the computer, by dropping it, or from the car's OneDrive or invoice
+  folder) and the boxes are filled in from it: provider, start, end, term, pay frequency, the pre-tax
+  payment per pay, FBT base value, electric car exemption, estimated km per year and, with budgets on, the
+  yearly budgets. Only the lease's own figures are read, never names, employer, payroll, bank or
+  registration details. Check the boxes before saving.
+- **Lease documents.** A **Lease agreement PDF** can be kept for reference (nothing is read from it). Chosen
+  PDFs are saved in a **Lease** subfolder of the car's folder and linked from the lease page. With no
+  folder chosen for the car, the lease still saves and says the PDF wasn't kept.
+- **Lease periods.** A car's lease page has **Add a lease period** at the top, and the periods other than
+  the current one are folded to a line each. Every period keeps its own lease form and lease agreement.
+- **Associate leases.** A new **Associate lease** tick box, for a car owned outright and leased to the
+  employer by an associate. No financier is needed, and the residual boxes and the minimum-residual check
+  go away.
+- **Salary packaging provider.** *Package or provider name* is now **Salary packaging provider**, and
+  packaging is recorded per car.
+- **Lease end** is filled in from the start date and the term in months. Leave the term empty and it is
+  worked out from the two dates.
+- **Lease budgets are optional and off by default.** Turn on **Track lease budgets** in Settings to see
+  them on the lease pages, the Categories page and the FBT year report. While off, the FBT year report
+  lists running costs by category. Budgets already entered are kept.
+- **Cars page.** The name is optional (a car with none is called by its make and model). Purchase price,
+  date bought and odometer are edited on the Cars page. The **Odometer readings** section is gone: the
+  odometer comes from TeslaMate or from the odometer on expenses. Recording a sale asks for the final
+  odometer (required for a car TeslaMate doesn't track).
+- **Standard reminders.** The Add a reminder form has a **Standard reminder** list (engine oil, tyre
+  rotation, registration renewal and others) that fills in the title, how often it repeats and the first
+  due date or odometer. Engine items are not offered for a battery electric car.
+- **Dashboard.** The **Sold** panel is only on the dashboard once a car has been sold.
+
 **Change history.** A new **History** page lists every add, edit and delete of an expense or category:
 when, who, and what changed (old and new values). It is written by triggers in the database, so changes
 made by other tools are recorded too, into an append-only `garagebooks.change_log` table. Who made a

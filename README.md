@@ -77,7 +77,7 @@ so, rather than showing wrong numbers; everything you entered carries on
 (`ALLOW_UNTESTED_TESLAMATE=1` uses them anyway). A weekly check tests each new TeslaMate release.
 
 TeslaMate itself is optional: the app keeps its own list of cars, and a car TeslaMate doesn't
-track works from odometer readings and charging or fuel costs entered by hand.
+track works from the odometer on its expenses and charging or fuel costs entered by hand.
 
 ## License
 

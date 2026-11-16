@@ -40,26 +40,29 @@ and rebates show in green, and the app follows your device's light or dark setti
 
 The **Cars** page lists your cars. The ones TeslaMate tracks are added by themselves and follow
 TeslaMate's name until you rename them here. Any other car, electric or not, is added by hand, with
-its type, make and model; TeslaMate isn't needed at all. Each car shows its latest odometer:
-TeslaMate's, or the latest reading you entered (add readings under **Odometer readings**; the
-odometer on an expense counts as one too). The page also says whether TeslaMate is connected, not
+its type, make and model; TeslaMate isn't needed at all. The name is optional: a car with none is called
+by its make and model. The purchase price, date bought and odometer at purchase are edited on the car's
+card too. They are kept as one expense in a purchase category, so the price counts once; a car with
+several purchase expenses is edited in the expense list. Each car shows its latest odometer: TeslaMate's,
+or else the odometer on its latest expense. The page also says whether TeslaMate is connected, not
 configured, or unavailable and why.
 
 <!-- screenshot: cars-page - The Cars page, with a TeslaMate car and a car added by hand -->
 
 A car paid for through a novated lease has a **Lease** link: the details from the provider's
-statement, its yearly budgets and a few checks on them. See [Leases](leases.md).
+statement, its yearly budgets (when [budgets are turned on](leases.md#lease-budgets)) and a few checks on them. See [Leases](leases.md).
 
 ### Selling a car
 
 When you sell a car, open **Sold this car?** on its card and enter the date it sold and what it sold
-for (0 if it was given away), then **Save sale**. The card then reads *Sold 12 Mar 2026 for $31,000.00*.
+for (0 if it was given away), and the final odometer, then **Save sale**. The final odometer is required
+for a car TeslaMate doesn't track, and optional for one it does (leave it empty to use TeslaMate's). The card then reads *Sold 12 Mar 2026 for $31,000.00*.
 **Clear sale** takes it back if you entered it by mistake. The date can't be in the future; a date
 before the car's first expense is accepted, with a warning.
 
 A sold car is not removed. Its total cost of ownership is the purchase price plus running costs and
 charging, **less the sale price**; the time owned, and so every per-day and per-month figure, stops at
-the sale date; and the distance stops at the last odometer reading on or before it. You can still add
+the sale date; and the distance stops at the final odometer, or the last odometer known on or before the sale date. You can still add
 an expense to a sold car (a late bill, say), but it goes after your other cars in the Add form's car
 list, marked *(sold)*. The dashboard names the car *(sold)* in its **Car** box and shows a **Sold**
 tile. See [What the dashboard counts](dashboard.md).

@@ -46,7 +46,7 @@ Each release is tested against one TeslaMate release (named in the README and in
 
 ## Without TeslaMate
 
-TeslaMate is optional. GarageBooks keeps its own list of cars (the Cars page): the cars TeslaMate tracks are added to it automatically, and any other car, electric or not, is added by hand. What TeslaMate would supply is then entered by hand: odometer readings on the Cars page (an expense's odometer counts too), and charging or fuel costs as expenses in the **Charging** and **Fuel** categories.
+TeslaMate is optional. GarageBooks keeps its own list of cars (the Cars page): the cars TeslaMate tracks are added to it automatically, and any other car, electric or not, is added by hand. What TeslaMate would supply is then entered by hand: the odometer on your expenses, and charging or fuel costs as expenses in the **Charging** and **Fuel** categories.
 
 The app looks at the database once a minute and is in one of four states, shown on the Cars page:
 
