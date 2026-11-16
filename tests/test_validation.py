@@ -15,7 +15,9 @@ def test_amount_ok(raw, expected):
     assert v.parse_amount(raw) == Decimal(expected)
 
 
-@pytest.mark.parametrize("raw", ["", "abc", "NaN", "Infinity", "1e99", "99999999999", "-99999999999", "--5"])
+@pytest.mark.parametrize("raw", ["", "abc", "NaN", "Infinity", "1e99", "99999999999", "-99999999999", "--5",
+                                 # found by test_properties.py: these once raised decimal.Overflow, a 500 on /new
+                                 "1e999999999", "-1e999999999"])
 def test_amount_rejected(raw):
     with pytest.raises(ValueError):
         v.parse_amount(raw)
