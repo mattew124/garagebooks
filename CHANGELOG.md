@@ -7,6 +7,18 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+**Notifications.** The app adds the new table and columns itself. If you use the restricted database role
+(`SKIP_MIGRATE=1`), run `scripts/provision-db.sh` again so the role can use the new `notification` table.
+Nothing is sent until you set an address, so nothing changes if you don't.
+
+- **Notifications.** A **Notifications** section on the Settings page takes an address (ntfy, an Apprise
+  API or a Home Assistant webhook) and sends a notice, once each, when a reminder comes due soon and when
+  it is overdue, 30 and 7 days before the OneDrive client secret expires and when it has, and when the
+  OneDrive sign-in stops working. A **Send a test notice** button checks the address. The address is a
+  secret: it is never shown back, logged or put in an error. A new scheduled job, `notifications`, runs
+  every 15 minutes. New invoices waiting for review and a lease budget heading for a shortfall come with
+  the features they report on. See [Notifications](docs/notifications.md).
+
 **Lease and car page changes.** Nothing to do on upgrade: the app adds the new columns itself.
 
 - **Roadmap.** Updated for what has shipped: the Now items are in place, cost after tax (L5) is next, and lease budgets (L3) move to Later.
