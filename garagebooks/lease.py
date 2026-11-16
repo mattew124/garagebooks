@@ -7,7 +7,7 @@ statement says and is not tax advice.
 """
 
 from datetime import date, timedelta
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_HALF_UP, localcontext
 
 # The provider's budget pools, in the order a statement lists them: identifier -> label.
 POOLS = {
@@ -325,4 +325,85 @@ def budget_for_year(lease, budgets, pool, year):
             seen = True
             total += Decimal(yearly) * ((end - begin).days + 1) / days_in_fbt_year(year)
     return total.quantize(CENTS, ROUND_HALF_UP) if seen else None
+
+
+# ---- cost after tax (roadmap L5) ----------------------------------------------------------------------
+# What an expense paid from pre-tax salary costs once the GST is claimed back. Deliberate simplifications,
+# set out in docs/lease-calculations.md: GST is a flat 1/11 of an invoice that is not GST-free, and the
+# post-tax share is the lease's own split of payments. Not tax advice. The same definition is in SQL as
+# garagebooks.expense_after_tax(); a test holds the two together.
+
+def is_packaged(choice, covered, pool, kind):
+    """Whether an expense is paid from the package. `choice` is the owner's (True, False, or None for
+    automatic); automatic means a lease covers its date, its category has a budget pool, and the category
+    is not a purchase."""
+    if choice is not None:
+        return bool(choice)
+    return bool(covered) and pool is not None and kind != "purchase"
+
+
+def effective_cost(amount, packaged, gst_free, pretax, posttax, rate_percent):
+    """What an expense costs after tax, to the cent (half away from zero). `pretax` and `posttax` are the
+    covering lease's payments (None with no lease; payments summing to nothing count as no post-tax share);
+    `rate_percent` is the marginal rate as a percentage (None: not entered). An expense paid personally costs
+    its invoice. A packaged one with no rate has no after-tax cost: None, never the invoice standing in."""
+    if not packaged:
+        return amount
+    if rate_percent is None:
+        return None
+    pretax, posttax = pretax or Decimal(0), posttax or Decimal(0)
+    if pretax + posttax <= 0:
+        pretax, posttax = Decimal(1), Decimal(0)
+    with localcontext() as ctx:
+        ctx.prec = 60            # one division, at the end, so the only rounding is to the cent
+        numerator = amount * (1 if gst_free else 10) * (pretax * (100 - rate_percent) + 100 * posttax)
+        denominator = (1 if gst_free else 11) * 100 * (pretax + posttax)
+        return (numerator / denominator).quantize(CENTS, ROUND_HALF_UP)
+
+
+def ev_rate(rates, year):
+    """The ATO's home charging rate for an FBT year: -> (the year whose rate it is, cents per km), the year's
+    own or else the latest earlier year's, or None for a year before the first. `rates` is {year: cents}."""
+    earlier = [y for y in rates if y <= year]
+    return (max(earlier), rates[max(earlier)]) if earlier else None
+
+
+def charging_reimbursement(km, cents_per_km, rate_percent):
+    """The home charging reimbursement for `km` driven at `cents_per_km`, and the tax saved on it (at the
+    marginal rate). None when the distance or the rate isn't known, or the readings run backwards: never 0."""
+    if km is None or cents_per_km is None or rate_percent is None or km < 0:
+        return None
+    amount = (km * cents_per_km / 100).quantize(CENTS, ROUND_HALF_UP)
+    return {"km": km, "cents_per_km": cents_per_km, "amount": amount,
+            "tax_saved": (amount * rate_percent / 100).quantize(CENTS, ROUND_HALF_UP)}
+
+
+def reimbursed_spans(leases, year, today):
+    """The day ranges (first, last), both included, of an FBT year in which a lease that has its home charging
+    reimbursed was held, up to `today`. Days to come are not counted yet."""
+    spans = []
+    for row in leases:
+        if not row["charging_reimbursed"] or not days_held(row, year):
+            continue
+        first, last = _held_range(row, year)
+        last = min(last, today)
+        if first <= last:
+            spans.append((first, last))
+    return sorted(spans)
+
+
+def after_tax_lines(rows, key, rate_percent):
+    """The year's after-tax part of the report, from its expenses (db.after_tax_facts): `key(row)` names the
+    line each belongs to. -> {line: {"invoice": total, "effective": total or None, "packaged": n}}. A line's
+    effective total is None while any of its packaged expenses has none (no rate)."""
+    lines = {}
+    for row in rows:
+        packaged = is_packaged(row["packaged"], row["lease_id"] is not None, row["budget_pool"], row["kind"])
+        cost = effective_cost(row["amount"], packaged, row["gst_free"], row["pretax_payment"], row["posttax_payment"],
+                              rate_percent)
+        line = lines.setdefault(key(row), {"invoice": Decimal(0), "effective": Decimal(0), "packaged": 0})
+        line["invoice"] += row["amount"]
+        line["packaged"] += 1 if packaged else 0
+        line["effective"] = None if cost is None or line["effective"] is None else line["effective"] + cost
+    return lines
 
