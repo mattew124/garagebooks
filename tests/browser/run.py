@@ -917,6 +917,64 @@ def lease_checks(page):
     page.wait_for_url(re.compile(r"msg=car_deleted"))
 
 
+def test_fbt_report(page):
+    try:
+        fbt_checks(page)
+    finally:
+        remove_marked(page)       # the expense, then the car, even when a check failed
+
+
+def fbt_checks(page):
+    """The per-FBT-year report for a car added by hand, with a lease and one expense: the current FBT year,
+    the taxable value, the pool the expense falls in, and the year links. The car is deleted at the end."""
+    from datetime import date, timedelta
+    today = date.today()
+    page.goto(UI + "cars")
+    page.fill("#add-car input[name=name]", MARKER)
+    page.click("#add-car button[type=submit]")
+    page.wait_for_url(re.compile(r"msg=car_added"))
+    page.locator(".car", has_text=MARKER).get_by_role("link", name="Lease").click()
+    expect(page.locator("#no-lease")).to_be_visible()
+    page.get_by_role("link", name="Costs, taxable value and contributions by FBT year").click()
+    expect(page.locator("#fbt-nolease")).to_be_visible()          # no lease yet: a helpful message, not an error
+    page.get_by_role("link", name="Add a lease").click()
+    page.get_by_label("Financier").fill("Example Finance")
+    page.get_by_label("Lease start").fill((today - timedelta(days=60)).isoformat())
+    page.get_by_label("Lease end").fill((today + timedelta(days=1035)).isoformat())
+    page.get_by_label("Term (months)").fill("36")
+    page.get_by_label("Paid").select_option("fortnightly")
+    page.get_by_label("Pre-tax part, per pay").fill("300")
+    page.get_by_label("Post-tax part, per pay").fill("20")
+    page.get_by_label("FBT base value").fill("62000")
+    page.get_by_label("Insurance").fill("1500")
+    page.get_by_role("button", name="Add lease").click()
+    page.wait_for_url(re.compile(r"msg=lease_added"))
+    page.goto(UI + "new")                                        # an expense in the Insurance pool, today
+    page.select_option("select[name=car_id]", label=MARKER)
+    page.select_option("select[name=category_id]", label="Insurance")
+    page.fill("input[name=amount]", "321.00")
+    page.fill("input[name=vendor]", MARKER)
+    page.click("button[type=submit].button")
+    page.wait_for_url(re.compile(r"msg=saved"))
+    page.goto(UI + "cars")
+    page.locator(".car", has_text=MARKER).get_by_role("link", name="Lease").click()
+    page.get_by_role("link", name="Costs, taxable value and contributions by FBT year").click()
+    year = today.year if today.month >= 4 else today.year - 1
+    expect(page.locator("#fbt-year")).to_have_text(f"FBT {year}–{(year + 1) % 100:02d}")
+    body = page.inner_text("body")
+    for shown in ("Taxable value", "Contribution required", "Expected by the end of the year", "$321.00",
+                  "not tax advice", "Running costs by pool"):
+        assert shown in body, f"{shown!r} is not on the FBT report"
+    expect(page.locator("tr[data-pool=insurance]")).to_contain_text("$321.00")
+    expect(page.locator("#purchases")).to_contain_text("No purchases")
+    expect(page.locator("#pool-total")).to_contain_text("$321.00")
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "sideways scroll on a phone"
+    shot(page, "fbt-phone")
+    page.goto(f"{page.url}?year={year - 3}")                        # a year before the lease: nothing held, still a page
+    expect(page.locator("#fbt-notheld")).to_be_visible()
+    assert page.get_by_role("link", name=re.compile(r"FBT \d{4}–\d\d →")).count() == 1, "no link on to a year with data"
+
+
 def test_dashboard(page):
     add_expense(page, "62000", "Initial purchase")
     add_expense(page, "1500", "Tyres")
@@ -929,6 +987,7 @@ def test_dashboard(page):
     expect(page.get_by_text("Total cost", exact=True)).to_be_visible(timeout=30000)
     expect(page.get_by_text("Cost per km — running")).to_be_visible()
     expect(page.get_by_text("Running costs per month")).to_be_visible()
+    expect(page.get_by_text("Running costs per FBT year")).to_be_visible()
     page.wait_for_load_state("networkidle")
     page.wait_for_timeout(2000)
     shot(page, "dashboard")
@@ -965,6 +1024,7 @@ def main():
         step("no sideways scroll on a phone", test_phone_layout_has_no_sideways_scroll, page)
         step("cars: TeslaMate's are listed, one is added by hand, read and deleted", test_cars_page, page)
         step("lease: add from a statement, see the figures, edit, delete", test_lease_page, page)
+        step("FBT year report: taxable value, costs by pool, year links", test_fbt_report, page)
         step("header stays tidy on a phone", test_header_stays_tidy_on_a_phone, page)
         step("phone list shows amount, invoice and edit", test_list_shows_key_fields_on_a_phone, page)
         step("a likely duplicate is asked about, then saved anyway", test_duplicate_is_asked_about_before_saving, page)

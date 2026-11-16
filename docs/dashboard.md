@@ -47,6 +47,17 @@ Record the sale on the Cars page (see [Cars](index.md#selling-a-car)). For a sol
 
 <!-- screenshot: dashboard-sold - The dashboard for a sold car, with the Sold tile and (sold) in the Car box -->
 
+## Running costs per FBT year
+
+Below the cumulative chart, bars show running costs for each FBT year (1 April to 31 March), labelled like
+**FBT 2025–26** and stacked by category, with charging from TeslaMate included where there is a TeslaMate.
+The year comes from each expense's date in the dashboard's time zone, so nothing is picked and it follows
+the time range: a year cut off by the range shows only the part inside it. The purchase price is left
+out. The same rule is in the database as `garagebooks.fbt_year(date)` (the year a date's FBT year starts
+in), for queries of your own. The per-car report is described under [Leases](leases.md#the-fbt-year).
+
+<!-- screenshot: dashboard-fbt - The Running costs per FBT year panel on the dashboard -->
+
 ## Rebates and refunds
 
 A rebate or refund (a state EV rebate, an insurance refund for ending a policy early) is an expense

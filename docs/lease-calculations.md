@@ -44,6 +44,9 @@ taxable value    = base value × 20% × days held ÷ days in the FBT year
 contribution     = taxable value      (employee contribution method: FBT becomes nil)
 ```
 
+GarageBooks works these out for each FBT year on the [FBT year report](leases.md#the-fbt-year), from the lease's own
+base value and percentage.
+
 ### Kilometre pace (L4)
 
 The provider's statement works out how far the car must go, from an estimated annual distance:

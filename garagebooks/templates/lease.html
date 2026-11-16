@@ -85,7 +85,7 @@
 {% endmacro %}
 {% block content %}
 <h1>Lease: {{ car.name }}</h1>
-<p><a href="{{ url_for('cars_page') }}">← Cars</a></p>
+<p><a href="{{ url_for('cars_page') }}">← Cars</a> · <a id="fbt-link" href="{{ url_for('car_fbt', car_id=car.id) }}">Costs, taxable value and contributions by FBT year</a></p>
 {% if shown %}
 {{ lease_card(shown, 'Current lease' if shown.figures.status == 'current' else 'Next lease') }}
 {% else %}

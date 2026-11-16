@@ -295,6 +295,23 @@ dl.facts > div { display: grid; gap: .1rem; }
 dl.facts dt { color: var(--muted); font-size: .85rem; }
 dl.facts dd { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 dl.facts dd.derived { font-weight: 600; }
+/* The FBT year report: tables that wrap on a phone, and a year selector that wraps too. */
+.fbt h2 { font-size: 1rem; }
+.fbt th, .fbt td { white-space: normal; padding: .5rem .5rem; overflow-wrap: break-word; }
+.fbt td:first-child, .fbt th:first-child { min-width: 6.5rem; }
+.fbt td.num, .fbt th.num { white-space: nowrap; overflow-wrap: normal; }
+.fbt tfoot th, .fbt tfoot td { border-top: 2px solid var(--line); border-bottom: 0; }
+/* These are real tables, not the expense list's tiles, even where the page is in tiles view (phones). */
+[data-view=tiles] .fbt table { display: table; width: 100%; }
+[data-view=tiles] .fbt thead { display: table-header-group; }
+[data-view=tiles] .fbt tbody { display: table-row-group; width: auto; }
+[data-view=tiles] .fbt tfoot { display: table-footer-group; }
+[data-view=tiles] .fbt tr { display: table-row; width: auto; background: none; border: 0; box-shadow: none; margin: 0; padding: 0; }
+[data-view=tiles] .fbt td, [data-view=tiles] .fbt td.num { display: table-cell; width: auto; text-align: left; border-bottom: 1px solid var(--line); padding: .5rem; }
+[data-view=tiles] .fbt td.num, [data-view=tiles] .fbt th.num { text-align: right; }
+.fbt-nav { flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: .5rem 1rem; margin-bottom: 1rem; }
+.fbt-nav small { flex-basis: 100%; color: var(--muted); }
+.unavailable { color: var(--muted); font-weight: 600; }
 .lease .actions { justify-content: flex-start; align-items: center; }
 .lease .actions form { margin: 0; }
 .lease button.danger { margin-top: 0; }

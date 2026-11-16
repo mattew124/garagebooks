@@ -521,6 +521,25 @@ def delete_lease(conn, car_id, lease_id):
     return conn.execute("DELETE FROM garagebooks.lease WHERE id = %s AND car_id = %s", (lease_id, car_id)).rowcount == 1
 
 
+# ---- the FBT year report (roadmap L2) ---------------------------------------------------
+
+def fbt_costs(conn, car_id, year, tz):
+    """A car's expenses in one FBT year, by category: rows of category, kind, budget_pool, total and count.
+    The year is decided by each expense's date in time zone `tz`, through garagebooks.fbt_year()."""
+    return conn.execute(
+        "SELECT c.name AS category, c.kind, c.budget_pool, c.sort_order, SUM(e.amount) AS total, count(*) AS n "
+        "FROM garagebooks.expense e JOIN garagebooks.category c ON c.id = e.category_id "
+        "WHERE e.car_id = %(car)s AND garagebooks.fbt_year((e.occurred_at AT TIME ZONE %(tz)s)::date) = %(year)s "
+        "GROUP BY c.id ORDER BY c.sort_order, c.name", {"car": car_id, "year": year, "tz": tz}).fetchall()
+
+
+def fbt_years_with_expenses(conn, car_id, tz):
+    """The FBT years (the year each starts in) in which this car has an expense, oldest first."""
+    return [r["y"] for r in conn.execute(
+        "SELECT DISTINCT garagebooks.fbt_year((occurred_at AT TIME ZONE %(tz)s)::date) AS y "
+        "FROM garagebooks.expense WHERE car_id = %(car)s ORDER BY 1", {"car": car_id, "tz": tz}).fetchall()]
+
+
 def set_budget_pool(conn, category_id, pool):
     """Which of the provider's budget pools a category's expenses come from (None: none). False if no such category."""
     return conn.execute("UPDATE garagebooks.category SET budget_pool = %s WHERE id = %s", (pool, category_id)).rowcount == 1
