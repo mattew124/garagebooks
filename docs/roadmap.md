@@ -40,87 +40,28 @@ directly.
 
 ## Now
 
-- **T1. TeslaMate independence** (size L)
-  GarageBooks runs, and every item in this roadmap works, with TeslaMate absent, unreachable or on an
-  untested version. It touches the places the app is tied to TeslaMate today: the car list and the
-  three tables that point at `public.cars`, the odometer read from `positions`, charging cost from
-  `charging_processes` in the ownership view, and the start-up version check. In order:
-  - **Its own cars.** A `garagebooks.car` table: name, type (BEV, ICE, PHEV or HEV), make, model, and an
-    optional link to a TeslaMate car. The expense, invoice-folder and import tables point at it instead
-    of `public.cars`. The change is additive and safe to run twice: every existing TeslaMate car gets a
-    row with the same id, so no expense changes or moves. A car added by hand never needs TeslaMate.
-  - **Sources, not queries.** A small interface that answers "which cars are there?", "what was this
-    car's odometer at this time?" and "what did charging cost?". TeslaMate answers from the tables it
-    reads now. The odometer on expenses, and charging and fuel entries, answer for every other car. A
-    feature asks the interface and handles "no answer", so cost per km, reminders and kilometre pace
-    run from the odometer on expenses.
-  - **A schema that starts without TeslaMate's tables.** `schema.sql` stops requiring `public.cars`.
-    The ownership view is built in the form that fits what is there (with or without the charging and
-    distance parts) and rebuilt if TeslaMate appears later. The version check applies only when
-    TeslaMate is present.
-  - **A dashboard that adapts.** It is written at start-up, so it leaves out the charging and TeslaMate
-    panels when there is no TeslaMate, and tells "not configured" from "unavailable".
-  - **Tested both ways.** CI runs the suite against the real TeslaMate image's schema, as now, and
-    against plain PostgreSQL with no TeslaMate tables. A feature isn't done until its tests pass in both.
-  *Why now:* Every later feature is built on it. Retrofitting after more features read TeslaMate's
-  tables directly costs far more. It also makes the car table (item 20) and a standalone install
-  (item 21) small.
-
-- **1. Backup and restore guide** (size S)
-  A docs page and a small script: dump and restore only the `garagebooks` schema (`pg_dump -n garagebooks`), check that an existing TeslaMate backup already includes it, and keep `GARAGEBOOKS_ENCRYPTION_KEY` out of database backups.
-  *Why now:* Protects the data before more of it is collected.
-
-- **2. Selling the car** (size S–M)
-  Record a sale date and price per car. TCO becomes purchase + running + charging − sale price; cost per day stops counting at the sale date; the dashboard shows the car as sold.
-  *Why now:* Without it, TCO is overstated and cost per day keeps growing after the car has gone.
-
-- **L1. Lease details per car** (size M)
-  The novated lease behind a car, entered from the provider's statement.
-  *Why now:* Everything else in the lease work reads from it.
-
-- **L2. FBT year and taxable value** (size S)
-  Costs grouped by FBT year, and the car's taxable value and the contribution that cancels it.
-  *Why now:* The FBT year is how a packaged car is reported and budgeted.
-
-- **3. Change history** (size M)
-  An append-only log of every add, edit and delete of an expense or category (who, when, before and after), written by a trigger in the `garagebooks` schema, with a page to view it.
-  *Why now:* An accidental edit or delete can be seen and undone by hand.
-
-- **4. Reminders by date or odometer** (size M)
-  Service reminders that fall due on a date, an odometer reading (from TeslaMate when it is there, otherwise the odometer on your latest expense) or whichever comes first, with a lead time in days or km. Recurring ones (tyre rotation every 10,000 km) create the next when resolved, and are resolved by linking the expense that did the job. Registration expiry and lease end (L1) become reminders too. Shown in the app and as a dashboard panel. Resolved reminders are kept.
-  *Why now:* The odometer is already there, from TeslaMate or from expenses (T1), so this is the cheapest useful new feature.
-  *Depends on:* T1
-
-- **5. Payment calculator** (size S)
-  On the amount field: work out the true cost of a payment made of several parts, such as a discounted gift card plus cash. Only the final amount is saved.
-  *Why now:* The field already does sums; this finishes the job.
-
-- **6. Stricter quality gates** (size S)
-  Raise the coverage floor from 85% to 90%; property-based tests (Hypothesis) on every form and API input; a software bill of materials (SBOM) attached to each release, beside the existing Trivy and CodeQL scans.
-  *Why now:* Cheap, and it makes every later item safer to ship.
-
-## Next
-
-- **L3. Lease budgets against what was spent** (size M)
-  Each budget pool's money in and money out, and the projected balance at the end of the FBT year.
+- **L5. Cost after tax** (size M)
+  What an expense paid from pre-tax salary really costs, beside its invoice amount. Not built yet. It will
+  include the charging reimbursement for an electric car on a novated or associate lease.
+  *Why now:* For a packaged car, the invoice amount overstates what it costs, and the lease details and FBT year it needs (L1, L2) are in place.
   *Depends on:* L1, L2
+
+- **L4. Kilometre pace** (size S)
+  The km the lease estimate expects this FBT year against the odometer: TeslaMate's, or the odometer on the latest expense.
+  *Why now:* A small item that uses the lease estimate and the odometer, both now in place.
+  *Depends on:* L1, T1
 
 - **7. Scheduled jobs** (size M)
   A small scheduler for periodic work, either in the app or as an optional second container from the same image (`garagebooks worker`), so the web process stays light.
+  *Why now:* Notifications (8), watching the invoice folder (13) and reading rates (L7) all need it.
   *Depends on:* —
 
 - **8. Notifications** (size M)
   Push notices through a URL you configure (ntfy, Apprise, or a Home Assistant webhook): a reminder coming due, the OneDrive client secret nearing its expiry date (the app already stores it), the OneDrive sign-in lost, new invoices waiting for review, a lease budget heading for a shortfall (L3).
+  *Why now:* Reminders are in place, and they are only useful if you are told when one falls due.
   *Depends on:* 7
 
-- **L4. Kilometre pace** (size S)
-  The km the lease estimate expects this FBT year against the odometer: TeslaMate's, or the latest manual reading.
-  *Depends on:* L1, T1
-
-- **L5. Cost after tax** (size M)
-  What an expense paid from pre-tax salary really costs, beside its invoice amount. Not built yet. It will
-  include the charging reimbursement for an electric car on a novated or associate lease.
-  *Depends on:* L1, L3
+## Next
 
 - **9. Status page** (size S–M)
   One page showing the app version, the TeslaMate version and compatibility check (when there is a TeslaMate), the OneDrive connection and secret expiry, whether the invoice folder is mounted, database size, the app's memory use, and the time of the last backup if you point it at one.
@@ -208,6 +149,11 @@ directly.
   Ongoing two-way sync with Fuelly, after the one-off import (12).
   *Depends on:* 12, 20
 
+- **L3. Lease budgets against what was spent** (size M)
+  Each budget pool's money in and money out, and the projected balance at the end of the FBT year.
+  *Why later:* Lease budgets are now optional and off by default, and are only worth tracking for an owner whose provider budgets each running cost.
+  *Depends on:* L1, L2
+
 ## Novated leases and salary packaging
 
 In Australia a car can be leased through an employer's salary packaging provider (a novated lease).
@@ -221,7 +167,7 @@ The formulas, and an example workbook with invented figures, are on
 [Novated lease calculations](lease-calculations.md). Nothing here gives tax advice. Rates, thresholds and residual percentages are published by the ATO
 and change; the app holds them as data you can update, never as numbers in the code.
 
-### L1. Lease details per car (Now, M)
+### L1. Lease details per car (Done, M)
 
 One lease record per car, entered from the provider's statement:
 
@@ -236,10 +182,15 @@ One lease record per car, entered from the provider's statement:
   or charging, insurance, registration and CTP, maintenance, tyres and other running costs.
 - Registration expiry, and whether the provider renews it, so item 4 can remind you.
 
+Added by the review (#85): the provider's lease form or package confirmation fills in a lease's details,
+the lease form and lease agreement PDFs are kept for each lease period, a car can have several lease
+periods, an associate lease option has no financier and no residual, and the lease end is worked out from
+the start and the term. Lease budgets are optional and off by default.
+
 More than one car can sit in one package, each with its own lease. Each GarageBooks category maps to
 one of the provider's budget pools.
 
-### L2. FBT year and taxable value (Now, S)
+### L2. FBT year and taxable value (Done, S)
 
 - No year to pick: each expense's date decides its FBT year (and its income tax year), so every figure
   falls in the right year by itself. Dashboards group and filter by it, built from the dates, and
@@ -250,7 +201,7 @@ one of the provider's budget pools.
   for an exempt electric car. The contributions actually made (L1's post-tax part) against it.
 - A per-FBT-year summary report: running costs by pool, contributions, taxable value.
 
-### L3. Lease budgets against what was spent (Next, M)
+### L3. Lease budgets against what was spent (Later, M)
 
 - Each pool's deductions to date (payment × pays so far) against what was spent: expenses in
   GarageBooks, and charging cost for the fuel or charging pool (from TeslaMate, or entered by hand).
@@ -261,13 +212,13 @@ one of the provider's budget pools.
 - Budget changes from a refinance or a re-budget take effect from their date, without rewriting
   earlier periods.
 
-### L4. Kilometre pace (Next, S)
+### L4. Kilometre pace (Now, S)
 
 From the lease's estimated km and the odometer (TeslaMate's, or the odometer on the latest expense): the reading at the start of the FBT year,
 the km expected by its end (pro rata if the car is held only part of the year), the km per day
 needed to get there, and the km per day actually driven. On the dashboard and the status page.
 
-### L5. Cost after tax (Next, M)
+### L5. Cost after tax (Now, M)
 
 A packaged expense costs less than its invoice: the GST is claimed back, and the rest comes from
 pre-tax salary. With your marginal tax rate entered once in Settings (the rate, not your salary),
@@ -281,9 +232,11 @@ kept as data by FBT year, like the other ATO figures.
 
 ### L6. Read the provider's statements (Later, M)
 
-Read the provider's package confirmation report with the same PDF reader the invoice import uses,
-showing what it found for review before filling in L1. Then read its activity statements to mark
-claims as reimbursed and correct pool balances in L3. Personal details on those statements (names,
+The first part is done: the lease form fills in a lease's details (#85). What is left is reading the
+statements of what the provider paid out, to mark claims as reimbursed and correct pool balances in L3.
+
+The activity statements are read with the same PDF reader the invoice import uses, showing what it found for review.
+Personal details on those statements (names,
 employer, payroll and bank numbers) are never stored.
 
 ### L7. Lease what-if calculator (Later, L)
@@ -323,11 +276,27 @@ Compare choices before signing, for one or more cars at once, over 1 to 5 year t
 
 ### L8. Lease end (Later, S)
 
+Already in place: a **Lease ends** reminder appears by itself, with a lead time of 90 days, from the
+lease's end date (item 4). The rest is not built.
+
 Before the lease ends: a reminder through item 4, the residual to pay, and the choice to pay it out,
 refinance (a new lease from that date, L1) or hand the car back. Paying out or selling links to
 item 2, so the TCO covers the whole time the car was owned.
 
 ## Already in place
+
+These are in main since 2026-11-16 and not yet in a release:
+
+- **T1. TeslaMate independence.** GarageBooks runs with TeslaMate absent, unreachable or on an untested version, with its own car table (#79).
+- **1. Backup and restore guide.** A docs page and a script to dump and restore the `garagebooks` schema (#75).
+- **2. Selling the car.** A sale date and price per car; TCO and cost per day stop at the sale (#80).
+- **L1. Lease details per car.** The novated lease behind a car (#81).
+- **L2. FBT year and taxable value.** Costs by FBT year, and the car's taxable value and contribution (#82).
+- **3. Change history.** An append-only log of every add, edit and delete, with a page to view it (#76).
+- **4. Reminders by date or odometer.** Recurring reminders, resolved by linking the expense that did the job (#83).
+- **5. Payment calculator.** Work out a payment made of several parts on the amount field (#77).
+- **6. Stricter quality gates.** A higher coverage floor, property-based tests and an SBOM on each release (#78).
+- **Review changes.** Lease form import and documents per lease period, several lease periods per car, associate leases, optional lease budgets, packaging per car, the purchase price on the Cars page, a list of standard service reminders, and the Sold panel only once a car is sold (#85). The manual odometer readings were removed.
 
 These were part of the original plan and are done: the dashboard as a version-controlled file that
 Grafana provisions, in the same Grafana as TeslaMate, with a car selector; TCO, purchase vs running
@@ -356,9 +325,11 @@ somewhere above; these are the ones adapted rather than taken as written.
 
 - **Reading TeslaMate's `drives` table:** Energy figures from `charging_processes` and `positions`, which the app already reads; widening that list would be a separate decision.
 
-- **Lease reporting left open, four lines:** Written up from a real statement and calculations (L1 to L8), with the first two moved to **Now**.
+- **Lease reporting left open, four lines:** Written up from a real statement and calculations (L1 to L8), with the first two moved to **Now** (both done by 2026-11-16).
 
 - **No dependency on TeslaMate:** The original plan's first system requirement, and the one most easily lost as features pile up. It is now T1, first in Now, with a design rule that every other item follows.
+
+- **Re-ranked on 2026-11-16:** The Now items shipped (see Already in place). Cost after tax (L5) is first in Now because you asked for it, with the charging reimbursement, then kilometre pace (L4), scheduled jobs (7) and notifications (8). Lease budgets (L3) moved to Later because budgets are now optional.
 
 - **Hosting, secrets and deployment pipeline:** The installer's choice, not part of this project.
 
