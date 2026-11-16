@@ -73,3 +73,45 @@ A `v*` tag publishes the image to ghcr.io. Test with a candidate tag first, by d
 `scripts/dev.sh up --image <ref>`, then `scripts/dev.sh test-browser`. Pin
 production to the digest that passed. Version numbering and the
 candidate-to-stable steps are in RELEASING.md.
+
+## Several branches at once
+
+Parallel work (sub-agents, stacked pull requests) collides in the same few files. To keep merges small:
+
+- Put new schema in one contiguous block, appended at the end of `schema.sql` (or after the block it
+  depends on). Never reformat existing lines. Add view columns at the end only.
+- Dashboard panel ids are unique across the file. Before adding a panel, list the ids on `main` and the
+  open branches (`git grep '"id":' origin/<branch> -- grafana`), and take the next free number. Add new
+  panels as a row below existing ones, and don't move existing panels.
+- A CHANGELOG entry goes at the top of **Unreleased**. Expect to resolve it by hand when branches merge.
+- A branch that depends on another is stacked on it (`gh pr create --base <that branch>`), says so at
+  the top of its pull request, and is retargeted to `main` when the base merges.
+- Give each `gh pr create` its own body file (`--body-file`) with a unique name: `/tmp/pr_body.md` is
+  shared between sessions, and one session's text ended up in another's pull request.
+- To try several branches together, merge them into a throwaway local `integration/*` branch and run
+  `scripts/dev.sh up`. Don't push it.
+
+## Tests
+
+- Failing test first means it was run and seen to fail. Say so in the pull request. Writing tests
+  and code together doesn't count.
+- A test run is only finished when all three pass: `pytest -q --cov`, `TEST_TESLAMATE=0 pytest -q`
+  (plain PostgreSQL, once the suite supports it), and `scripts/dev.sh test-browser` (after
+  `scripts/dev.sh up`, so the stack runs the latest code).
+- Browser tests: select within one form (`form[action$="/readings"] input[name=date]`), not
+  `.car input[name=date]`, because a card holds several forms. Clean up what a test adds in a
+  `finally`, and make the clean-up sweep what an aborted earlier run left. Grafana only draws panels in
+  view, so keep the dashboard test's viewport tall enough for the whole dashboard.
+- A new panel, view or page is not done until a test runs its SQL or renders it with TeslaMate
+  present, absent, and held back.
+- A test that inserts into a shared table must undo it in `finally`, or in the `admin` fixture. One
+  leftover row fails other tests far from the cause.
+
+## Delegating to sub-agents
+
+- Brief each agent with the files to read first, the rules it must follow (this file), the exact checks
+  to run and report, and the branch and pull request base to use. Self-contained items go to cheaper
+  models. Anything the rest is built on (a schema or interface change) is done by the main session.
+- An agent's report is a claim: review the diff of anything the rest builds on.
+- Screenshots in the docs come from `scripts/dev.sh demo screenshots`, never the dev stack. Agents can
+  only add the markers, so list the outstanding ones in the final report.
