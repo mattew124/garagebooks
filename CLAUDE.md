@@ -11,6 +11,11 @@ Grafana dashboard (`grafana/`). See README.md and `docs/`, the documentation sit
   belong in `dev.env` or `CLAUDE.local.md` (both gitignored).
 - Never write to a real TeslaMate database while developing. The dev stack has its
   own test database; `scripts/dev.sh` only ever reads from TeslaMate.
+- Test data is invented. When a real invoice, policy, registration notice or lease form shows how a document
+  is laid out, copy its layout and labels only: never its file name, plate, VIN, invoice, policy, account or
+  customer numbers, ABN, ACN or licence numbers, names, addresses, dates or amounts. Use invented values in the
+  same format (ABC123, ABN 11 111 111 111, INV12345, Example Tyres Pty Ltd, round amounts). This applies to
+  tests, fixtures, sample data, docs and commit messages.
 - Location history stays out of the test database. `dev.sh` blanks latitude,
   longitude and elevation; don't copy more of `positions` without blanking them.
 - The app has no login, so it must only ever be published behind forward-auth.
