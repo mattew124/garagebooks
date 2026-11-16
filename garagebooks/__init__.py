@@ -63,6 +63,7 @@ MESSAGES = {
     "reminder_reopened": "Reminder reopened. The next one it had added was removed.",
     "reminder_reopened_kept": "Reminder reopened. The next one had been edited or resolved, so it was left as it is.",
     "category_pool": "Budget pool saved.",
+    "category_gst_free": "GST-free setting saved.",
     "settings": "Settings saved.",
     "folders": "Folders saved.",
     "connected": "OneDrive connected.",
@@ -195,8 +196,14 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                     sold = any(car["sold_at"] is not None for car in db.cars(conn))
             except Exception:           # noqa: BLE001 - no database yet: the panel is left out until a sale is known
                 sold = False
+            try:
+                with connect() as conn:
+                    # The cost-after-tax panels have nothing to show without a marginal rate and a lease.
+                    after_tax = db.get_settings(conn)["marginal_tax_rate"] is not None and bool(db.lease_car_ids(conn))
+            except Exception:           # noqa: BLE001 - no database yet: left out until there is something to show
+                after_tax = False
             wrote = dashboard.export(dashboard_dir, tz, os.environ.get("BASE_PATH", "").rstrip("/"), start=start,
-                                     teslamate=known["teslamate"], sold=sold)
+                                     teslamate=known["teslamate"], sold=sold, after_tax=after_tax)
             log.info("Grafana dashboard %s in %s", "written" if wrote else "already up to date", dashboard_dir)
         except OSError as exc:
             log.warning("Could not write the Grafana dashboard to %s: %s", dashboard_dir, exc)
@@ -388,11 +395,27 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         except Exception:
             return {"grafana_url": None}
 
+    def after_tax_view(rows, rate):
+        """What the list shows of the cost after tax, from db.after_tax_facts rows: each packaged expense's cost
+        ({id: cost}), how many are packaged, and the total of every expense after tax (None while a packaged one
+        can't be worked out, which is whenever no rate is entered)."""
+        costs, packaged, total = {}, 0, Decimal(0)
+        for row in rows:
+            paid_from_package = lease.is_packaged(row["packaged"], row["lease_id"] is not None, row["budget_pool"], row["kind"])
+            cost = lease.effective_cost(row["amount"], paid_from_package, row["gst_free"], row["pretax_payment"],
+                                        row["posttax_payment"], rate)
+            if paid_from_package:
+                packaged += 1
+                costs[row["id"]] = cost
+            total = None if cost is None or total is None else total + cost
+        return {"costs": costs, "packaged": packaged, "total": total, "rate_set": rate is not None}
+
     def form_context(values=None, errors=None, expense_id=None):
         with connect() as conn:
             account = db.onedrive_account(conn) if drive else None
             folders = db.car_folders(conn)
             return {
+                "leased_cars": db.lease_car_ids(conn),
                 # Which storage each car's invoices go to, for the file picker: only where it can be used.
                 "car_storage": {car_id: f["backend"] for car_id, f in folders.items() if store_for(f["backend"])},
                 "default_storage": "onedrive" if drive else "local",
@@ -543,7 +566,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         """Echo the raw submission back into the form after a validation error."""
         return {k: form.get(k, "") for k in (
             "car_id", "category_id", "date", "time", "amount", "odometer_km",
-            "vendor", "notes", "invoice_url", "invoice_path")}
+            "vendor", "notes", "invoice_url", "invoice_path", "packaged")}
 
     # ---- routes ---------------------------------------------------------------
 
@@ -617,6 +640,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 "expenses": db.list_expenses(conn, category_id, sort=view.get("sort", "date"),
                                              direction=view.get("dir", "desc")),
                 "totals": db.totals(conn, category_id),
+                "after": after_tax_view(db.after_tax_facts(conn, tz, category_id=category_id),
+                                        db.get_settings(conn)["marginal_tax_rate"]),
                 "categories": db.categories(conn),
                 "category_id": category_id,
                 "message": MESSAGES.get(request.args.get("msg", "")),
@@ -681,6 +706,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             "odometer_km": "" if row["odometer_km"] is None else f"{row['odometer_km']:.1f}",
             "vendor": row["vendor"] or "", "notes": row["notes"] or "",
             "invoice_url": row["invoice_url"] or "", "invoice_path": row["invoice_path"] or "",
+            "packaged": {None: "auto", True: "package", False: "personal"}[row["packaged"]],
         }
         with connect() as conn:
             offer = bool(db.stored_open_reminders(conn, row["car_id"]))
@@ -874,6 +900,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         """A saved lease as the form's text fields."""
         values = {k: ("" if v is None else v) for k, v in row.items()}
         values["associate_lease"] = "on" if row["associate_lease"] else ""
+        values["charging_reimbursed"] = "on" if row["charging_reimbursed"] else ""
         for pool, amount in budgets.items():
             values[f"budget_{pool}"] = amount
         return values
@@ -885,7 +912,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         with connect() as conn:
             budgets_on = db.lease_budgets_on(conn)
         values, errors = validation.parse_lease_form(request.form, lease.POOLS, lease.FREQUENCIES,
-                                                     lease.FBT_METHODS, lease.TAX_TREATMENTS, budgets_on)
+                                                     lease.FBT_METHODS, lease.TAX_TREATMENTS, budgets_on,
+                                                     electric=car["kind"] == "BEV")
         if not errors:
             with connect() as conn:
                 clash = db.overlapping_lease(conn, car_id, values["start_date"], values["end_date"], lease_id)
@@ -961,6 +989,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             lease_id = db.add_lease(conn, car_id, values)
         if lease_id is None:      # another lease was added between the check and the save
             return render_lease_form(car, None, request.form, {"start_date": "These dates overlap another lease of this car."}, 400)
+        refresh_dashboard()
         log.info("lease %s added to car %s", lease_id, car_id)
         return redirect(url_for("car_lease", car_id=car_id, msg=lease_msg("lease_added")), 303)
 
@@ -1001,6 +1030,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         with connect() as conn:
             if not db.delete_lease(conn, car_id, lease_id):
                 abort(404)
+        refresh_dashboard()
         log.info("lease %s of car %s deleted", lease_id, car_id)
         return redirect(url_for("car_lease", car_id=car_id, msg="lease_deleted"), 303)
 
@@ -1035,6 +1065,64 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
 
     # ---- the FBT year report (roadmap L2) -------------------------------------------
 
+    def home_charging(conn, car, leases, year, today, rate):
+        """The home charging reimbursement of an FBT year, for an electric car on a lease that has it ticked:
+        None when there is nothing to work out, else {"km", "rate", "result"}. The distance is the odometer at the
+        end of the days the car was held in the year (or now, if earlier) less the odometer at their start,
+        from sources.odometer_at() only: km is None when either reading isn't known, and then there is no result.
+        `rate` is (the FBT year whose cents per km it is, cents per km), or None before the first year with one."""
+        if car["kind"] != "BEV":
+            return None
+        spans = lease.reimbursed_spans([row for row, _ in leases], year, today)
+        if not spans:
+            return None
+        zone, state, now = ZoneInfo(tz), teslamate(conn), datetime.now(ZoneInfo(tz))
+        km = Decimal(0)
+        for first, last in spans:
+            begin = datetime.combine(first, dtime.min, zone)
+            end = min(datetime.combine(last + timedelta(days=1), dtime.min, zone), now)
+            at_start, at_end = (sources.odometer_at(conn, state, car["id"], when) for when in (begin, end))
+            if at_start is None or at_end is None:
+                km = None
+                break
+            km += (Decimal(str(at_end.km)) - Decimal(str(at_start.km))).quantize(Decimal("0.1"))
+        ev = lease.ev_rate(db.ev_charging_rates(conn), year)
+        return {"km": km, "rate": ev, "result": lease.charging_reimbursement(km, ev and ev[1], rate)}
+
+    def fbt_after_tax(conn, car, leases, report, year, today, budgets_on):
+        """The report's "After tax" part: each line the report has with its invoice total and what it costs after
+        tax, TeslaMate's charging (paid personally), the reimbursement, and the year's after-tax cost. With no
+        marginal rate there are no figures. A total that depends on something unknown is None, never a number
+        standing in for it. Purchases are left out, as in the running costs."""
+        rate = db.get_settings(conn)["marginal_tax_rate"]
+        if rate is None:
+            return {"rate_set": False}
+        rows = [r for r in db.after_tax_facts(conn, tz, car_id=car["id"], year=year) if r["kind"] != "purchase"]
+        if budgets_on:
+            names = {**lease.POOLS, lease.NO_POOL: "Not in a pool"}
+            found = lease.after_tax_lines(rows, lambda r: r["budget_pool"] or lease.NO_POOL, rate)
+            order = [k for k in names if k in found]
+        else:
+            names = {}
+            found = lease.after_tax_lines(rows, lambda r: r["category"], rate)
+            order = sorted(found)
+        lines = [{"key": k, "label": names.get(k, k), **found[k]} for k in order]
+        invoice = sum((line["invoice"] for line in lines), Decimal(0))
+        effective = None if any(line["effective"] is None for line in lines) else sum((line["effective"] for line in lines), Decimal(0))
+        charging = report["teslamate_charging"]
+        if charging:
+            if charging["value"] is None:
+                invoice = effective = None
+            else:
+                invoice = None if invoice is None else invoice + Decimal(charging["value"])
+                effective = None if effective is None else effective + Decimal(charging["value"])
+        reimbursement = home_charging(conn, car, leases, year, today, rate)
+        total = effective
+        if reimbursement is not None:
+            total = None if reimbursement["result"] is None or effective is None else effective - reimbursement["result"]["tax_saved"]
+        return {"rate_set": True, "lines": lines, "charging": charging, "invoice": invoice, "effective": effective,
+                "reimbursement": reimbursement, "total": total}
+
     @app.get("/cars/<int:car_id>/fbt")
     def car_fbt(car_id):
         car = car_or_404(car_id)
@@ -1057,11 +1145,12 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             # TeslaMate's charging for the year (only its part: what was entered by hand is already in the costs)
             charging = sources.charging_cost(conn, teslamate(conn), car_id, datetime(year, 4, 1, tzinfo=zone),
                                              datetime(year + 1, 4, 1, tzinfo=zone), include_manual=False)
-        report = lease.fbt_report(leases, costs, charging, year, today)
+            report = lease.fbt_report(leases, costs, charging, year, today)
+            after = fbt_after_tax(conn, car, leases, report, year, today, budgets_on)
         earlier, later = [y for y in years if y < year], [y for y in years if y > year]
         return render_template("fbt.html", car=car, report=report, today=today, budgets_on=budgets_on, frequencies={k: v[0] for k, v in lease.FREQUENCIES.items()},
                                previous=earlier[-1] if earlier else None, following=later[0] if later else None,
-                               label=lease.fbt_label)
+                               label=lease.fbt_label, after=after)
     # ---- reminders (roadmap item 4) ------------------------------------------------
 
     def open_items(conn, car_id=None):
@@ -1237,19 +1326,31 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             if not db.set_budget_pool(conn, category_id, pool):
                 abort(404)
         return redirect(url_for("categories", msg="category_pool"), 303)
+
+    @app.post("/categories/<int:category_id>/gst_free")
+    def category_gst_free(category_id):
+        """An unticked box sends nothing, so the form saying it is ticked is exactly "1"."""
+        with connect() as conn:
+            if not db.set_gst_free(conn, category_id, request.form.get("gst_free") == "1"):
+                abort(404)
+        return redirect(url_for("categories", msg="category_gst_free"), 303)
     # ---- change history ---------------------------------------------------------
 
     # Field -> label, in the order they are shown. id and the created/updated stamps are never shown.
     history_fields = {
         "expense": (("car_id", "Car"), ("category_id", "Category"), ("occurred_at", "Date and time"),
                     ("amount", "Amount"), ("odometer_km", "Odometer"), ("vendor", "Vendor"), ("notes", "Notes"),
-                    ("invoice_url", "Invoice link"), ("invoice_path", "Invoice file")),
+                    ("invoice_url", "Invoice link"), ("invoice_path", "Invoice file"), ("packaged", "Paid from")),
         "category": (("name", "Name"), ("kind", "Kind"), ("sort_order", "Sort order"),
-                     ("upload_folder", "Invoice subfolder")),
+                     ("upload_folder", "Invoice subfolder"), ("gst_free", "GST-free")),
     }
 
     def history_entries(entries, car_names, category_names):
         def show(field, value):
+            if field == "packaged":
+                return {None: "Automatic", True: "The package", False: "Personally"}.get(value, str(value))
+            if field == "gst_free":
+                return "Yes" if value else "No"
             if value is None or value == "":
                 return "—"
             if field == "car_id":
@@ -1276,7 +1377,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 changed = [(label, show(f, before.get(f)), show(f, after.get(f)))
                            for f, label in fields if before.get(f) != after.get(f)]
             else:
-                changed = [(label, None, show(f, row.get(f))) for f, label in fields if row.get(f) not in (None, "")]
+                changed = [(label, None, show(f, row.get(f))) for f, label in fields
+                           if row.get(f) not in (None, "") and not (f == "gst_free" and row.get(f) is False)]
             if e["table_name"] == "expense":
                 title = "Expense: " + " · ".join(
                     x for x in (category_names.get(row.get("category_id")), car_names.get(row.get("car_id")),
@@ -1912,6 +2014,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
     @app.route("/settings", methods=["GET", "POST"])
     def settings():
         values, errors = {}, {}
+        ev_form_values, new_rate = {}, {"year": "", "cents": ""}
         if request.method == "POST":
             for field in ("app_url", "grafana_url"):
                 raw = request.form.get(field, "")
@@ -1932,6 +2035,35 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 values["invoice_name_format"] = validation.parse_name_format(raw)
             except ValueError as exc:
                 errors["invoice_name_format"] = str(exc)
+            raw = request.form.get("marginal_tax_rate", "")
+            values["marginal_tax_rate"] = raw
+            try:
+                values["marginal_tax_rate"] = validation.parse_marginal_rate(raw)
+            except ValueError as exc:
+                errors["marginal_tax_rate"] = str(exc)
+            with connect() as conn:
+                known_rates = db.ev_charging_rates(conn)
+            rate_changes = {}
+            for year in known_rates:       # the rows on the page: each is checked, so a bad one is shown where it is
+                field = f"ev_rate_{year}"
+                if field in request.form:
+                    ev_form_values[year] = request.form[field]
+                    try:
+                        rate_changes[year] = validation.parse_cents_per_km(request.form[field])
+                    except ValueError as exc:
+                        errors[field] = str(exc)
+            new_rate.update(year=request.form.get("new_rate_year", ""), cents=request.form.get("new_rate_cents", ""))
+            if new_rate["year"].strip() or new_rate["cents"].strip():
+                try:
+                    new_year = validation.parse_rate_year(new_rate["year"])
+                except ValueError as exc:
+                    errors["new_rate_year"] = str(exc)
+                try:
+                    new_cents = validation.parse_cents_per_km(new_rate["cents"])
+                except ValueError as exc:
+                    errors["new_rate_cents"] = str(exc)
+                if not errors.keys() & {"new_rate_year", "new_rate_cents"}:
+                    rate_changes[new_year] = new_cents
             values["lease_budgets"] = bool(request.form.get("lease_budgets"))
             raw = request.form.get("multi_amount", "max")
             values["multi_amount"] = raw
@@ -1948,12 +2080,19 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                                      None if date_pattern == validation.DEFAULT_DATE_PATTERN else date_pattern,
                                      None if name_format == validation.DEFAULT_NAME_FORMAT else name_format,
                                      values["multi_amount"], values["lease_budgets"])
+                    db.set_marginal_tax_rate(conn, values["marginal_tax_rate"])
+                    for year, cents in rate_changes.items():
+                        db.set_ev_charging_rate(conn, year, cents)
+                refresh_dashboard()         # the cost-after-tax panels appear and go with the rate
                 log.info("settings saved")
                 return redirect(url_for("settings", msg="settings"), 303)
         else:
             with connect() as conn:
                 values = db.get_settings(conn)
+        with connect() as conn:
+            ev_rates = db.ev_charging_rates(conn)
         return render_template("settings.html", values=values, errors=errors, aliases=validation.NAME_ALIASES,
+                               ev_rates=ev_rates, ev_rate_values=ev_form_values, new_rate=new_rate,
                                date_default=validation.DEFAULT_DATE_PATTERN, name_default=validation.DEFAULT_NAME_FORMAT,
                                multi_choices=validation.MULTI_AMOUNT_CHOICES, example=name_example(values),
                                message=MESSAGES.get(request.args.get("msg", ""))), (400 if errors else 200)
