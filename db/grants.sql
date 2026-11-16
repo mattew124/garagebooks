@@ -36,3 +36,5 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON garagebooks.reminder TO :"app_role";
 GRANT SELECT ON garagebooks.reminder_due TO :"app_role";
 -- The change history: the app adds to it (through the triggers) and reads it, never rewrites it.
 GRANT SELECT, INSERT ON garagebooks.change_log TO :"app_role";
+-- Scheduled jobs: the scheduler adds a row for each job and records each run.
+GRANT SELECT, INSERT, UPDATE ON garagebooks.job TO :"app_role";

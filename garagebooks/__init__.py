@@ -22,7 +22,7 @@ from flask import (Flask, abort, g, has_request_context, jsonify, make_response,
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from . import dashboard, db, docinfo, icons, invoices, lease, leaseform, logs, onedrive, reminders, sources, storage, updates, validation
+from . import dashboard, db, docinfo, icons, invoices, jobs, lease, leaseform, logs, onedrive, reminders, sources, storage, updates, validation
 
 log = logging.getLogger("garagebooks.app")
 
@@ -116,13 +116,15 @@ class PrefixMiddleware:
         return [b"Not found\n"]
 
 
-def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_fetch=None):
+def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_fetch=None, background_jobs=True):
     """`connect` is injectable so tests can hand in a connection to a scratch DB,
-    `onedrive_transport` so they can stand in for Microsoft, `release_fetch` for GitHub and `icon_fetch` for the provider icon's source."""
+    `onedrive_transport` so they can stand in for Microsoft, `release_fetch` for GitHub and `icon_fetch` for the provider icon's source.
+    `background_jobs=False` is for the worker (`python -m garagebooks worker`), which runs the scheduled jobs itself."""
     app = Flask(__name__)
     logs.configure(app.logger, os.environ.get("LOG_LEVEL"))
     log = app.logger
     tz = os.environ.get("APP_TZ", "UTC")
+    real_start = connect is None      # not a test handing in its own database
     if connect is None:
         connect = db.connect
         if os.environ.get("SKIP_MIGRATE") != "1":
@@ -263,6 +265,26 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
              tz, base_path or "/", "on" if drive else "off", "on" if local else "off",
              "on" if update_check.active else "off")
     update_check.status()    # starts the first check now, so the footer knows by the first page
+
+    # Scheduled jobs (jobs.py). Add a job here, beside the things it needs. Where they run is SCHEDULER:
+    # in this process (the default), in a worker container, or nowhere.
+    scheduler = jobs.Scheduler(connect, log)
+    scheduler.add("teslamate", timedelta(hours=1), lambda conn: f"TeslaMate: {teslamate(conn, fresh=True).state}",
+                  "Looks at TeslaMate again: adds its new cars, and holds its figures back or lets them through.")
+    scheduler.add("dashboard", timedelta(hours=6), lambda _conn: refresh_dashboard(),
+                  "Rewrites the Grafana dashboard, so its time range and panels follow the data.")
+    app.extensions["scheduler"] = scheduler
+    try:
+        jobs_mode = jobs.mode(os.environ)
+    except ValueError as exc:
+        log.error("%s Running the scheduled jobs in the app, as if it were unset.", exc)
+        jobs_mode = "app"
+    app.extensions["scheduler_mode"] = jobs_mode
+    if real_start and background_jobs and jobs_mode == "app":
+        scheduler.start_thread()
+    log.info("scheduled jobs: %s", {"app": "run by this process", "off": "switched off (SCHEDULER=off)",
+                                    "worker": "left to a worker (SCHEDULER=worker)"}[jobs_mode]
+             if background_jobs else "this is the worker")
 
     # ---- helpers --------------------------------------------------------------
 

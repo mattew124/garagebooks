@@ -609,3 +609,16 @@ ALTER TABLE garagebooks.lease ADD COLUMN IF NOT EXISTS agreement_path text
 -- Lease budgets (the provider's yearly budget pools) are optional and off until turned on in Settings:
 -- the lease pages, the Categories page and the FBT year report leave them out while this is false.
 ALTER TABLE garagebooks.setting ADD COLUMN IF NOT EXISTS lease_budgets boolean NOT NULL DEFAULT false;
+
+-- Scheduled jobs (roadmap item 7): one row per job the app knows, written by the scheduler (jobs.py).
+-- last_started_at is also the claim: a job that is due is taken with one UPDATE of this row, so two
+-- web workers, or the app and a worker container, never both run it.
+--   last_finished_at  NULL while it runs (or when the process stopped part-way)
+--   last_ok           how the last run went; last_message is a few words for the Settings page
+CREATE TABLE IF NOT EXISTS garagebooks.job (
+    name             text PRIMARY KEY CHECK (name ~ '^[a-z][a-z0-9_]{0,39}$'),
+    last_started_at  timestamptz,
+    last_finished_at timestamptz,
+    last_ok          boolean,
+    last_message     text CHECK (last_message IS NULL OR length(last_message) <= 500)
+);

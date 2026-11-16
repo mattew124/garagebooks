@@ -54,6 +54,13 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "no_teslamate: only for a database with no TeslaMate (TEST_TESLAMATE=0)")
 
 
+@pytest.fixture(autouse=True)
+def no_background_jobs(monkeypatch):
+    """A test that starts the app for real must not leave the scheduler's thread running behind it.
+    test_jobs.py covers when that thread is started."""
+    monkeypatch.setenv("SCHEDULER", "off")
+
+
 def pytest_collection_modifyitems(config, items):
     for item in items:
         if item.get_closest_marker("teslamate") and not TESLAMATE:
