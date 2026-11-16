@@ -63,7 +63,21 @@ The provider's statement works out how far the car must go, from an estimated an
 | (h) | Odometer needed at (d) | c + g |
 | (i) | Km per day needed | g ÷ f |
 
-GarageBooks adds what the statement can't show: km per day actually driven, from TeslaMate.
+GarageBooks shows (a) to (i) for each lease with an estimate, on the FBT year report and the lease page, and adds what the
+statement can't show, from the odometer (TeslaMate's, or the latest reading entered by hand on or before the moment):
+
+| | Figure | Formula |
+|---|---|---|
+| (j) | Km driven so far | odometer now − (c); for a year that is over, the odometer at (d) − (c) |
+| (k) | Days so far | whole days from (b) to today, up to (f) (today still counts as to drive) |
+| (l) | Km per day actually driven | j ÷ k |
+| (m) | Km ahead (+) or behind (−) the pro-rata pace | j − a × k ÷ e |
+| (n) | Km per day needed from today | (g − j) ÷ (f − k), at least 0; blank when no days remain |
+
+Days held count both ends of the period, so (f) is one more than d − b. Each figure is rounded to 0.1 km once,
+at the end. A figure that needs an odometer that isn't known is blank (shown as *not known*), never 0. The dashboard's
+**Kilometre pace** panel works out the same figures in SQL, using `garagebooks.odometer_at(car, moment)`, which answers like the
+app does with TeslaMate present, absent and held back.
 
 ## Tax year, bracket and Medicare status
 
