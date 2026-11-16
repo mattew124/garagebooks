@@ -329,7 +329,7 @@ _AFTER_TAX_SELECT = """
 def after_tax_facts(conn, tz, car_id=None, category_id=None, year=None, expense_ids=None):
     """Expenses with what lease.effective_cost() needs, newest first. Narrowed to a car, a category, an FBT
     year (by each expense's date in `tz`) or some expense ids."""
-    where = ["(%(car)s::integer IS NULL OR e.car_id = %(car)s)", "(%(cat)s::integer IS NULL OR e.category_id = %(cat)s)",
+    where = ["(%(car)s::bigint IS NULL OR e.car_id = %(car)s)", "(%(cat)s::bigint IS NULL OR e.category_id = %(cat)s)",
              "(%(year)s::integer IS NULL OR garagebooks.fbt_year((e.occurred_at AT TIME ZONE %(tz)s)::date) = %(year)s)",
              "(%(ids)s::bigint[] IS NULL OR e.id = ANY(%(ids)s))"]
     return conn.execute(f"{_AFTER_TAX_SELECT} WHERE {' AND '.join(where)} ORDER BY e.occurred_at DESC, e.id DESC",
@@ -656,7 +656,7 @@ def open_reminders(conn, car_id=None):
         "FROM garagebooks.reminder_due d JOIN garagebooks.car c ON c.id = d.car_id "
         "LEFT JOIN garagebooks.category cat ON cat.id = d.category_id "
         "LEFT JOIN garagebooks.reminder r ON r.id = d.reminder_id "
-        "WHERE (%(car)s::integer IS NULL OR d.car_id = %(car)s)", {"car": car_id}).fetchall()
+        "WHERE (%(car)s::bigint IS NULL OR d.car_id = %(car)s)", {"car": car_id}).fetchall()
 
 
 def get_reminder(conn, reminder_id, lock=False):
