@@ -51,10 +51,6 @@ directly.
   *Why now:* A small item that uses the lease estimate and the odometer, both now in place.
   *Depends on:* L1, T1
 
-- **7. Scheduled jobs** (size M)
-  A small scheduler for periodic work, either in the app or as an optional second container from the same image (`garagebooks worker`), so the web process stays light.
-  *Why now:* Notifications (8), watching the invoice folder (13) and reading rates (L7) all need it.
-  *Depends on:* —
 
 ## Next
 
@@ -291,6 +287,7 @@ These are in main since 2026-11-16 and not yet in a release:
 - **4. Reminders by date or odometer.** Recurring reminders, resolved by linking the expense that did the job (#83).
 - **5. Payment calculator.** Work out a payment made of several parts on the amount field (#77).
 - **6. Stricter quality gates.** A higher coverage floor, property-based tests and an SBOM on each release (#78).
+- **7. Scheduled jobs.** A small scheduler for periodic work, run by the app or by an optional worker container from the same image (`python3 -m garagebooks worker`), with each job's last run shown on Settings (#90).
 - **8. Notifications.** Push notices through an address you set (ntfy, Apprise or a Home Assistant webhook): a reminder coming due or overdue, the OneDrive client secret nearing its expiry date, and the OneDrive sign-in lost (#89). Two notices wait for the features they report on: new invoices waiting for review (with item 13) and a lease budget heading for a shortfall (with L3).
 - **Review changes.** Lease form import and documents per lease period, several lease periods per car, associate leases, optional lease budgets, packaging per car, the purchase price on the Cars page, a list of standard service reminders, and the Sold panel only once a car is sold (#85). The manual odometer readings were removed.
 

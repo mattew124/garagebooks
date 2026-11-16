@@ -2,29 +2,42 @@
 # It joins TeslaMate's own compose network (external) to reach the `database`
 # service, using the same database user and password as TeslaMate. The app creates
 # its own `garagebooks` schema when it starts. See https://mattew124.github.io/garagebooks/setup/
+
+# What the app and the optional worker share: the same image, hardening, settings and volume.
+x-garagebooks: &garagebooks
+  build: .
+  # Pin a released version: GARAGEBOOKS_IMAGE=ghcr.io/mattew124/garagebooks:0.1.0
+  image: ${GARAGEBOOKS_IMAGE:-garagebooks:latest}
+  restart: unless-stopped
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  tmpfs: ["/dev/shm"]
+  env_file: .env
+  volumes:
+    - dashboards:/dashboards
+  networks:
+    - teslamate
+
+x-garagebooks-environment: &environment
+  DATABASE_HOST: database
+  BASE_PATH: ${BASE_PATH:-/garagebooks}
+  # TeslaMate's own variable: this host's name. Pre-fills the Settings page on first start.
+  FQDN_TM: ${FQDN_TM:-}
+  APP_TZ: ${APP_TZ:-UTC}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  TZ: ${APP_TZ:-UTC}
+  # The app writes its Grafana dashboard here, for Grafana to provision (see Setup in the docs).
+  DASHBOARD_DIR: ${DASHBOARD_DIR-/dashboards}
+
 services:
   garagebooks:
-    build: .
-    # Pin a released version: GARAGEBOOKS_IMAGE=ghcr.io/mattew124/garagebooks:0.1.0
-    image: ${GARAGEBOOKS_IMAGE:-garagebooks:latest}
-    restart: unless-stopped
-    read_only: true
-    cap_drop: [ALL]
-    security_opt: ["no-new-privileges:true"]
-    tmpfs: ["/dev/shm"]
-    env_file: .env
+    <<: *garagebooks
     environment:
-      DATABASE_HOST: database
-      BASE_PATH: ${BASE_PATH:-/garagebooks}
-      # TeslaMate's own variable: this host's name. Pre-fills the Settings page on first start.
-      FQDN_TM: ${FQDN_TM:-}
-      APP_TZ: ${APP_TZ:-UTC}
-      LOG_LEVEL: ${LOG_LEVEL:-info}
-      TZ: ${APP_TZ:-UTC}
-      # The app writes its Grafana dashboard here, for Grafana to provision (see Setup in the docs).
-      DASHBOARD_DIR: ${DASHBOARD_DIR-/dashboards}
-    volumes:
-      - dashboards:/dashboards
+      <<: *environment
+      # Where the scheduled jobs run: app (the default: in this container), worker (the `worker` service
+      # below does it) or off. See Scheduled jobs in the docs.
+      SCHEDULER: ${SCHEDULER:-app}
     ports:
       # Loopback only; docker-compose.traefik.yml publishes it behind forward-auth.
       - "127.0.0.1:${HOST_PORT:-8088}:8080"
@@ -34,8 +47,20 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-    networks:
-      - teslamate
+
+  # Optional: the scheduled jobs in a container of their own, so the web process stays light. Off unless
+  # asked for: set SCHEDULER=worker in .env and start it with
+  #   docker compose --profile worker up -d
+  worker:
+    <<: *garagebooks
+    profiles: ["worker"]
+    command: ["python3", "-m", "garagebooks", "worker"]
+    environment:
+      <<: *environment
+      SCHEDULER: worker
+    # It listens on nothing, so there is no port and no HTTP check. If it stops, the restart policy starts it.
+    healthcheck:
+      disable: true
 
 volumes:
   dashboards:

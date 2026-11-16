@@ -2,7 +2,7 @@
 
 GarageBooks can push a notice to your phone when something needs you. You give it an address
 (ntfy, an Apprise API, or a Home Assistant webhook) on the **Settings** page, and a
-[scheduled job](reference.md) sends the notices. With no address set, nothing is sent.
+[scheduled job](scheduled-jobs.md) sends the notices. With no address set, nothing is sent.
 
 ## What you are told, and when
 

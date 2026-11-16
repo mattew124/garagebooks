@@ -30,7 +30,7 @@
 #   scripts/dev.sh onedrive-link     load that sign-in into this stack, pointed at the
 #                                    /Expenses test folder
 #   scripts/dev.sh psql [args]       psql on the test database
-#   scripts/dev.sh logs              follow the app's logs
+#   scripts/dev.sh logs              follow the app's logs (and the worker's, with SCHEDULER=worker)
 #
 # Settings come from ./dev.env (gitignored; see dev.env.example). That includes where the stack's invoice
 # folder is: .dev/invoices here, a folder of its own on a mounted share (DEV_INVOICES_SHARE) or one folder
@@ -129,7 +129,11 @@ compose() {
     local files=(-f docker-compose.dev.yml)
     # PUBLIC_HOST set: publish through the reverse proxy instead of on loopback.
     [ -z "${PUBLIC_HOST:-}" ] || files+=(-f docker-compose.dev.traefik.yml)
-    docker compose -p "$PROJECT" "${files[@]}" --env-file "$ENVF" "$@"
+    # SCHEDULER=worker (dev.env): the scheduled jobs run in the dev-worker container, not in the app. `down`
+    # always names the profile, so a worker started earlier is stopped too.
+    local profile=""
+    { [ "${SCHEDULER:-}" != worker ] && [ "${1:-}" != down ]; } || profile=worker
+    COMPOSE_PROFILES="$profile" docker compose -p "$PROJECT" "${files[@]}" --env-file "$ENVF" "$@"
 }
 dev_psql() { compose exec -T dev-db psql -X -q -v ON_ERROR_STOP=1 -U teslamate -d teslamate "$@"; }
 
@@ -538,6 +542,8 @@ case "${1:-}" in
         fi ;;
     sample-invoices) ensure_env; require_invoices; python3 scripts/dev-sample-invoices.py "$DEV_INVOICES_DIR" ;;
     psql) ensure_env; shift; dev_psql "$@" ;;
-    logs) ensure_env; compose logs -f garagebooks-dev ;;
+    logs) ensure_env
+        if [ "${SCHEDULER:-}" = worker ]; then compose logs -f garagebooks-dev dev-worker
+        else compose logs -f garagebooks-dev; fi ;;
     *) sed -n '3,34p' "$0" >&2; exit 2 ;;
 esac

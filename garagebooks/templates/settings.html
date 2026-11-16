@@ -46,6 +46,28 @@
       budgets already entered are kept.</small></span></label>
   <button type="submit" class="button">Save</button>
 </form>
+<section class="card stack" id="scheduled-jobs">
+  <h2 class="card-title">Scheduled jobs</h2>
+  <p id="jobs-where">{% if jobs_mode == "worker" %}These jobs run in a worker container, a second container from the same image.
+    {%- elif jobs_mode == "off" %}Scheduled jobs are switched off (<code>SCHEDULER=off</code>), so none of these run. See
+    <a href="{{ docs_url }}scheduled-jobs/" target="_blank" rel="noopener noreferrer">Scheduled jobs</a> in the documentation to turn them on.
+    {%- else %}These jobs are run by this app, in the background.{% endif %}</p>
+  <ul class="jobs">
+    {% for job in job_list %}{% set state = job | job_state %}
+    <li data-job="{{ job.name }}" data-state="{{ state }}">
+      <strong>{{ job.name }}</strong>, {{ job.every | every }}<br>
+      <small>{{ job.description }}</small><br>
+      <small>Last run:
+        {% if state == "never" %}Not run yet.
+        {%- else %}{{ job.last_started_at | when }}.
+          {% if state == "ok" %}OK{% if job.last_message %}: {{ job.last_message }}{% endif %}.
+          {%- elif state == "failed" %}Failed{% if job.last_message %}: {{ job.last_message }}{% endif %}.
+          {%- else %}Running, or interrupted.{% endif %}
+          Next due: {{ job.next_due_at | when }}.{% endif %}</small>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
 <h2 id="notifications">Notifications</h2>
 <form method="post" action="{{ url_for('notifications_save') }}" class="card stack">
   <p>Push a notice to your phone when a reminder comes due, the OneDrive client secret is nearing its expiry date, or the
