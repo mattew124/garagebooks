@@ -350,3 +350,18 @@ label.check { display: flex; align-items: center; gap: .5rem; font-weight: 500; 
 .pager { margin: 0 0 1rem; }
 #add-reminder { margin-top: 1.5rem; }
 #resolved { margin-top: 2rem; }
+/* Change history */
+.history { display: grid; gap: .75rem; margin: 1rem 0; padding: 0; list-style: none; }
+.history .change { padding: .8rem 1rem; }
+.change-head { display: flex; flex-wrap: wrap; gap: .5rem; align-items: baseline; }
+.change-head strong { overflow-wrap: anywhere; }
+.op { font-size: .75rem; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; padding: .1rem .5rem;
+  border-radius: 99px; background: var(--accent-soft); color: var(--accent); }
+.op-insert { background: var(--good-soft); color: var(--good); }
+.op-delete { background: var(--bad-soft); color: var(--bad); }
+.change-meta { margin: .15rem 0 0; }
+.change-fields { display: grid; grid-template-columns: max-content 1fr; gap: .2rem .9rem; margin: .6rem 0 0; }
+.change-fields dt { color: var(--muted); font-size: .85rem; }
+.change-fields dd { margin: 0; overflow-wrap: anywhere; }
+.change-fields .was { text-decoration: line-through; color: var(--muted); }
+.pager { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin: 1rem 0; }

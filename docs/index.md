@@ -96,6 +96,16 @@ Starter categories: Initial purchase, Insurance, Registration, Tyres, Cabin air 
 Air filter, Wheel alignment, Tyre rotation. Add more on the **Categories** page
 (new ones count as running costs).
 
+## Change history
+
+The **History** page lists every add, edit and delete of an expense or category, newest first: when,
+who, and what changed (for an edit, each changed field as old → new; for an add or delete, the whole
+row). Filter it by car, by expenses or categories, or by kind of change. It is read-only: if
+something was changed or deleted by mistake, enter the old values again. See
+[Reference](reference.md#change-history) for how it is recorded.
+
+<!-- screenshot: change-history - The History page, listing an add, an edit and a delete -->
+
 ## How it fits together
 
 The expenses live in their own `garagebooks` schema inside the TeslaMate database, so Grafana joins

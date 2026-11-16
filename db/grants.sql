@@ -34,3 +34,5 @@ GRANT SELECT (car_id, start_date, cost) ON public.charging_processes TO :"app_ro
 -- Reminders, and the view that adds the ones derived from a car's lease.
 GRANT SELECT, INSERT, UPDATE, DELETE ON garagebooks.reminder TO :"app_role";
 GRANT SELECT ON garagebooks.reminder_due TO :"app_role";
+-- The change history: the app adds to it (through the triggers) and reads it, never rewrites it.
+GRANT SELECT, INSERT ON garagebooks.change_log TO :"app_role";

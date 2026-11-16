@@ -632,3 +632,13 @@ def parse_resolve_form(form, today):
     except ValueError as exc:
         errors["km"] = str(exc)
     return values, errors
+ACTOR_MAX = 200
+
+
+def parse_actor(raw):
+    """The signed-in user as the sign-in gate names them in a request header, for the change history:
+    control characters dropped, ends trimmed, cut to ACTOR_MAX. None when nothing is left."""
+    if not raw:
+        return None
+    cleaned = "".join(ch for ch in raw if ch.isprintable()).strip()[:ACTOR_MAX].strip()
+    return cleaned or None

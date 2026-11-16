@@ -16,7 +16,8 @@ from datetime import date, datetime, time as dtime, timedelta, timezone
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
-from flask import Flask, abort, g, jsonify, make_response, redirect, render_template, request, send_file, url_for
+from flask import (Flask, abort, g, has_request_context, jsonify, make_response, redirect, render_template, request,
+                   send_file, url_for)
 
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -131,6 +132,20 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 if not db.has_schema(conn):
                     raise RuntimeError("SKIP_MIGRATE=1, but the 'garagebooks' schema in this database is from an "
                                        "older release. Run scripts/provision-db.sh again, then start the app.")
+    # Who made a change, for the change history. The sign-in gate in front of the app names the user in
+    # a request header; AUTH_USER_HEADER says which. Unset (the default) the header is never read: it is
+    # only trustworthy when the proxy strips it from client requests. Every database connection the
+    # app opens passes it on, so each write path is covered, and it lasts for that transaction only.
+    actor_header = (os.environ.get("AUTH_USER_HEADER") or "").strip()
+    if actor_header:
+        open_connection = connect
+
+        def connect():
+            conn = open_connection()
+            actor = validation.parse_actor(request.headers.get(actor_header)) if has_request_context() else None
+            if conn is not None and actor:
+                conn.execute("SELECT set_config('garagebooks.actor', %s, true)", (actor,))
+            return conn
     dashboard_dir = os.environ.get("DASHBOARD_DIR")
     allow_untested = os.environ.get("ALLOW_UNTESTED_TESLAMATE") == "1"
     # What is known about TeslaMate, looked at again every so often: it may be installed, upgraded
@@ -1105,6 +1120,75 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             if not db.set_budget_pool(conn, category_id, pool):
                 abort(404)
         return redirect(url_for("categories", msg="category_pool"), 303)
+    # ---- change history ---------------------------------------------------------
+
+    # Field -> label, in the order they are shown. id and the created/updated stamps are never shown.
+    history_fields = {
+        "expense": (("car_id", "Car"), ("category_id", "Category"), ("occurred_at", "Date and time"),
+                    ("amount", "Amount"), ("odometer_km", "Odometer"), ("vendor", "Vendor"), ("notes", "Notes"),
+                    ("invoice_url", "Invoice link"), ("invoice_path", "Invoice file")),
+        "category": (("name", "Name"), ("kind", "Kind"), ("sort_order", "Sort order"),
+                     ("upload_folder", "Invoice subfolder")),
+    }
+
+    def history_entries(entries, car_names, category_names):
+        def show(field, value):
+            if value is None or value == "":
+                return "—"
+            if field == "car_id":
+                return car_names.get(value, f"car {value}")
+            if field == "category_id":
+                return category_names.get(value, f"category {value}")
+            if field == "amount":
+                return money(Decimal(str(value)))
+            if field == "odometer_km":
+                return km(value)
+            if field == "occurred_at":
+                try:
+                    return when(datetime.fromisoformat(value))
+                except (TypeError, ValueError):
+                    return str(value)
+            return str(value)
+
+        out = []
+        for e in entries:
+            before, after = e["before_row"] or {}, e["after_row"] or {}
+            row = after or before
+            fields = history_fields[e["table_name"]]
+            if e["operation"] == "update":
+                changed = [(label, show(f, before.get(f)), show(f, after.get(f)))
+                           for f, label in fields if before.get(f) != after.get(f)]
+            else:
+                changed = [(label, None, show(f, row.get(f))) for f, label in fields if row.get(f) not in (None, "")]
+            if e["table_name"] == "expense":
+                title = "Expense: " + " · ".join(
+                    x for x in (category_names.get(row.get("category_id")), car_names.get(row.get("car_id")),
+                                row.get("vendor")) if x)
+            else:
+                title = f"Category: {row.get('name', '')}"
+            out.append({"when": e["changed_at"], "actor": e["actor"], "operation": e["operation"],
+                        "label": {"insert": "Added", "update": "Edited", "delete": "Deleted"}[e["operation"]],
+                        "title": title, "row_id": e["row_id"], "table": e["table_name"], "fields": changed})
+        return out
+
+    @app.get("/history")
+    def history_page():
+        filters = {}
+        car = request.args.get("car", type=int)
+        if car:
+            filters["car"] = car
+        if request.args.get("table") in db.HISTORY_TABLES:
+            filters["table"] = request.args["table"]
+        if request.args.get("operation") in db.HISTORY_OPERATIONS:
+            filters["operation"] = request.args["operation"]
+        with connect() as conn:
+            entries, page, pages = db.history(conn, car, filters.get("table"), filters.get("operation"),
+                                              request.args.get("page", 1, type=int))
+            cars = db.cars(conn)
+            cats = db.categories(conn)
+        shown = history_entries(entries, {c["id"]: c["name"] for c in cars}, {c["id"]: c["name"] for c in cats})
+        return render_template("history.html", entries=shown, cars=cars, filters=filters, page=page, pages=pages,
+                               page_link=lambda n: url_for("history_page", **filters, **({"page": n} if n > 1 else {})))
 
     @app.get("/learned")
     def learned_page():

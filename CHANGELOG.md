@@ -7,6 +7,15 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+**Change history.** A new **History** page lists every add, edit and delete of an expense or category:
+when, who, and what changed (old and new values). It is written by triggers in the database, so changes
+made by other tools are recorded too, into an append-only `garagebooks.change_log` table. Who made a
+change is only known when you set the new optional `AUTH_USER_HEADER` to the header your forward-auth
+gate sets with the signed-in user (and the gate removes it from incoming requests); otherwise it shows
+*unknown*. Nothing is recorded for changes made before this version. **To upgrade:** pull the new image.
+If you use the restricted database role (`SKIP_MIGRATE=1`), re-run `scripts/provision-db.sh` first: it
+creates the log and grants the role `SELECT` and `INSERT` on it.
+
 The rename to GarageBooks reaches the last places the old name was kept: the database schema, the
 dashboard's address and the settings. The app upgrades your database itself on its first start, and
 your data, saved links and OneDrive sign-in carry over.

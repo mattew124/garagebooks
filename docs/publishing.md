@@ -174,6 +174,11 @@ curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: teslamate.example.com' \
 
 ## Things to keep in mind
 
+- The [change history](reference.md#change-history) can name who made each change, from the header your
+  gate sets with the signed-in user. Put that header's name in `AUTH_USER_HEADER` in `.env`, and only if
+  the gate strips it from incoming requests and sets it itself (Cloudflare Access sets
+  `Cf-Access-Authenticated-User-Email`). Left unset, changes are recorded as *unknown*.
+
 - Anyone your Access policy allows gets the **full** app: they can add, edit and delete expenses.
   Keep the policy narrow.
 - Cloudflare Access protects the public hostname only. Anything that reaches Traefik's port 80
