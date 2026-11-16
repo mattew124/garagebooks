@@ -219,7 +219,7 @@ pre-tax salary. With your marginal tax rate entered once in Settings (the rate, 
 each packaged expense and the totals show both the invoice amount and the effective cost. Expenses paid
 personally are unaffected. Nothing here is tax advice.
 
-Built (#PR): a **Paid from** choice on an expense (automatic, the package or personally), a **GST-free** tick
+Built (#91): a **Paid from** choice on an expense (automatic, the package or personally), a **GST-free** tick
 per category, the marginal rate and the ATO's home charging rates by FBT year in Settings, an **After tax**
 part on the FBT year report, two dashboard panels, and, for a battery electric car whose lease has it ticked,
 the home charging reimbursement: the ATO's cents-per-km rate (kept as data by FBT year: 4.20 cents per km for the
@@ -294,7 +294,7 @@ These are in main since 2026-11-16 and not yet in a release:
 - **4. Reminders by date or odometer.** Recurring reminders, resolved by linking the expense that did the job (#83).
 - **5. Payment calculator.** Work out a payment made of several parts on the amount field (#77).
 - **6. Stricter quality gates.** A higher coverage floor, property-based tests and an SBOM on each release (#78).
-- **L5. Cost after tax.** What a packaged expense costs after the GST and pre-tax salary, beside its invoice amount, and the home charging reimbursement (#PR).
+- **L5. Cost after tax.** What a packaged expense costs after the GST and pre-tax salary, beside its invoice amount, and the home charging reimbursement (#91).
 - **Review changes.** Lease form import and documents per lease period, several lease periods per car, associate leases, optional lease budgets, packaging per car, the purchase price on the Cars page, a list of standard service reminders, and the Sold panel only once a car is sold (#85). The manual odometer readings were removed.
 
 These were part of the original plan and are done: the dashboard as a version-controlled file that
