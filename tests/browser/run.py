@@ -1103,7 +1103,7 @@ def reminder_checks(page):
     car_id = car.get_attribute("id").removeprefix("car-")
     car.locator("summary", has_text="Odometer readings").click()
     from datetime import date, timedelta
-    car.locator("input[name=date]").fill((date.today() - timedelta(days=3)).isoformat())   # before the expense below
+    car.locator("form[action$=\"/readings\"] input[name=date]").fill((date.today() - timedelta(days=3)).isoformat())   # before the expense below
     car.locator("input[name=km]").fill("12,345")
     car.get_by_role("button", name="Add reading").click()
     page.wait_for_url(re.compile(r"msg=reading_added"))
@@ -1177,7 +1177,7 @@ def test_dashboard(page):
     errors = []
     page.on("response", lambda r: errors.append(f"{r.status} {r.url}")
             if "/api/ds/query" in r.url and r.status >= 400 else None)
-    page.set_viewport_size({"width": 1600, "height": 1800})
+    page.set_viewport_size({"width": 1600, "height": 2800})
     page.goto(GRAFANA + "d/garagebooks-tco/cost-of-ownership")
     # Stat titles appear, and a value comes back from the datasource.
     expect(page.get_by_text("Total cost", exact=True)).to_be_visible(timeout=30000)
