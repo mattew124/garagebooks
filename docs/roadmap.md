@@ -40,12 +40,6 @@ directly.
 
 ## Now
 
-- **L5. Cost after tax** (size M)
-  What an expense paid from pre-tax salary really costs, beside its invoice amount. Not built yet. It will
-  include the charging reimbursement for an electric car on a novated or associate lease.
-  *Why now:* For a packaged car, the invoice amount overstates what it costs, and the lease details and FBT year it needs (L1, L2) are in place.
-  *Depends on:* L1, L2
-
 - **L4. Kilometre pace** (size S)
   The km the lease estimate expects this FBT year against the odometer: TeslaMate's, or the odometer on the latest expense.
   *Why now:* A small item that uses the lease estimate and the odometer, both now in place.
@@ -218,17 +212,21 @@ From the lease's estimated km and the odometer (TeslaMate's, or the odometer on 
 the km expected by its end (pro rata if the car is held only part of the year), the km per day
 needed to get there, and the km per day actually driven. On the dashboard and the status page.
 
-### L5. Cost after tax (Now, M)
+### L5. Cost after tax (Done, M)
 
 A packaged expense costs less than its invoice: the GST is claimed back, and the rest comes from
 pre-tax salary. With your marginal tax rate entered once in Settings (the rate, not your salary),
-each packaged expense and the TCO show both the invoice amount and the effective cost, less any
-post-tax contributions. Expenses paid personally are unaffected.
+each packaged expense and the totals show both the invoice amount and the effective cost. Expenses paid
+personally are unaffected. Nothing here is tax advice.
 
-Not built yet. It will also include the charging reimbursement for an electric car on a novated or
-associate lease: the ATO's cents-per-km rate for home charging times the km driven, whatever the
-charging actually cost (4.20 cents per km for the FBT years to 31 March 2026, and 5.47 cents from 1 April 2026). The rate is set per FBT year, so it is
-kept as data by FBT year, like the other ATO figures.
+Built (#PR): a **Paid from** choice on an expense (automatic, the package or personally), a **GST-free** tick
+per category, the marginal rate and the ATO's home charging rates by FBT year in Settings, an **After tax**
+part on the FBT year report, two dashboard panels, and, for a battery electric car whose lease has it ticked,
+the home charging reimbursement: the ATO's cents-per-km rate (kept as data by FBT year: 4.20 cents per km for the
+FBT years to 31 March 2026 and 5.47 cents from 1 April 2026) times the km driven, and the tax saved on it. The
+formulas and their simplifications are on [Novated lease calculations](lease-calculations.md#cost-after-tax-l5).
+The reimbursement needs the odometer, so it is in the app only. The existing TCO figures keep their meaning:
+the after-tax figures sit beside them.
 
 ### L6. Read the provider's statements (Later, M)
 
@@ -296,6 +294,7 @@ These are in main since 2026-11-16 and not yet in a release:
 - **4. Reminders by date or odometer.** Recurring reminders, resolved by linking the expense that did the job (#83).
 - **5. Payment calculator.** Work out a payment made of several parts on the amount field (#77).
 - **6. Stricter quality gates.** A higher coverage floor, property-based tests and an SBOM on each release (#78).
+- **L5. Cost after tax.** What a packaged expense costs after the GST and pre-tax salary, beside its invoice amount, and the home charging reimbursement (#PR).
 - **Review changes.** Lease form import and documents per lease period, several lease periods per car, associate leases, optional lease budgets, packaging per car, the purchase price on the Cars page, a list of standard service reminders, and the Sold panel only once a car is sold (#85). The manual odometer readings were removed.
 
 These were part of the original plan and are done: the dashboard as a version-controlled file that
@@ -329,7 +328,7 @@ somewhere above; these are the ones adapted rather than taken as written.
 
 - **No dependency on TeslaMate:** The original plan's first system requirement, and the one most easily lost as features pile up. It is now T1, first in Now, with a design rule that every other item follows.
 
-- **Re-ranked on 2026-11-16:** The Now items shipped (see Already in place). Cost after tax (L5) is first in Now because you asked for it, with the charging reimbursement, then kilometre pace (L4), scheduled jobs (7) and notifications (8). Lease budgets (L3) moved to Later because budgets are now optional.
+- **Re-ranked on 2026-11-16:** The Now items shipped (see Already in place). Cost after tax (L5, with the charging reimbursement) was first in Now because you asked for it, and is now built; kilometre pace (L4), scheduled jobs (7) and notifications (8) follow. Lease budgets (L3) moved to Later because budgets are now optional.
 
 - **Hosting, secrets and deployment pipeline:** The installer's choice, not part of this project.
 

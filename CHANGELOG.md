@@ -7,6 +7,24 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+**Cost after tax (L5).** Nothing to do on upgrade: the app adds the new columns, the rates table and the
+`garagebooks.expense_after_tax(tz)` function itself. If you use the restricted database role (`SKIP_MIGRATE=1`),
+run `scripts/provision-db.sh` again first. Nothing changes until you enter a marginal tax rate in Settings.
+
+- **Cost after tax.** With your **marginal tax rate** entered in Settings (a percentage, Medicare levy included;
+  never a salary), an expense paid from a lease package shows what it costs after tax beside its invoice amount:
+  the GST is claimed back and the rest comes from pre-tax salary. An expense on the **Add expense** form has a
+  **Paid from** choice (automatic, the package or personally), shown for a car with a lease; automatic means a
+  lease covers its date, its category has a budget pool, and it isn't a purchase, so existing expenses need no
+  changes. The Categories page has a **GST-free** tick (Registration starts ticked). The expense list, the FBT
+  year report (a new **After tax** part) and the dashboard (**Running costs after tax** and **After tax by FBT
+  year**, written only while a rate is entered and a car has a lease) show it. The formulas and their
+  simplifications are on the Novated lease calculations page. Not tax advice.
+- **Home charging reimbursement.** A battery electric car's lease has a tick for home charging reimbursed at the
+  ATO's cents-per-km rate. The FBT year report then shows the km driven, the rate used, the reimbursement and the
+  tax saved on it. The ATO's rates by FBT year are in Settings (4.20 cents per km to FBT 2025–26, 5.47 from
+  1 April 2026), and can be changed or added to. With no odometer reading the report says *not known*.
+
 **Lease and car page changes.** Nothing to do on upgrade: the app adds the new columns itself.
 
 - **Roadmap.** Updated for what has shipped: the Now items are in place, cost after tax (L5) is next, and lease budgets (L3) move to Later.
