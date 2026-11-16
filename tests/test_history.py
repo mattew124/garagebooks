@@ -210,8 +210,7 @@ def test_filters(pg, admin, monkeypatch):
     client = make_client(pg, monkeypatch)
     client.post("/new", data=form(admin, vendor="Alpha"), headers=ORIGIN)
     client.post("/categories", data={"name": "Servicing"}, headers=ORIGIN)
-    admin.execute("INSERT INTO cars (id, eid, vid, vin, settings_id, name, inserted_at, updated_at) "
-                  "VALUES (2, 2, 2, 'VIN2', 2, 'Second car', now(), now())")
+    admin.execute("INSERT INTO garagebooks.car (id, name) VALUES (2, 'Second car')")
     try:
         admin.execute("INSERT INTO garagebooks.expense (car_id, category_id, occurred_at, amount, vendor) "
                       "VALUES (2, %s, now(), 7, 'Beta')", (category_id(admin, "Tyres"),))
@@ -227,7 +226,7 @@ def test_filters(pg, admin, monkeypatch):
         assert "Alpha" in page(car=1) and "Beta" not in page(car=1)
         assert "Alpha" in page(table="nonsense", operation="x", car="y", page="z")   # bad filters are ignored
     finally:
-        admin.execute("TRUNCATE garagebooks.expense; DELETE FROM cars WHERE id = 2")
+        admin.execute("TRUNCATE garagebooks.expense CASCADE; DELETE FROM garagebooks.car WHERE id = 2")
 
 
 def test_the_log_is_paginated(pg, admin, monkeypatch):
