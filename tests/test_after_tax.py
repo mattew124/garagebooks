@@ -731,3 +731,9 @@ def test_db_helpers_round_trip_the_rate_and_the_rates_table(empty_db, monkeypatc
         assert db.get_settings(conn)["marginal_tax_rate"] == D("34.00")
         db.set_ev_charging_rate(conn, 2027, D("6.00"))
         assert db.ev_charging_rates(conn)[2027] == D("6.00")
+
+
+def test_a_category_filter_outside_the_id_range_is_an_empty_list_not_a_crash(app):
+    client, _, _ = app
+    for n in ("32768", "2147483648", "9223372036854775808"):
+        assert client.get(f"/?category={n}").status_code == 200

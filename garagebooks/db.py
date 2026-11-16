@@ -329,6 +329,8 @@ _AFTER_TAX_SELECT = """
 def after_tax_facts(conn, tz, car_id=None, category_id=None, year=None, expense_ids=None):
     """Expenses with what lease.effective_cost() needs, newest first. Narrowed to a car, a category, an FBT
     year (by each expense's date in `tz`) or some expense ids."""
+    if any(v is not None and not 0 <= v <= 32767 for v in (car_id, category_id)):
+        return []                   # ids are smallint: nothing can match one outside it
     where = ["(%(car)s::bigint IS NULL OR e.car_id = %(car)s)", "(%(cat)s::bigint IS NULL OR e.category_id = %(cat)s)",
              "(%(year)s::integer IS NULL OR garagebooks.fbt_year((e.occurred_at AT TIME ZONE %(tz)s)::date) = %(year)s)",
              "(%(ids)s::bigint[] IS NULL OR e.id = ANY(%(ids)s))"]
