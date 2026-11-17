@@ -42,3 +42,5 @@ GRANT SELECT, INSERT ON garagebooks.change_log TO :"app_role";
 -- definition of an expense's cost after tax that the app and the dashboard share.
 GRANT SELECT, INSERT, UPDATE ON garagebooks.ev_charging_rate TO :"app_role";
 GRANT EXECUTE ON FUNCTION garagebooks.expense_after_tax(text) TO :"app_role";
+-- Scheduled jobs: the scheduler adds a row for each job and records each run.
+GRANT SELECT, INSERT, UPDATE ON garagebooks.job TO :"app_role";

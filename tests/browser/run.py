@@ -870,6 +870,22 @@ def test_settings_file_name_defaults_can_be_edited(page):
     shot(page, "settings-phone")
 
 
+def test_settings_lists_the_scheduled_jobs(page):
+    """Settings > Scheduled jobs: each built-in job with how often it runs and how its last run went. Read-only."""
+    page.goto(UI + "settings")
+    section = page.locator("#scheduled-jobs")
+    assert section.locator("h2").text_content() == "Scheduled jobs", section.locator("h2").text_content()
+    assert section.locator("#jobs-where").inner_text().strip(), "it says where the jobs run"
+    names = section.locator("li[data-job]").evaluate_all("els => els.map(e => e.dataset.job)")
+    assert names == ["dashboard", "teslamate"], names
+    states = section.locator("li[data-job]").evaluate_all("els => els.map(e => e.dataset.state)")
+    assert set(states) <= {"never", "ok", "failed", "running"}, states
+    assert "every hour" in section.locator('li[data-job="teslamate"]').inner_text()
+    assert section.locator("button, input, form").count() == 0
+    section.scroll_into_view_if_needed()
+    shot(page, "settings-jobs")
+
+
 def test_connect_reaches_microsoft(page):
     """Real Chromium enforces the CSP, so this is where a blocked redirect shows.
     The request to Microsoft is answered locally and never sent. Runs only when
@@ -1710,6 +1726,7 @@ def main():
         step("OneDrive page and upload field", test_onedrive_page, page)
         step("a PDF dropped on the form is chosen and read", test_pdf_can_be_dropped_on_the_form, page)
         step("file name settings start from the real defaults", test_settings_file_name_defaults_can_be_edited, page)
+        step("Settings lists the scheduled jobs", test_settings_lists_the_scheduled_jobs, page)
         step("Connect OneDrive goes to Microsoft", test_connect_reaches_microsoft, page)
         step("folder browser (read-only)", test_folder_browser, page)
         step("real upload to the OneDrive test folder", test_real_upload, page)

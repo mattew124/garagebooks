@@ -732,3 +732,16 @@ AS $fn$
                                     THEN l.posttax_payment ELSE 0 END AS post) q
     CROSS JOIN (SELECT (SELECT marginal_tax_rate FROM garagebooks.setting WHERE id = 1) AS rate) r
 $fn$;
+
+-- Scheduled jobs (roadmap item 7): one row per job the app knows, written by the scheduler (jobs.py).
+-- last_started_at is also the claim: a job that is due is taken with one UPDATE of this row, so two
+-- web workers, or the app and a worker container, never both run it.
+--   last_finished_at  NULL while it runs (or when the process stopped part-way)
+--   last_ok           how the last run went; last_message is a few words for the Settings page
+CREATE TABLE IF NOT EXISTS garagebooks.job (
+    name             text PRIMARY KEY CHECK (name ~ '^[a-z][a-z0-9_]{0,39}$'),
+    last_started_at  timestamptz,
+    last_finished_at timestamptz,
+    last_ok          boolean,
+    last_message     text CHECK (last_message IS NULL OR length(last_message) <= 500)
+);

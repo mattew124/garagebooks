@@ -59,6 +59,12 @@ The app looks at the database once a minute and is in one of four states, shown 
 
 Held-back figures are shown as *unavailable*, never as zero, and nothing else stops. When TeslaMate appears, is repaired or is upgraded past, the app notices within a minute, with no restart: it adds TeslaMate's cars, and rewrites the dashboard and the `garagebooks.ownership` view to match. GarageBooks only ever reads TeslaMate's `cars`, `positions` and `charging_processes` tables, and none of its own tables points at them, so TeslaMate can be removed, or delete a car, without touching your expenses.
 
+## Scheduled jobs
+
+`SCHEDULER` (in `.env`, restart to apply) says where the periodic work runs: `app` (the default, a background
+thread in the app), `worker` (a second container from the same image, started with `docker compose --profile
+worker up -d`) or `off`. See [Scheduled jobs](scheduled-jobs.md).
+
 ## Cost after tax in the database
 
 For queries of your own: `garagebooks.expense_after_tax('Australia/Brisbane')` returns every expense with its car,

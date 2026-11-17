@@ -7,6 +7,16 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+**Scheduled jobs.** Nothing to do on upgrade: the app adds the new table itself and runs the jobs in the background.
+With the restricted role from `scripts/provision-db.sh` and `SKIP_MIGRATE=1`, run the script again so the role can
+write the new `garagebooks.job` table.
+
+- **Scheduled jobs.** A small scheduler runs periodic work: it looks at TeslaMate again every hour and rewrites the
+  Grafana dashboard every six hours. The **Settings** page has a **Scheduled jobs** section with each job's
+  last run, how it went and when it is next due. `SCHEDULER` says where they run: `app` (the default), `worker`
+  or `off`. For `worker`, start the optional second container with `docker compose --profile worker up -d`
+  (it is the same image, started with `python3 -m garagebooks worker`). See the Scheduled jobs page of the docs.
+
 **Cost after tax (L5).** Nothing to do on upgrade: the app adds the new columns, the rates table and the
 `garagebooks.expense_after_tax(tz)` function itself. If you use the restricted database role (`SKIP_MIGRATE=1`),
 run `scripts/provision-db.sh` again first. Nothing changes until you enter a marginal tax rate in Settings.

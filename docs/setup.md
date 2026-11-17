@@ -84,6 +84,11 @@
 
     ![The Settings page, with the app and dashboard addresses](images/settings-page.png)
 
+## Scheduled jobs
+
+Nothing to do: the app looks at TeslaMate again every hour and rewrites its dashboard every six hours, in the
+background. To run them in a container of their own instead, see [Scheduled jobs](scheduled-jobs.md).
+
 ## The database
 
 There is nothing to run. On start the app creates its own `garagebooks` schema in the TeslaMate
@@ -98,4 +103,4 @@ owns the database; Grafana already reads it the same way.
 To give the app less than that, run `scripts/provision-db.sh` once. It creates a role that
 can write expenses and read only `cars`, `schema_migrations`, `positions(car_id, date, odometer)` and
 `charging_processes(car_id, start_date, cost)`. Point
-`DATABASE_USER`/`DATABASE_PASS` at it and set `SKIP_MIGRATE=1`. Re-run the script on upgrades.
+`DATABASE_USER`/`DATABASE_PASS` at it and set `SKIP_MIGRATE=1`. Re-run the script on upgrades (the scheduled jobs' table needs it).
