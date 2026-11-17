@@ -43,6 +43,9 @@ header { background: var(--header); border-bottom: 1px solid var(--line); }
 nav { display: flex; flex-wrap: wrap; gap: .15rem; align-items: center; margin-right: auto; }
 nav a { white-space: nowrap; color: var(--muted); padding: .4rem .75rem; border-radius: 99px; font-weight: 500; }
 nav a:hover { background: var(--sunken); color: var(--text); text-decoration: none; }
+/* One more link (Claims) when claiming is on: tighter, so the header stays on one row at desktop width. */
+nav.crowded { gap: 0; }
+nav.crowded a { padding: .4rem .5rem; }
 nav a[aria-current] { background: var(--accent-soft); color: var(--accent); }
 header .add { white-space: nowrap; }
 @media (min-width: 40.01rem) {
@@ -402,3 +405,9 @@ label.check input { flex: none; margin-top: .3rem; }
 #pay-cost { font-size: 1.1rem; }
 .pay-problem { color: var(--bad); margin: .25rem 0; }
 .pay-problem:empty { display: none; }
+/* Claims: the status badge beside an expense, and the preview's figures. */
+a.claim-badge { text-decoration: none; color: var(--good); background: var(--good-soft); font-size: .8rem; }
+a.claim-link { font-weight: 600; }
+.claim-figures { display: grid; grid-template-columns: max-content 1fr; gap: .25rem 1rem; margin: 0; }
+.claim-figures dt { color: var(--muted); }
+.claim-figures dd { margin: 0; font-variant-numeric: tabular-nums; }

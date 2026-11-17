@@ -242,3 +242,15 @@ def test_every_override_file_names_a_service_the_main_file_has():
     assert main == {"garagebooks"}
     for override in ("docker-compose.traefik.yml", "docker-compose.invoices.yml"):
         assert compose_services(override) and compose_services(override) <= main, override
+
+
+def test_the_stand_in_claims_connector_is_private_and_the_app_uses_it_by_default():
+    """Claiming is on in the dev stack against tests/fake_connector.py, which is never published and only
+    ever answers with invented values; DEV_CLAIMS_CONNECTOR_URL points the app at a real one instead."""
+    cfg = config()
+    fake = cfg["services"]["dev-claims-connector"]
+    assert set(fake["networks"]) == {"dev"} and "ports" not in fake
+    assert "dev-claims-connector:" not in DEV_PROXY
+    env = cfg["services"]["garagebooks-dev"]["environment"]
+    assert "dev-claims-connector:8765" in env["CLAIMS_CONNECTOR_URL"]
+    assert "DEV_CLAIMS_CONNECTOR_URL" in env["CLAIMS_CONNECTOR_URL"]

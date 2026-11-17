@@ -283,10 +283,14 @@ def set_upload_folder(conn, category_id, folder):
 _SELECT = """
     SELECT e.id, e.car_id, c.name AS car_name, e.category_id, cat.name AS category,
            cat.kind, e.occurred_at, e.amount, e.odometer_km, e.vendor, e.notes,
-           e.invoice_url, e.invoice_path
+           e.invoice_url, e.invoice_path,
+           c.make AS car_make, c.model AS car_model, cat.budget_pool,
+           cl.provider AS claim_provider, cl.provider_id AS claim_provider_id, cl.reference AS claim_reference,
+           cl.status AS claim_status, cl.paid_date AS claim_paid_date, cl.approved_amount AS claim_approved
     FROM garagebooks.expense e
     JOIN garagebooks.car c ON c.id = e.car_id
     JOIN garagebooks.category cat ON cat.id = e.category_id
+    LEFT JOIN garagebooks.expense_claim cl ON cl.expense_id = e.id
 """
 
 
@@ -428,6 +432,10 @@ def update_expense(conn, expense_id, v):
         {"invoice_path": None, **v, "id": expense_id},
     )
     return cur.rowcount == 1
+
+
+def is_claimed(conn, expense_id):
+    return conn.execute("SELECT 1 FROM garagebooks.expense_claim WHERE expense_id = %s", (expense_id,)).fetchone() is not None
 
 
 def delete_expense(conn, expense_id):
@@ -677,7 +685,7 @@ def recent_expenses(conn, car_id, limit=20):
 # ---- change history ------------------------------------------------------------
 
 HISTORY_PAGE = 50
-HISTORY_TABLES = ("expense", "category")
+HISTORY_TABLES = ("expense", "category", "expense_claim")
 HISTORY_OPERATIONS = ("insert", "update", "delete")
 
 
@@ -703,3 +711,53 @@ def history(conn, car_id=None, table=None, operation=None, page=1):
         f"FROM garagebooks.change_log {clause} ORDER BY changed_at DESC, id DESC LIMIT %(limit)s OFFSET %(offset)s",
         {**params, "limit": HISTORY_PAGE, "offset": (page - 1) * HISTORY_PAGE}).fetchall()
     return entries, page, pages
+
+
+# ---- claims (roadmap L3: what was sent to the salary packaging provider) ------------------------------
+
+def lease_spans(conn):
+    """-> {car_id: [(start_date, end_date)]} of every lease, both ends included: which days a lease covers."""
+    spans = {}
+    for row in conn.execute("SELECT car_id, start_date, end_date FROM garagebooks.lease"):
+        spans.setdefault(row["car_id"], []).append((row["start_date"], row["end_date"]))
+    return spans
+
+
+CLAIM_FIELDS = ("provider", "provider_id", "reference", "status", "amount", "gst", "fields")
+
+
+def add_claim(conn, expense_id, v):
+    """Record that an expense was claimed. False if it already has a claim (nothing is changed then)."""
+    cur = conn.execute(
+        f"INSERT INTO garagebooks.expense_claim (expense_id, {', '.join(CLAIM_FIELDS)}) "
+        f"VALUES (%(expense_id)s, {', '.join('%(' + f + ')s' for f in CLAIM_FIELDS)}) ON CONFLICT DO NOTHING",
+        {"gst": None, "fields": None, **v, "expense_id": expense_id})
+    return cur.rowcount == 1
+
+
+def claim_rows(conn):
+    """Every recorded claim with its expense, newest first, for the claims page."""
+    return conn.execute(
+        "SELECT cl.*, e.occurred_at, e.amount AS expense_amount, e.vendor, e.car_id, c.name AS car_name,"
+        " cat.name AS category FROM garagebooks.expense_claim cl"
+        " JOIN garagebooks.expense e ON e.id = cl.expense_id JOIN garagebooks.car c ON c.id = e.car_id"
+        " JOIN garagebooks.category cat ON cat.id = e.category_id ORDER BY cl.submitted_at DESC, cl.expense_id DESC"
+    ).fetchall()
+
+
+def save_claim_status(conn, provider_id, status, reference=None, approved_amount=None, paid_date=None):
+    """What a status refresh learned about a claim. The provider's reference is only filled in when it
+    was missing. -> the number of rows changed."""
+    return conn.execute(
+        "UPDATE garagebooks.expense_claim SET status = %s, reference = COALESCE(reference, %s),"
+        " approved_amount = %s, paid_date = %s, status_checked_at = now() WHERE provider_id = %s",
+        (status, reference, approved_amount, paid_date, provider_id)).rowcount
+
+
+def touch_claim_check(conn, provider_id):
+    conn.execute("UPDATE garagebooks.expense_claim SET status_checked_at = now() WHERE provider_id = %s",
+                 (provider_id,))
+
+
+def delete_claim(conn, expense_id):
+    return conn.execute("DELETE FROM garagebooks.expense_claim WHERE expense_id = %s", (expense_id,)).rowcount == 1

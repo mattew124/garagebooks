@@ -135,6 +135,39 @@ on the **Categories** page (shown only while budgets are on); your choice is kep
 
 <!-- screenshot: category-pools - The Categories page, with the lease budget pool beside each category -->
 
+## Claiming an expense
+
+Running costs that the provider reimburses (fuel or charging, tyres, maintenance, insurance,
+registration and other costs, but not the lease payments themselves) are claimed back from the
+provider. If you run a [claims connector](claims-connector.md) for your provider, GarageBooks can send
+the claim for you: an expense with a **Claim** link beside it, because it is in one of those pools,
+is more than $0, falls inside a lease of the car and has not been claimed yet.
+
+1. Choose **Claim** (on the list, the **Claims** page or the expense's Edit page). The page asks the
+   connector what it would claim and shows the provider's own summary, the amount, the GST and the
+   amount without GST. This can take up to a minute.
+2. If the provider needs more, such as a description or the dates of an insurance policy, the page
+   shows those boxes with the provider's own labels. Fill them in and choose **Check again**. You can
+   also type the GST included in the amount, or leave it empty and let the provider work it out.
+3. If the provider has signed you out, the page offers **Sign in**, and a box for the code it sends you.
+4. A warning, such as one saying the invoice was already claimed, is shown in red and **Submit claim**
+   is withheld. Otherwise choose **Submit claim**. This sends a real claim to the provider.
+5. You return to the list with a message giving the provider's reference. The expense now shows a small
+   badge with that reference and its status, and its Edit page shows the details.
+
+The invoice sent is the PDF kept in the car's folder on the server. An expense whose invoice is only a
+link (OneDrive, say) has to have the file attached first: Edit it and choose the PDF. The file can't be
+larger than 10 MB.
+
+<!-- screenshot: claim-page - The Claim page: what will be claimed, the amounts and the Submit claim button -->
+
+<!-- screenshot: claims-page - The Claims page: claimed expenses with their status, and the ones still to claim -->
+
+**Claims** in the header lists every claim with its reference, status, approved amount and the date it
+was paid, and the expenses still waiting to be claimed. **Refresh claim statuses** asks the provider
+about each claim that isn't yet marked paid. A claimed expense can't be deleted by mistake: remove its
+claim record first (Edit, then **Remove claim record**), which doesn't cancel the claim at the provider.
+
 ## Reminders for registration and the end of the lease
 
 The registration date and the lease's end date become [reminders](reminders.md#registration-and-lease-end)

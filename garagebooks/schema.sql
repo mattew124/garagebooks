@@ -609,3 +609,50 @@ ALTER TABLE garagebooks.lease ADD COLUMN IF NOT EXISTS agreement_path text
 -- Lease budgets (the provider's yearly budget pools) are optional and off until turned on in Settings:
 -- the lease pages, the Categories page and the FBT year report leave them out while this is false.
 ALTER TABLE garagebooks.setting ADD COLUMN IF NOT EXISTS lease_budgets boolean NOT NULL DEFAULT false;
+
+-- Claims (roadmap L3, the "claimed" part): an expense sent to the salary packaging provider through a
+-- claims connector (see docs/claims-connector.md), kept so nothing is claimed twice. One row per
+-- expense. ON DELETE RESTRICT: a claimed expense can't be deleted until its claim record is removed
+-- (the app says so). `fields` is what the owner typed for the claim form, as sent. approved_amount,
+-- paid_date and status_checked_at are filled in when the provider's statuses are refreshed.
+CREATE TABLE IF NOT EXISTS garagebooks.expense_claim (
+    expense_id        bigint PRIMARY KEY REFERENCES garagebooks.expense (id) ON DELETE RESTRICT,
+    provider          text NOT NULL CHECK (btrim(provider) <> ''),
+    provider_id       text NOT NULL CHECK (btrim(provider_id) <> ''),
+    reference         text,
+    status            text,
+    amount            numeric(12, 2),
+    gst               numeric(12, 2),
+    fields            jsonb,
+    submitted_at      timestamptz NOT NULL DEFAULT now(),
+    status_checked_at timestamptz,
+    approved_amount   numeric(12, 2),
+    paid_date         date
+);
+
+-- The change history covers claims too. A claim has no id of its own: its row_id is the expense's.
+-- status_checked_at moves on every refresh, so like updated_at it doesn't count as a change.
+ALTER TABLE garagebooks.change_log DROP CONSTRAINT IF EXISTS change_log_table_name_check;
+ALTER TABLE garagebooks.change_log ADD CONSTRAINT change_log_table_name_check
+    CHECK (table_name IN ('expense', 'category', 'expense_claim'));
+
+CREATE OR REPLACE FUNCTION garagebooks.log_change() RETURNS trigger LANGUAGE plpgsql AS $fn$
+DECLARE
+    old_row jsonb := CASE WHEN TG_OP = 'INSERT' THEN NULL ELSE to_jsonb(OLD) END;
+    new_row jsonb := CASE WHEN TG_OP = 'DELETE' THEN NULL ELSE to_jsonb(NEW) END;
+BEGIN
+    -- The app stamps updated_at on every save: an edit that changes nothing else is not a change.
+    IF TG_OP = 'UPDATE' AND (old_row - 'updated_at' - 'status_checked_at') = (new_row - 'updated_at' - 'status_checked_at') THEN
+        RETURN NULL;
+    END IF;
+    INSERT INTO garagebooks.change_log (actor, table_name, row_id, operation, before_row, after_row)
+    VALUES (NULLIF(left(btrim(current_setting('garagebooks.actor', true)), 200), ''), TG_TABLE_NAME,
+            COALESCE(COALESCE(new_row, old_row) ->> 'id', COALESCE(new_row, old_row) ->> 'expense_id')::bigint,
+            lower(TG_OP), old_row, new_row);
+    RETURN NULL;
+END
+$fn$;
+
+DROP TRIGGER IF EXISTS log_change ON garagebooks.expense_claim;
+CREATE TRIGGER log_change AFTER INSERT OR UPDATE OR DELETE ON garagebooks.expense_claim
+    FOR EACH ROW EXECUTE FUNCTION garagebooks.log_change();

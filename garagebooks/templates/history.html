@@ -3,7 +3,7 @@
 {% block main_attrs %} class="narrow"{% endblock %}
 {% block content %}
 <h1>Change history</h1>
-<p><small>Every add, edit and delete of an expense or category, newest first, including changes made outside this app. It is
+<p><small>Every add, edit and delete of an expense or category{% if claims_enabled %} (and of a claim recorded for an expense){% endif %}, newest first, including changes made outside this app. It is
   read-only: to undo a change, enter the old values again.</small></p>
 <form class="filter card" method="get">
   <label><span class="label">Car</span>
@@ -17,6 +17,7 @@
       <option value="">Everything</option>
       <option value="expense" {{ 'selected' if filters.get('table') == 'expense' }}>Expenses</option>
       <option value="category" {{ 'selected' if filters.get('table') == 'category' }}>Categories</option>
+      {% if claims_enabled %}<option value="expense_claim" {{ 'selected' if filters.get('table') == 'expense_claim' }}>Claims</option>{% endif %}
     </select>
   </label>
   <label><span class="label">Change</span>

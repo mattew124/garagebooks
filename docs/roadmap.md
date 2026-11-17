@@ -212,6 +212,11 @@ one of the provider's budget pools.
 - Budget changes from a refinance or a re-budget take effect from their date, without rewriting
   earlier periods.
 
+*Progress:* the **claimed** part is in place. With a [claims connector](claims-connector.md) configured,
+an expense in a claimable pool is claimed from the provider, the claim (reference, status, approved
+amount, paid date) is kept against it, and an expense with a claim recorded isn't offered again. Still
+to do: paid by the provider and paid personally, the pool balances and the projection.
+
 ### L4. Kilometre pace (Now, S)
 
 From the lease's estimated km and the odometer (TeslaMate's, or the odometer on the latest expense): the reading at the start of the FBT year,

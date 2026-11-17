@@ -395,6 +395,11 @@ def remove_expenses(page):
     page.goto(UI)
     while page.locator(f"tr:has-text('{MARKER}') a:has-text('Edit')").count():
         page.locator(f"tr:has-text('{MARKER}') a:has-text('Edit')").first.click()
+        if page.locator("#claim-record").count():        # a claimed expense can't be deleted until its record goes
+            page.once("dialog", lambda d: d.accept())
+            page.click("#claim-record button")
+            page.wait_for_url(re.compile(r"msg=claim_forgotten"))
+            continue
         page.once("dialog", lambda d: d.accept())
         page.click("button.danger")
         page.wait_for_url(re.compile(r"msg=deleted"))
@@ -1518,6 +1523,123 @@ def test_sold_panel(page, dash_page):
         remove_marked(page)
 
 
+# The stand-in claims connector (tests/fake_connector.py): the dev stack's own service, never a real provider.
+FAKE_CONNECTOR = "http://dev-claims-connector:8765"
+
+
+def fake_connector(page, config=None):
+    """Reset the stand-in connector, then change what it answers. Skips when this stack has none."""
+    import json
+    try:
+        assert page.request.post(FAKE_CONNECTOR + "/_fake/reset").ok
+        if config:
+            assert page.request.post(FAKE_CONNECTOR + "/_fake/config", data=json.dumps(config),
+                                     headers={"Content-Type": "application/json"}).ok
+    except Exception as exc:
+        raise Skip(f"no stand-in claims connector on this stack ({str(exc)[:80]})") from exc
+
+
+def test_claims(page):
+    """Claim an expense through the stand-in connector: preview, a field it asks for, the sign-in with its
+    code, submit, the badge and the reference, refusing to delete a claimed expense, refreshing the status,
+    and removing the record. The car, lease and expense are made here and removed at the end."""
+    from datetime import date, timedelta
+    fake_connector(page)
+    today = date.today()
+    try:
+        car = add_marked_car(page)
+        car.get_by_role("link", name="Lease").click()
+        page.click("#add-lease-top")
+        page.locator("#f-financier").fill("Example Finance")
+        page.get_by_label("Lease start").fill((today - timedelta(days=30)).isoformat())
+        page.locator("#f-end_date").fill((today + timedelta(days=1065)).isoformat())
+        page.get_by_label("Term (months)").fill("36")
+        page.get_by_label("Paid").select_option("fortnightly")
+        page.get_by_label("Pre-tax part, per pay").fill("300")
+        page.get_by_role("button", name="Add lease").click()
+        page.wait_for_url(re.compile(r"msg=lease_added"))
+        page.goto(UI + "new")
+        page.select_option("select[name=car_id]", label=MARKER)
+        page.select_option("select[name=category_id]", label="Tyres")
+        page.fill("input[name=amount]", "1200.00")
+        page.fill("input[name=vendor]", MARKER)
+        page.click("button[type=submit].button")
+        page.wait_for_url(re.compile(r"msg=saved"))
+
+        row = page.locator("tbody tr", has_text=MARKER)
+        expect(row.locator("a.claim-link")).to_have_count(1)
+        row.locator("a.claim-link").click()
+        expect(page.locator("#claim-preview")).to_contain_text("Claim $1200.00 for Tyres")
+        expect(page.locator("#claim-preview")).to_contain_text("$1,090.91")
+        expect(page.get_by_text("No invoice is attached")).to_be_visible()
+        assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "sideways scroll on a phone"
+        shot(page, "claim-preview")
+
+        # The provider wants something more: the box has its own label, and the preview comes back with it.
+        fake_connector(page, {"needs_fields": [{"key": "description", "label": "What was it for?", "type": "text"}]})
+        page.reload()
+        expect(page.get_by_label("What was it for?")).to_be_visible()
+        expect(page.get_by_role("button", name="Submit claim")).to_have_count(0)
+        shot(page, "claim-needs-field")
+        page.get_by_label("What was it for?").fill("New tyres")
+        page.get_by_role("button", name="Check again").click()
+        expect(page.get_by_role("button", name="Submit claim")).to_be_visible()
+
+        # Signed out: sign in on the page, with the code the provider sends.
+        fake_connector(page, {"signed_in": False})
+        page.goto(page.url.split("?")[0])
+        expect(page.locator("#claim-signin")).to_be_visible()
+        page.get_by_role("button", name="Sign in").click()
+        code = page.locator("#claim-signin input[name=code]")
+        expect(code).to_be_visible(timeout=15000)
+        shot(page, "claim-signin")
+        code.fill("123456")
+        page.get_by_role("button", name="Send code").click()
+        expect(page.get_by_role("button", name="Submit claim")).to_be_visible(timeout=30000)   # signed in, back on the preview
+
+        page.get_by_role("button", name="Submit claim").click()
+        page.wait_for_url(re.compile(r"msg=claimed"))
+        expect(page.locator(".notice")).to_contain_text("REF0001")
+        row = page.locator("tbody tr", has_text=MARKER)
+        expect(row.locator("a.claim-badge")).to_contain_text("REF0001")
+        expect(row.locator("a.claim-link")).to_have_count(0)
+        shot(page, "claim-submitted")
+
+        # A claimed expense isn't deleted by accident.
+        row.get_by_role("link", name="Edit").click()
+        expect(page.locator("#claim-record")).to_contain_text("REF0001")
+        page.once("dialog", lambda d: d.accept())
+        page.click("button.danger")
+        expect(page.get_by_role("heading", name="This expense has been claimed")).to_be_visible()
+
+        # Refresh: the provider says it is paid.
+        fake_connector(page, {"signed_in": True, "statuses": {"P0001": {
+            "provider_id": "P0001", "reference": "REF0001", "status": "Paid", "approved_amount": 1100.0,
+            "paid_date": today.isoformat()}}})
+        # (the reset above also forgot the stand-in's own counter, so P0001 is the only id it knows)
+        page.goto(UI + "claims")
+        expect(page.locator("tbody tr", has_text="REF0001")).to_have_count(1)
+        page.get_by_role("button", name="Refresh claim statuses").click()
+        page.wait_for_url(re.compile(r"msg=claims_refreshed"))
+        expect(page.locator("tbody tr", has_text="REF0001")).to_contain_text("Paid")
+        expect(page.locator("tbody tr", has_text="REF0001")).to_contain_text("$1,100.00")
+        shot(page, "claims-page")
+
+        # The record can be removed (the claim stays with the provider), after which it can be claimed again.
+        page.goto(UI)
+        page.locator("tbody tr", has_text=MARKER).get_by_role("link", name="Edit").click()
+        page.once("dialog", lambda d: d.accept())
+        page.get_by_role("button", name="Remove claim record").click()
+        page.wait_for_url(re.compile(r"msg=claim_forgotten"))
+        expect(page.locator("tbody tr", has_text=MARKER).locator("a.claim-link")).to_have_count(1)
+    finally:
+        try:
+            fake_connector(page)
+        except Skip:
+            pass
+        remove_marked(page)
+
+
 def main():
     with sync_playwright() as p:
         browser = p.chromium.launch()
@@ -1550,6 +1672,7 @@ def main():
         step("FBT year report: taxable value, costs by pool, year links", test_fbt_report, page)
         step("header stays tidy on a phone", test_header_stays_tidy_on_a_phone, page)
         step("phone list shows amount, invoice and edit", test_list_shows_key_fields_on_a_phone, page)
+        step("claims: preview, needed field, sign-in code, submit, status refresh, remove record", test_claims, page)
         step("history page lists an add, an edit and a delete", test_history_page, page)
         step("a likely duplicate is asked about, then saved anyway", test_duplicate_is_asked_about_before_saving, page)
         step("the duplicate warning can be dismissed", test_duplicate_warning_can_be_dismissed, page)
@@ -1568,7 +1691,8 @@ def main():
              test_local_folder, page, viewer.new_page())
         viewer.close()
         # Expected 400s from the deliberate bad submissions above aren't script errors.
-        real = [t for t in problems if "400" not in t]
+        # (and the 409 of a claimed expense that the app refuses to delete)
+        real = [t for t in problems if "400" not in t and "409" not in t]
         step("no script or CSP errors", lambda: (_ for _ in ()).throw(AssertionError(real)) if real else None)
 
         desktop = browser.new_context(viewport={"width": 1280, "height": 900}, device_scale_factor=2)

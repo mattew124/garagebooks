@@ -63,7 +63,11 @@
     {# A stored invoice is served by the app; anything else is the link that was pasted or uploaded. #}
     {% set inv = url_for('invoice', expense_id=e.id) if e.invoice_path else e.invoice_url %}
     <td class="inv{{ '' if inv else ' none' }}" data-label="Invoice">{% if inv %}<a href="{{ inv }}" target="_blank" rel="noopener noreferrer">PDF ↗</a>{% else %}–{% endif %}</td>
-    <td class="actions"><a href="{{ url_for('edit', expense_id=e.id, **view) }}">Edit</a></td>
+    <td class="actions"><a href="{{ url_for('edit', expense_id=e.id, **view) }}">Edit</a>
+      {%- if claims_enabled %}
+      {%- if e.id in claim_open %} <a class="claim-link" href="{{ url_for('claim_page', expense_id=e.id, **view) }}">Claim</a>
+      {%- elif e.claim_provider_id %} <a class="badge claim-badge" href="{{ url_for('edit', expense_id=e.id, **view) }}" title="Claimed: see the claim">{{ e.claim_reference or 'Claimed' }}{% if e.claim_status %} · {{ e.claim_status }}{% endif %}{% if e.claim_paid_date %} · paid {{ e.claim_paid_date.strftime('%d %b') }}{% endif %}</a>{% endif %}
+      {%- endif %}</td>
   </tr>
   {% endfor %}
   </tbody>

@@ -19,6 +19,7 @@ nav = [
   { "Development" = "development.md" },
   { "Roadmap" = "roadmap.md" },
   { "Leases" = "leases.md" },
+  { "Claims connector" = "claims-connector.md" },
   { "Novated lease calculations" = "lease-calculations.md" },
 ]
 

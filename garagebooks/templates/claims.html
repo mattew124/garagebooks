@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Claims{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Claims</h1>
+  <form method="post" action="{{ url_for('claims_refresh') }}" data-claim-wait>
+    <button type="submit" class="secondary">Refresh claim statuses</button>
+  </form>
+</div>
+{% if problem %}<p class="notice bad" role="alert">{{ problem }}</p>{% endif %}
+<p class="claim-wait" role="status" hidden>Asking the provider. This can take a minute.</p>
+<h2 class="card-title">Claimed</h2>
+{% if claims %}
+<div class="card list"><div class="table-wrap">
+<table>
+  <thead><tr><th>Date</th><th>Expense</th><th class="num">Amount</th><th>Reference</th><th>Status</th><th class="num">Approved</th><th>Paid</th><th></th></tr></thead>
+  <tbody>
+  {% for c in claims %}
+  <tr>
+    <td data-label="Date">{{ c.occurred_at|day }}</td>
+    <td data-label="Expense">{{ c.category }}{% if c.vendor %} · {{ c.vendor }}{% endif %}</td>
+    <td class="num" data-label="Amount">{{ c.amount|money }}</td>
+    <td data-label="Reference">{{ c.reference or '–' }}</td>
+    <td data-label="Status">{{ c.status or '–' }}</td>
+    <td class="num" data-label="Approved">{{ c.approved_amount|money if c.approved_amount is not none else '–' }}</td>
+    <td data-label="Paid">{{ c.paid_date.strftime('%d %b %Y') if c.paid_date else '–' }}</td>
+    <td class="actions"><a href="{{ url_for('edit', expense_id=c.expense_id) }}">Open</a></td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table></div></div>
+{% else %}
+<p class="empty">Nothing has been claimed yet.</p>
+{% endif %}
+<h2 class="card-title">Still to claim</h2>
+{% if todo %}
+<div class="card list"><div class="table-wrap">
+<table>
+  <thead><tr><th>Date</th><th>Expense</th><th class="num">Amount</th><th></th></tr></thead>
+  <tbody>
+  {% for e in todo %}
+  <tr>
+    <td data-label="Date">{{ e.occurred_at|day }}</td>
+    <td data-label="Expense">{{ e.category }}{% if e.vendor %} · {{ e.vendor }}{% endif %}</td>
+    <td class="num" data-label="Amount">{{ e.amount|money }}</td>
+    <td class="actions"><a class="claim-link" href="{{ url_for('claim_page', expense_id=e.id) }}">Claim</a></td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table></div></div>
+{% else %}
+<p class="empty">No expenses are waiting to be claimed.</p>
+{% endif %}
+{% endblock %}

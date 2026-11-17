@@ -7,6 +7,22 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+**Claiming expenses from the salary packaging provider.** Nothing to do on upgrade: the app adds the new
+table itself, and the feature stays off until you set `CLAIMS_CONNECTOR_URL`. Installers on the
+restricted database role re-run `scripts/provision-db.sh` first. The container's web server timeout
+moves from 120 s to 180 s, and now comes from `gunicorn.conf.py` rather than the command line.
+
+- **Claims connector.** With `CLAIMS_CONNECTOR_URL` (and `CLAIMS_CONNECTOR_TOKEN` or
+  `CLAIMS_CONNECTOR_TOKEN_FILE`) set, an expense in one of the provider's claimable budget pools, on a car
+  with a lease covering its date, has a **Claim** link. The page asks a separate connector service what
+  would be claimed, shows it with any warnings, asks for what the provider needs (and the provider's
+  sign-in code when it has signed out), and submits when you confirm. The claim is kept against the
+  expense, shown as a badge with its reference and status, and listed on a new **Claims** page, where
+  **Refresh claim statuses** brings the provider's status, approved amount and paid date up to date. A
+  claimed expense can't be deleted until its claim record is removed. The protocol is on the new
+  [Claims connector](docs/claims-connector.md) page, so anyone can write a connector. This is the
+  "claimed" part of roadmap item L3.
+
 **Lease and car page changes.** Nothing to do on upgrade: the app adds the new columns itself.
 
 - **Roadmap.** Updated for what has shipped: the Now items are in place, cost after tax (L5) is next, and lease budgets (L3) move to Later.

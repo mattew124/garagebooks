@@ -39,6 +39,10 @@ services:
       INVOICES_HOST_DIR: ${DEV_INVOICES_SHOWN:-}
       # As docker-compose.invoices.yml: stop rather than run without the invoice folder.
       INVOICES_REQUIRED: "1"
+      # Claiming is on in dev, against a stand-in connector with invented answers (tests/fake_connector.py,
+      # below); DEV_CLAIMS_CONNECTOR_URL in dev.env points it at a connector of your own instead.
+      CLAIMS_CONNECTOR_URL: ${DEV_CLAIMS_CONNECTOR_URL:-http://dev-claims-connector:8765}
+      CLAIMS_CONNECTOR_TOKEN: ${DEV_CLAIMS_CONNECTOR_TOKEN:-fake-connector-token}
     volumes:
       - dev-dashboards:/dashboards
       - type: bind
@@ -59,6 +63,21 @@ services:
       retries: 3
     ports:
       - "127.0.0.1:${DEV_UI_PORT:-8089}:8080"
+    networks: [dev]
+
+  # A stand-in claims connector: answers the protocol in docs/claims-connector.md from memory, with invented
+  # values, and never talks to a provider. It reuses the app's image (Python is all it needs), and the
+  # browser tests change what it answers through POST /_fake/config. Reachable only on this stack's network.
+  dev-claims-connector:
+    image: ${GARAGEBOOKS_IMAGE:-garagebooks:${DEV_TAG:-dev}}
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    user: "${DEV_UID:-10001}:${DEV_GID:-10001}"
+    entrypoint: ["python3", "/fake_connector.py", "8765"]
+    volumes:
+      - ./tests/fake_connector.py:/fake_connector.py:ro
     networks: [dev]
 
   # The dashboard volume belongs to whoever wrote it first (root when new, 10001 from an earlier
