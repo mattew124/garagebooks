@@ -73,7 +73,10 @@ Parallel sessions each get a git worktree under `.claude/worktrees/<name>/`, and
    the repository (`onedrive-save` writes it; `ONEDRIVE_DEV_FILE` moves it) and points this stack at the
    `/Expenses test` folder. Never commit that file, and never point a test at a folder holding real invoices.
 4. When the branch is merged or abandoned, run `scripts/dev.sh destroy` before the
-   worktree is removed. `scripts/dev.sh list` shows every dev stack still running.
+   worktree is removed. `scripts/dev.sh list` shows every dev stack still running, and
+   `scripts/dev.sh prune` destroys those of merged branches and removed worktrees
+   (`scripts/dev.sh auto-prune on` runs it hourly). Take a stack `down` while its branch waits for review:
+   a host running many stacks at once runs out of memory.
 
 ## Releasing
 

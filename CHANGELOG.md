@@ -49,6 +49,7 @@ run `scripts/provision-db.sh` again first. Nothing changes until you enter a mar
 
 **Lease and car page changes.** Nothing to do on upgrade: the app adds the new columns itself.
 
+- **Dev stacks.** `scripts/dev.sh prune` destroys the dev stacks of merged branches and of removed worktrees, and `scripts/dev.sh auto-prune on` runs it hourly from cron.
 - **Kilometre pace (roadmap L4).** For a lease with an estimated km per year: the FBT year report has a **Kilometre pace**
   section (the km expected by the end of the year, pro rata for the days held, the odometer at the start and needed at the
   end, the km per day needed, and what a statement can't show: km driven so far, km per day driven, how far ahead of or behind

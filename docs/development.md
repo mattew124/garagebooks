@@ -142,6 +142,25 @@ parallel branches never share running code. `scripts/dev.sh info` shows a checko
 ports, `list` shows every running dev stack, and `destroy` removes one (its containers, test database, image and `.dev` folder). `.worktreeinclude`
 copies your `dev.env` into new Claude Code worktrees.
 
+Stacks add up when several branches are in flight, and each holds a database, Grafana and the app in
+memory. Two commands clear away the ones nobody needs:
+
+```bash
+scripts/dev.sh prune --dry-run   # what prune would remove, and why
+scripts/dev.sh prune             # destroy the stacks of merged branches, and of checkouts that are gone
+scripts/dev.sh auto-prune on     # run prune every hour from cron; `off` stops it, no argument says which
+```
+
+`prune` looks at every dev stack on the machine, not only this checkout's. A worktree's stack (and its
+demo stack) goes once the worktree's last commit has been merged into `origin/main` (fetched first) with a
+merge commit, as pull requests are here; a squash or rebase merge isn't recognised, and that stack is kept.
+A branch just made from `main`, with nothing on it yet, is not merged. A merged worktree that still has
+uncommitted changes is kept and named in the output. A stack whose checkout has gone (removed with
+`git worktree remove` before `destroy`) is taken down by name, with its test database and its image. The
+main checkout's own stacks are never pruned. `prune` removes stacks only: the worktree folders stay, as with
+`destroy`. `auto-prune on` adds one entry to your crontab that runs the main checkout's `dev.sh`, so it
+outlives every worktree, and logs to `~/.cache/garagebooks/dev-prune.log`.
+
 The invoice folder is on in the dev stack too: `.dev/invoices` in the checkout stands in for a mounted
 share (the app runs as you there, so its files are yours), and `destroy` removes it. Drop PDFs into it
 to try the import, or let `sample-invoices` write some made-up ones into `.dev/invoices/Sample invoices`;
