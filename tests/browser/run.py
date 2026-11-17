@@ -1358,6 +1358,27 @@ def set_marginal_rate(page, value):
     page.wait_for_url(re.compile(r"msg=settings"))
 
 
+def after_tax_dashboard_checks(page):
+    """With a rate and a lease the dashboard has both after-tax panels, and they sit below the Kilometre pace row
+    without covering it (a tall viewport: Grafana only draws the panels in view)."""
+    car_id = re.search(r"/cars/(\d+)/", page.url).group(1)
+    wide = page.context.browser.new_context(viewport={"width": 1280, "height": 3000})
+    graf = wide.new_page()
+    try:
+        for _ in range(12):      # Grafana re-reads the provisioned dashboard every 60 seconds
+            graf.goto(GRAFANA + f"d/garagebooks-tco/cost-of-ownership?var-car_id={car_id}")
+            graf.wait_for_load_state("networkidle")
+            graf.wait_for_timeout(2000)
+            if graf.get_by_text("After tax by FBT year", exact=True).count():
+                break
+            graf.wait_for_timeout(10000)
+        shot(graf, "after-tax-dashboard")
+        expect(graf.get_by_text("Running costs after tax", exact=True).first).to_be_visible(timeout=30000)
+        expect(graf.get_by_text("After tax by FBT year", exact=True).first).to_be_visible()
+    finally:
+        wide.close()
+
+
 def test_cost_after_tax(page):
     """The marginal rate in Settings, "Paid from" on the form, the after-tax figure in the list and the After tax
     part of the FBT year report. The rate is put back as it was, and the car (and its expense) deleted, at the end."""
@@ -1424,6 +1445,7 @@ def cost_after_tax_checks(page, before):
     expect(after.locator("#fbt-after-tax-total")).to_contain_text("unavailable")
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "sideways scroll on a phone"
     shot(page, "fbt-after-tax")
+    after_tax_dashboard_checks(page)
     set_marginal_rate(page, "")                                                  # no rate: pages say so, show nothing
     page.goto(UI)
     expect(page.locator("#no-tax-rate")).to_be_visible()
