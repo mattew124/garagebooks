@@ -46,11 +46,6 @@ directly.
   *Why now:* For a packaged car, the invoice amount overstates what it costs, and the lease details and FBT year it needs (L1, L2) are in place.
   *Depends on:* L1, L2
 
-- **L4. Kilometre pace** (size S)
-  The km the lease estimate expects this FBT year against the odometer: TeslaMate's, or the odometer on the latest expense.
-  *Why now:* A small item that uses the lease estimate and the odometer, both now in place.
-  *Depends on:* L1, T1
-
 - **7. Scheduled jobs** (size M)
   A small scheduler for periodic work, either in the app or as an optional second container from the same image (`garagebooks worker`), so the web process stays light.
   *Why now:* Notifications (8), watching the invoice folder (13) and reading rates (L7) all need it.
@@ -64,7 +59,7 @@ directly.
 ## Next
 
 - **9. Status page** (size S–M)
-  One page showing the app version, the TeslaMate version and compatibility check (when there is a TeslaMate), the OneDrive connection and secret expiry, whether the invoice folder is mounted, database size, the app's memory use, and the time of the last backup if you point it at one.
+  One page showing the app version, the TeslaMate version and compatibility check (when there is a TeslaMate), the OneDrive connection and secret expiry, whether the invoice folder is mounted, database size, the app's memory use, and the time of the last backup if you point it at one. It also shows the kilometre pace (L4) for each car with a lease estimate.
   *Depends on:* —
 
 - **10. Charging and energy figures** (size M)
@@ -212,11 +207,12 @@ one of the provider's budget pools.
 - Budget changes from a refinance or a re-budget take effect from their date, without rewriting
   earlier periods.
 
-### L4. Kilometre pace (Now, S)
+### L4. Kilometre pace (Done, S)
 
 From the lease's estimated km and the odometer (TeslaMate's, or the odometer on the latest expense): the reading at the start of the FBT year,
 the km expected by its end (pro rata if the car is held only part of the year), the km per day
-needed to get there, and the km per day actually driven. On the dashboard and the status page.
+needed to get there, and the km per day actually driven. In the app (the FBT year report and the lease page)
+and on the dashboard. The status page (item 9) will show it too once there is one.
 
 ### L5. Cost after tax (Now, M)
 
@@ -292,6 +288,7 @@ These are in main since 2026-11-16 and not yet in a release:
 - **2. Selling the car.** A sale date and price per car; TCO and cost per day stop at the sale (#80).
 - **L1. Lease details per car.** The novated lease behind a car (#81).
 - **L2. FBT year and taxable value.** Costs by FBT year, and the car's taxable value and contribution (#82).
+- **L4. Kilometre pace.** The km the lease estimate expects this FBT year against the odometer, in the app and on the dashboard (#88).
 - **3. Change history.** An append-only log of every add, edit and delete, with a page to view it (#76).
 - **4. Reminders by date or odometer.** Recurring reminders, resolved by linking the expense that did the job (#83).
 - **5. Payment calculator.** Work out a payment made of several parts on the amount field (#77).

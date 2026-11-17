@@ -19,6 +19,8 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON garagebooks.car, garagebooks.odometer_re
 GRANT EXECUTE ON FUNCTION garagebooks.sync_teslamate_cars() TO :"app_role";
 -- Switching the ownership view between its two forms (with and without TeslaMate) and nothing else.
 GRANT EXECUTE ON FUNCTION garagebooks.build_ownership(boolean) TO :"app_role";
+-- The same for the odometer function the kilometre pace panel uses.
+GRANT EXECUTE ON FUNCTION garagebooks.build_odometer_at(boolean) TO :"app_role";
 -- What it reads from TeslaMate, when there is a TeslaMate in this database.
 SELECT to_regclass('public.cars') IS NOT NULL AND to_regclass('public.positions') IS NOT NULL
        AND to_regclass('public.charging_processes') IS NOT NULL AS has_teslamate \gset

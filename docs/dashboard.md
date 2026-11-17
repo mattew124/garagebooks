@@ -70,6 +70,22 @@ car's latest known one (the same as **Distance** above). With none known, a remi
 left count from today in the dashboard's time zone. It shows open reminders only, whatever the time range,
 and includes the registration and lease end from the car's [lease](leases.md).
 
+## Kilometre pace
+
+The **Kilometre pace** table, at the bottom of the dashboard, shows the selected car's current lease against its
+estimated km per year, for the current FBT year: **Expected km** (pro rata for the days held), **Odometer at start** and
+**Odometer needed at end**, **Km per day needed**, **Driven so far**, **Km per day driven**, **Ahead (+) or behind (-)** the
+pro-rata pace and **Km per day needed from today**. They are the same figures as the
+[FBT year report](leases.md#kilometre-pace) works out. The table is empty for a car with no current lease or no estimate, and
+the panel is left out of the dashboard altogether until a lease has an estimate. A figure that needs an odometer that isn't
+known is empty, not 0.
+
+The odometer comes from the database function `garagebooks.odometer_at(car, moment)`: TeslaMate's last position at or before
+the moment for a car it tracks, else your latest reading or an expense's odometer. The panel reads none of TeslaMate's tables itself, so it
+works with TeslaMate present, absent or held back (when its figures are held back, only the readings you entered are used).
+
+<!-- screenshot: dashboard-km-pace - The Kilometre pace panel on the dashboard -->
+
 ## Rebates and refunds
 
 A rebate or refund (a state EV rebate, an insurance refund for ending a policy early) is an expense

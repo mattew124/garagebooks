@@ -9,6 +9,14 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 **Lease and car page changes.** Nothing to do on upgrade: the app adds the new columns itself.
 
+- **Kilometre pace (roadmap L4).** For a lease with an estimated km per year: the FBT year report has a **Kilometre pace**
+  section (the km expected by the end of the year, pro rata for the days held, the odometer at the start and needed at the
+  end, the km per day needed, and what a statement can't show: km driven so far, km per day driven, how far ahead of or behind
+  the pace the car is, and the km per day needed from today), and the lease page has a short version. The dashboard has a
+  **Kilometre pace** table (panel 21), left out until a lease has an estimate. The odometer is TeslaMate's, or your latest
+  reading, and says *not known* rather than 0 when there is none. New in the database: the functions
+  `garagebooks.odometer_at()` and `garagebooks.build_odometer_at()`, which the app creates itself. With
+  `scripts/provision-db.sh` (`SKIP_MIGRATE=1`), run it again so the app's role can switch the function.
 - **Roadmap.** Updated for what has shipped: the Now items are in place, cost after tax (L5) is next, and lease budgets (L3) move to Later.
 - **Lease form import.** The Add a lease page starts with a **Documents** card. Choose the provider's lease
   form or package confirmation (from the computer, by dropping it, or from the car's OneDrive or invoice

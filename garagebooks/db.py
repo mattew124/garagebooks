@@ -235,6 +235,17 @@ def build_ownership(conn, use_teslamate):
         return None
 
 
+def build_odometer_at(conn, use_teslamate):
+    """The same for the SQL odometer function the dashboard's kilometre pace panel uses. Returns whether
+    TeslaMate's positions are in it, or None when this database user may not rebuild it."""
+    try:
+        with conn.transaction():
+            return conn.execute("SELECT garagebooks.build_odometer_at(%s) AS tm", (use_teslamate,)).fetchone()["tm"]
+    except psycopg.Error as exc:
+        log.warning("the odometer function could not be rebuilt: %s", exc)
+        return None
+
+
 def get_settings(conn):
     row = conn.execute("SELECT app_url, grafana_url, invoice_date_format, invoice_name_format, multi_amount, "
                        "lease_budgets FROM garagebooks.setting WHERE id = 1").fetchone()
@@ -503,6 +514,11 @@ def current_lease(conn, car_id, on):
     return conn.execute(
         "SELECT * FROM garagebooks.lease WHERE car_id = %(car)s AND end_date >= %(on)s "
         "ORDER BY start_date LIMIT 1", {"car": car_id, "on": on}).fetchone()
+
+
+def any_estimated_km(conn):
+    """Whether any lease has an estimated km per year: only then does the dashboard have a kilometre pace to show."""
+    return conn.execute("SELECT EXISTS (SELECT 1 FROM garagebooks.lease WHERE estimated_km_per_year IS NOT NULL) AS found").fetchone()["found"]
 
 
 def lease_budgets(conn, lease_id):
