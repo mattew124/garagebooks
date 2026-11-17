@@ -161,6 +161,15 @@ main checkout's own stacks are never pruned. `prune` removes stacks only: the wo
 `destroy`. `auto-prune on` adds one entry to your crontab that runs the main checkout's `dev.sh`, so it
 outlives every worktree, and logs to `~/.cache/garagebooks/dev-prune.log`.
 
+Each dev stack creates its own Docker network. Docker's default address pool starts at
+`172.17.0.0/16` and moves on to `192.168.0.0/16` after about ten networks, and a network
+there (even a stopped one) captures routing for the whole range, which VPN clients and home
+LANs commonly use. Keep to `172.16.0.0/12` by setting `default-address-pools` in
+`/etc/docker/daemon.json` (for example `{"base": "172.28.0.0/14", "size": 20}`, then restart
+Docker), never set a `subnet:` in `192.168.0.0/16`, `10.0.0.0/8` or `100.64.0.0/10`, and run
+`scripts/dev.sh destroy` (or `prune`) for stacks you no longer need. `ip route | grep 192.168` should print
+nothing.
+
 The invoice folder is on in the dev stack too: `.dev/invoices` in the checkout stands in for a mounted
 share (the app runs as you there, so its files are yours), and `destroy` removes it. Drop PDFs into it
 to try the import, or let `sample-invoices` write some made-up ones into `.dev/invoices/Sample invoices`;
