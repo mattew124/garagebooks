@@ -448,6 +448,37 @@ def parse_paid_from(raw):
     return PAID_FROM[key]
 
 
+MAX_NOTIFY_URL_LEN = 500       # the same limit as the column's CHECK
+NOTIFY_FORMATS = ("ntfy", "json")
+
+
+def parse_notify_url(raw):
+    """The Settings 'Notification address'. Blank -> None (notifications off). Otherwise a full http(s)
+    address with a host, no spaces or control characters, at most 500 characters (it may carry a login:
+    https://user:password@host/topic)."""
+    url = (raw or "").strip()
+    if not url:
+        return None
+    try:
+        parts = urlparse(url)
+        usable = parts.scheme in ("http", "https") and bool(parts.hostname)
+    except ValueError:
+        usable = False
+    if not usable or any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in url):
+        raise ValueError("Enter a full address starting with http:// or https://")
+    if len(url) > MAX_NOTIFY_URL_LEN:
+        raise ValueError("That address is too long (500 characters at most).")
+    return url
+
+
+def parse_notify_format(raw):
+    """The Settings notification format: 'ntfy' or 'json'. Blank means ntfy."""
+    choice = (raw or "").strip(" ").lower() or "ntfy"      # only spaces are forgiven, not a newline
+    if choice not in NOTIFY_FORMATS:
+        raise ValueError("Choose ntfy or JSON.")
+    return choice
+
+
 def parse_expense_form(form, tz, valid_car_ids, valid_category_ids):
     """-> (values, errors). `values` is only meaningful when `errors` is empty."""
     values, errors = {}, {}

@@ -745,3 +745,25 @@ CREATE TABLE IF NOT EXISTS garagebooks.job (
     last_ok          boolean,
     last_message     text CHECK (last_message IS NULL OR length(last_message) <= 500)
 );
+
+-- Notifications (roadmap item 8): the Settings page's address for push notices, and what has been sent.
+--   notify_url     where a notice is POSTed (an ntfy topic, an Apprise API, a Home Assistant webhook): a
+--                  secret for most of them, so it is never shown back, logged or put in an error. NULL = off.
+--   notify_format  'ntfy' (the message as text, the title in a header) or 'json' (for Apprise and
+--                  Home Assistant). NULL = ntfy.
+--   notification   one row per notice sent, so each thing is told once. The key names the event and
+--                  what it was about (for a reminder, the date and odometer it was due on), so a
+--                  reminder that is edited is a new event. Rows are pruned after a year.
+--   onedrive_account.signin_lost_at / signin_checked_at: set when a refresh finds the saved sign-in no
+--                  longer works, and when it was last tried, so the job needn't ask Microsoft every run.
+ALTER TABLE garagebooks.setting ADD COLUMN IF NOT EXISTS notify_url text
+    CHECK (notify_url IS NULL OR (notify_url ~* '^https?://[^[:space:]]+$' AND length(notify_url) <= 500));
+ALTER TABLE garagebooks.setting ADD COLUMN IF NOT EXISTS notify_format text
+    CHECK (notify_format IS NULL OR notify_format IN ('ntfy', 'json'));
+CREATE TABLE IF NOT EXISTS garagebooks.notification (
+    key     text PRIMARY KEY CHECK (length(key) <= 200),
+    sent_at timestamptz NOT NULL DEFAULT now(),
+    title   text NOT NULL CHECK (length(title) <= 300)
+);
+ALTER TABLE garagebooks.onedrive_account ADD COLUMN IF NOT EXISTS signin_lost_at timestamptz;
+ALTER TABLE garagebooks.onedrive_account ADD COLUMN IF NOT EXISTS signin_checked_at timestamptz;

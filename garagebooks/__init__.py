@@ -22,7 +22,7 @@ from flask import (Flask, abort, g, has_request_context, jsonify, make_response,
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from . import dashboard, db, docinfo, icons, invoices, jobs, jobtext, lease, leaseform, logs, onedrive, reminders, sources, storage, updates, validation
+from . import dashboard, db, docinfo, icons, invoices, jobs, jobtext, lease, leaseform, logs, notices, notify, onedrive, reminders, sources, storage, updates, validation
 
 log = logging.getLogger("garagebooks.app")
 
@@ -30,6 +30,7 @@ MESSAGES = {
     "saved": "Expense saved.",
     "updated": "Expense updated.",
     "deleted": "Expense deleted.",
+    "notify_saved": "Notification settings saved.",
     "saved_uploaded": "Expense saved. The invoice was saved in the car's folder and linked.",
     "updated_uploaded": "Expense updated. The invoice was saved in the car's folder and linked.",
     "updated_replaced": "Expense updated. It now points to the new invoice; the previous file is still "
@@ -117,9 +118,11 @@ class PrefixMiddleware:
         return [b"Not found\n"]
 
 
-def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_fetch=None, background_jobs=True):
+def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_fetch=None, background_jobs=True,
+               notify_send=None):
     """`connect` is injectable so tests can hand in a connection to a scratch DB,
-    `onedrive_transport` so they can stand in for Microsoft, `release_fetch` for GitHub and `icon_fetch` for the provider icon's source.
+    `onedrive_transport` so they can stand in for Microsoft, `release_fetch` for GitHub, `icon_fetch` for the provider icon's source and `notify_send` for the notification
+    service (notify.send's signature).
     `background_jobs=False` is for the worker (`python -m garagebooks worker`), which runs the scheduled jobs itself."""
     app = Flask(__name__)
     logs.configure(app.logger, os.environ.get("LOG_LEVEL"))
@@ -286,6 +289,14 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                   "Looks at TeslaMate again: adds its new cars, and holds its figures back or lets them through.")
     scheduler.add("dashboard", timedelta(hours=6), lambda _conn: refresh_dashboard(),
                   "Rewrites the Grafana dashboard, so its time range and panels follow the data.")
+    send_notice = notify_send or notify.send
+
+    def notifications(conn):
+        return notices.run(conn, send_notice, teslamate(conn), datetime.now(ZoneInfo(tz)),
+                           onedrive=drive is not None, signin_check=check_signin)
+    scheduler.add("notifications", timedelta(minutes=15), notifications,
+                  "Sends the notices you have asked for (Settings, Notifications): a reminder coming due, the OneDrive "
+                  "client secret nearing its expiry, the OneDrive sign-in lost. Each is sent once.")
     app.extensions["scheduler"] = scheduler
     try:
         jobs_mode = jobs.mode(os.environ)
@@ -536,7 +547,9 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         shortly before it expires (a refresh costs most of a second). It is only reused while the stored
         refresh token is the one it came with: disconnecting, signing in again or new credentials all
         change that, so none of them leaves a kept token in use. Otherwise: spend the stored refresh token
-        and store the one Microsoft hands back."""
+        and store the one Microsoft hands back. A sign-in Microsoft refuses is noted (signin_lost_at), so
+        the notifications job can say so; a refresh that works clears it."""
+        lost = None
         with connect() as conn:
             account = db.onedrive_account(conn, lock=True)
             if not account or not account["refresh_token"]:
@@ -544,17 +557,34 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 raise onedrive.NotConnected()
             if kept.get("key") == account["refresh_token"] and kept["until"] > time.monotonic():
                 return kept["token"]
-            tokens = drive.refresh(account["client_id"], drive.decrypt(account["client_secret"]),
-                                   drive.decrypt(account["refresh_token"]))
-            key = account["refresh_token"]
-            if tokens.get("refresh_token"):
-                key = drive.encrypt(tokens["refresh_token"])
-                db.save_onedrive_account(conn, refresh_token=key)
+            try:
+                tokens = drive.refresh(account["client_id"], drive.decrypt(account["client_secret"]),
+                                       drive.decrypt(account["refresh_token"]))
+            except onedrive.SignInExpired as exc:
+                lost = exc
+            else:
+                key = account["refresh_token"]
+                if tokens.get("refresh_token"):
+                    key = drive.encrypt(tokens["refresh_token"])
+                db.save_onedrive_account(conn, refresh_token=key, signin_lost_at=None, signin_checked_at=datetime.now(timezone.utc))
+        if lost is not None:        # after the transaction above, which holds the row
+            kept.clear()
+            with connect() as conn:
+                db.note_signin_lost(conn)
+            raise lost
         lifetime = tokens.get("expires_in", 0) - TOKEN_MARGIN_SECONDS
         kept.clear()
         if lifetime > 0:
             kept.update(key=key, token=tokens["access_token"], until=time.monotonic() + lifetime)
         return tokens["access_token"]
+
+    def check_signin():
+        """Does Microsoft still accept the saved sign-in? Asked by the notifications job at most once a day
+        (a refresh is the only way to know). The answer is recorded by access_token; this just asks."""
+        try:
+            access_token()
+        except onedrive.OneDriveError as exc:      # lost (recorded), not connected, or Microsoft out of reach: tried again later
+            log.info("OneDrive sign-in check: %s", exc)
 
     def upload_ready(car_id):
         """Has this car a folder, in a storage this installation has and can use right now?"""
@@ -1575,7 +1605,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         with connect() as conn:
             # A new registration can't use the old one's sign-in.
             db.save_onedrive_account(conn, client_secret=drive.encrypt(secret), refresh_token=None,
-                                     account=None, auth_state=None, auth_expires_at=None, **fields)
+                                     account=None, auth_state=None, auth_expires_at=None,
+                                     signin_lost_at=None, signin_checked_at=None, **fields)
         return redirect(url_for("storage_page", msg="credentials"), 303)
 
     @app.post("/onedrive/connect")
@@ -1630,7 +1661,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             return render_storage(status=400, notice=exc.user_message)
         name = drive.account_name(tokens["access_token"]) or "your Microsoft account"
         with connect() as conn:
-            db.save_onedrive_account(conn, refresh_token=drive.encrypt(tokens["refresh_token"]), account=name)
+            db.save_onedrive_account(conn, refresh_token=drive.encrypt(tokens["refresh_token"]), account=name,
+                                     signin_lost_at=None, signin_checked_at=None)
         log.info("OneDrive connected")
         resp = redirect(url_for("storage_page", msg="connected"), 303)
         resp.delete_cookie(STATE_COOKIE, path=request.script_root or "/")
@@ -1640,7 +1672,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
     def onedrive_disconnect():
         need_drive()
         with connect() as conn:
-            db.save_onedrive_account(conn, refresh_token=None, account=None)
+            db.save_onedrive_account(conn, refresh_token=None, account=None, signin_lost_at=None, signin_checked_at=None)
         log.info("OneDrive disconnected")
         return redirect(url_for("storage_page", msg="disconnected"), 303)
 
@@ -2150,15 +2182,70 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         else:
             with connect() as conn:
                 values = db.get_settings(conn)
+        return render_settings(values, errors, ev_form_values=ev_form_values, new_rate=new_rate)
+
+    def render_settings(values, errors, status=None, notify_errors=None, notify_format=None, test=None,
+                        ev_form_values=None, new_rate=None):
+        """The Settings page. The notification address is a secret: the page is only told its host."""
         with connect() as conn:
+            address, saved_format = db.get_notify(conn)
             job_list = scheduler.status(conn)
             ev_rates = db.ev_charging_rates(conn)
         return render_template("settings.html", values=values, errors=errors, aliases=validation.NAME_ALIASES,
                                job_list=job_list, jobs_mode=jobs_mode,
-                               ev_rates=ev_rates, ev_rate_values=ev_form_values, new_rate=new_rate,
+                               ev_rates=ev_rates, ev_rate_values=ev_form_values or {}, new_rate=new_rate or {"year": "", "cents": ""},
                                date_default=validation.DEFAULT_DATE_PATTERN, name_default=validation.DEFAULT_NAME_FORMAT,
                                multi_choices=validation.MULTI_AMOUNT_CHOICES, example=name_example(values),
-                               message=MESSAGES.get(request.args.get("msg", ""))), (400 if errors else 200)
+                               message=MESSAGES.get(request.args.get("msg", "")),
+                               notify={"host": notify.host_of(address) if address else None, "errors": notify_errors or {},
+                                       "format": notify_format or saved_format, "formats": notify.FORMATS, "test": test},
+                               ), status or (400 if errors or notify_errors else 200)
+
+    @app.post("/settings/notifications")
+    def notifications_save():
+        """Save the notification address and format. A blank address keeps the one saved (it is never shown
+        back); the Remove box clears it."""
+        errors = {}
+        raw_format = request.form.get("notify_format", "")
+        try:
+            fmt = validation.parse_notify_format(raw_format)
+        except ValueError as exc:
+            fmt = None
+            errors["notify_format"] = str(exc)
+        try:
+            address = validation.parse_notify_url(request.form.get("notify_url", ""))
+        except ValueError as exc:
+            address = None
+            errors["notify_url"] = str(exc)
+        if errors:
+            with connect() as conn:
+                values = db.get_settings(conn)
+            return render_settings(values, {}, notify_errors=errors, notify_format=fmt or "ntfy")
+        with connect() as conn:
+            if request.form.get("notify_clear"):
+                address = None
+            elif address is None:
+                address = db.get_notify(conn)[0]
+            db.save_notify(conn, address, fmt)
+        log.info("notification settings saved: %s", "on (" + notify.host_of(address) + ")" if address else "off")
+        return redirect(url_for("settings", msg="notify_saved"), 303)
+
+    @app.post("/settings/notifications/test")
+    def notifications_test():
+        """Send one notice now to the saved address, and say how it went, in words that never hold the address."""
+        with connect() as conn:
+            address, fmt = db.get_notify(conn)
+            values = db.get_settings(conn)
+        if not address:
+            test = {"ok": False, "text": "Save an address first: there is nowhere to send it yet."}
+        else:
+            try:
+                send_notice(address, fmt, "GarageBooks test notice",
+                            "If you can read this, notifications are working.", tags=("white_check_mark",))
+                test = {"ok": True, "text": f"A test notice was sent to {notify.host_of(address)}. Check that it arrived."}
+            except jobs.JobError as exc:
+                test = {"ok": False, "text": str(exc)}
+        return render_settings(values, {}, status=200, test=test)
 
     @app.post("/api/prefill")
     def api_prefill():

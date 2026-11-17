@@ -104,6 +104,13 @@ app have no name either way.
 
 Date and time are entered in `APP_TZ` and stored as `timestamptz`. TeslaMate's `positions.date` is naive UTC; the odometer lookup converts before comparing.
 
+## Notifications
+
+The address notices are sent to is set on the Settings page, not in `.env`. It is a secret, so it is never
+logged, shown back or put in an error; it is stored unencrypted in the `garagebooks` schema, so a database
+backup holds it. Sending is by the `notifications` scheduled job, every 15 minutes. See
+[Notifications](notifications.md).
+
 ## CSRF protection
 
 POSTs must carry a same-origin `Origin`/`Referer` header (CSRF guard). Plain `curl` needs `-H 'Origin: https://your-host'`.

@@ -40,10 +40,7 @@ directly.
 
 ## Now
 
-- **8. Notifications** (size M)
-  Push notices through a URL you configure (ntfy, Apprise, or a Home Assistant webhook): a reminder coming due, the OneDrive client secret nearing its expiry date (the app already stores it), the OneDrive sign-in lost, new invoices waiting for review, a lease budget heading for a shortfall (L3).
-  *Why now:* Reminders are in place, and they are only useful if you are told when one falls due.
-  *Depends on:* 7
+Everything that was here has shipped (see Already in place). The next items are under Next.
 
 ## Next
 
@@ -64,7 +61,7 @@ directly.
   *Depends on:* —
 
 - **13. Watch the invoice folder** (size L)
-  Check each car's OneDrive or server folder on a schedule. Each new PDF becomes a draft expense (read the way the import page already reads them), with its category taken from the subfolder it is in. Drafts wait in a review queue until you confirm or edit them.
+  Check each car's OneDrive or server folder on a schedule. Each new PDF becomes a draft expense (read the way the import page already reads them), with its category taken from the subfolder it is in. Drafts wait in a review queue until you confirm or edit them, and a notice (item 8) says when new ones are waiting.
   *Depends on:* 7, 8
 
 - **14. Your own lists and fields** (size M)
@@ -191,8 +188,8 @@ one of the provider's budget pools.
   GarageBooks, and charging cost for the fuel or charging pool (from TeslaMate, or entered by hand).
 - Each expense marked as **paid by the provider** (lease, fuel card), **claimed** (awaiting or
   reimbursed) or **paid personally**, so nothing is counted twice and unclaimed costs stand out.
-- The projected balance of each pool at the end of the FBT year, and a warning through item 8
-  when one is heading for a shortfall or a large unused surplus.
+- The projected balance of each pool at the end of the FBT year, and a warning through notifications
+  (item 8 is in place; this notice is added here) when one is heading for a shortfall or a large unused surplus.
 - Budget changes from a refinance or a re-budget take effect from their date, without rewriting
   earlier periods.
 
@@ -287,6 +284,7 @@ These are in main since 2026-11-16 and not yet in a release:
 - **5. Payment calculator.** Work out a payment made of several parts on the amount field (#77).
 - **6. Stricter quality gates.** A higher coverage floor, property-based tests and an SBOM on each release (#78).
 - **7. Scheduled jobs.** A small scheduler for periodic work, run by the app or by an optional worker container from the same image (`python3 -m garagebooks worker`), with each job's last run shown on Settings (#90).
+- **8. Notifications.** Push notices through an address you set (ntfy, Apprise or a Home Assistant webhook): a reminder coming due or overdue, the OneDrive client secret nearing its expiry date, and the OneDrive sign-in lost (#89). Two notices wait for the features they report on: new invoices waiting for review (with item 13) and a lease budget heading for a shortfall (with L3).
 - **L5. Cost after tax.** What a packaged expense costs after the GST and pre-tax salary, beside its invoice amount, and the home charging reimbursement (#91).
 - **Review changes.** Lease form import and documents per lease period, several lease periods per car, associate leases, optional lease budgets, packaging per car, the purchase price on the Cars page, a list of standard service reminders, and the Sold panel only once a car is sold (#85). The manual odometer readings were removed.
 

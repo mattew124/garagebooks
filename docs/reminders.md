@@ -96,6 +96,11 @@ reading, days and kilometres left, and the status. See [What the dashboard count
 
 <!-- screenshot: reminders-dashboard - The Reminders table on the dashboard -->
 
+## Being told
+
+A reminder can be pushed to your phone when it comes due soon and again when it is overdue: set up
+[notifications](notifications.md) on the Settings page.
+
 ## Upgrading
 
 The app adds the reminders table and view itself when it starts. If you use the restricted database

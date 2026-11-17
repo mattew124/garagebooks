@@ -44,3 +44,6 @@ GRANT SELECT, INSERT, UPDATE ON garagebooks.ev_charging_rate TO :"app_role";
 GRANT EXECUTE ON FUNCTION garagebooks.expense_after_tax(text) TO :"app_role";
 -- Scheduled jobs: the scheduler adds a row for each job and records each run.
 GRANT SELECT, INSERT, UPDATE ON garagebooks.job TO :"app_role";
+-- Notifications: what has been sent is added, read and pruned, never rewritten. (The settings and the
+-- OneDrive sign-in columns are covered by the grants on their tables above.)
+GRANT SELECT, INSERT, DELETE ON garagebooks.notification TO :"app_role";
