@@ -9,6 +9,7 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 **Lease and car page changes.** Nothing to do on upgrade: the app adds the new columns itself.
 
+- **Dev stacks.** `scripts/dev.sh prune` destroys the dev stacks of merged branches and of removed worktrees, and `scripts/dev.sh auto-prune on` runs it hourly from cron.
 - **Roadmap.** Updated for what has shipped: the Now items are in place, cost after tax (L5) is next, and lease budgets (L3) move to Later.
 - **Lease form import.** The Add a lease page starts with a **Documents** card. Choose the provider's lease
   form or package confirmation (from the computer, by dropping it, or from the car's OneDrive or invoice
