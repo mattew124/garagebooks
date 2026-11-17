@@ -298,3 +298,13 @@ def test_the_dev_stack_can_run_the_worker_but_only_when_asked():
     out = subprocess.run(["docker", "compose", "-f", str(ROOT / "docker-compose.dev.yml"), "--env-file", "/dev/null",
                           "config", "--services"], capture_output=True, text=True, check=True, env=env).stdout.split()
     assert "dev-worker" not in out and "garagebooks-dev" in out
+
+
+def test_the_browser_tests_python_package_matches_their_playwright_image():
+    """The image ships the browsers but not the Python package, which looks for its own build of them.
+    Dependabot bumps the image's tag only, so a mismatch has to fail here rather than in a browser run."""
+    text = (ROOT / "tests" / "browser" / "Dockerfile").read_text()
+    image = re.search(r"^FROM mcr\.microsoft\.com/playwright/python:v(\d+\.\d+\.\d+)-", text, re.M)
+    package = re.search(r"\bplaywright==(\d+\.\d+\.\d+)\b", text)
+    assert image and package, "tests/browser/Dockerfile no longer names both versions"
+    assert package.group(1) == image.group(1)
