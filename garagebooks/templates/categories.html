@@ -16,6 +16,11 @@
       {% if folder_error and folder_error[0] == c.id %}<span class="error">{{ folder_error[1] }}</span>{% endif %}
     </form>
     {% endif %}
+    <form method="post" action="{{ url_for('category_gst_free', category_id=c.id) }}" class="row">
+      <label class="check"><input type="checkbox" name="gst_free" value="1" {{ 'checked' if c.gst_free }}>
+        <span>GST-free <small>(this category's invoices carry no GST)</small></span></label>
+      <button type="submit" class="secondary">Save</button>
+    </form>
     {% if budgets_on %}
     <form method="post" action="{{ url_for('category_pool', category_id=c.id) }}" class="row">
       <label><small>Lease budget pool</small>
@@ -31,6 +36,7 @@
 </ul>
 {% if uploads_enabled %}<p><small>Uploaded invoices go into this subfolder of the car's {{ 'folder' if local_enabled else 'OneDrive folder' }}, made when first
   needed. Leave it blank to use a folder named after the category, e.g. Tyres and Wheel alignment can both use “Maintenance”.</small></p>{% endif %}
+<p><small>Tick GST-free for a category whose invoices carry no GST, such as registration and CTP. It only changes what an expense paid from a lease package is shown to cost after tax: the GST on an invoice that isn't GST-free is taken to be a flat 1/11 of it.</small></p>
 {% if budgets_on %}<p><small>A car on a novated lease has a yearly budget for each pool. Choose the pool each category's expenses are paid from, or None when the category isn't part of the package.</small></p>{% endif %}
 <form method="post" class="card stack">
   <label>New category <input name="name" maxlength="60" required placeholder="e.g. Servicing">

@@ -55,7 +55,10 @@ class World:
         for row in self.folders:        # the standard categories' upload folders, which a property may have changed
             self.db.execute("UPDATE garagebooks.category SET upload_folder = %s WHERE id = %s", (row["upload_folder"], row["id"]))
         self.db.execute("UPDATE garagebooks.setting SET app_url = NULL, grafana_url = NULL, invoice_date_format = NULL,"
-                        " invoice_name_format = NULL, multi_amount = NULL, notify_url = NULL, notify_format = NULL")
+                        " invoice_name_format = NULL, multi_amount = NULL, marginal_tax_rate = NULL, notify_url = NULL,"
+                        " notify_format = NULL")
+        self.db.execute("DELETE FROM garagebooks.ev_charging_rate WHERE fbt_year NOT BETWEEN 2022 AND 2026")
+        self.db.execute("UPDATE garagebooks.ev_charging_rate SET cents_per_km = CASE WHEN fbt_year = 2026 THEN 5.47 ELSE 4.20 END")
 
     def prepare(self):
         """A clean database, a signed-in OneDrive and a chosen folder for car 1 in each store."""
@@ -150,7 +153,7 @@ def expense_form(w):
         "invoice_url": st.one_of(text, st.just("https://example.com/a")),
         "invoice_path": st.one_of(text, st.just("/Cars/Test car/a.pdf")),
         "vendor": text, "notes": text, "confirm_duplicate": st.sampled_from(["", "1"]),
-        "remove_invoice": st.sampled_from(["", "1"]), "category": text, "sort": text, "dir": text})
+        "remove_invoice": st.sampled_from(["", "1"]), "packaged": st.one_of(text, st.sampled_from(["auto", "package", "personal"])), "category": text, "sort": text, "dir": text})
 
 
 pdf_upload = st.one_of(
@@ -254,6 +257,17 @@ def test_a_category_upload_folder_saves_only_a_legal_name(world, category_id, fo
 
 
 @EXAMPLES
+@given(st.one_of(ids, st.just(1)), text)
+def test_a_category_gst_free_tick_is_a_yes_or_no_and_never_a_crash(world, category_id, tick):
+    client = world.prepare() if world.client is None else world.client
+    world.reset()
+    category_id = world.category("Tyres") if category_id == 1 else category_id
+    assert client.post(f"/categories/{category_id}/gst_free", data={"gst_free": tick}, headers=ORIGIN).status_code in OK
+    assert world.db.execute("SELECT gst_free FROM garagebooks.category WHERE name = 'Tyres'").fetchone()["gst_free"] in (True, False)
+    world.db.execute("UPDATE garagebooks.category SET gst_free = false WHERE name = 'Tyres'")
+
+
+@EXAMPLES
 @given(st.sampled_from(["/learned/label/delete", "/learned/vendor/delete"]), st.dictionaries(st.sampled_from(["field", "label", "vendor"]), text))
 def test_forgetting_a_learned_label_or_vendor(world, path, data):
     client = world.prepare() if world.client is None else world.client
@@ -265,7 +279,9 @@ settings_form = st.fixed_dictionaries({}, optional={
     "app_url": st.one_of(text, st.just("https://example.com/app")), "grafana_url": st.one_of(text, st.just("http://grafana:3000")),
     "invoice_date_format": st.one_of(text, st.sampled_from(["yymmdd", "yyyy-mm-dd", "dd.mm.yy"])),
     "invoice_name_format": st.one_of(text, st.sampled_from(["%date %category - %vendor", "%date_%car", "%date %vendor %%"])),
-    "multi_amount": st.one_of(text, st.sampled_from(sorted(v.MULTI_AMOUNT_CHOICES)))})
+    "multi_amount": st.one_of(text, st.sampled_from(sorted(v.MULTI_AMOUNT_CHOICES))),
+    "marginal_tax_rate": st.one_of(text, st.decimals(min_value=-5, max_value=105, places=2).map(str)),
+    "ev_rate_2026": text, "new_rate_year": st.one_of(text, st.integers(1980, 2210).map(str)), "new_rate_cents": text})
 
 
 @EXAMPLES
@@ -282,8 +298,11 @@ def test_settings_save_only_what_validates(world, form):
         assert v.parse_date_pattern(row["invoice_date_format"]) == row["invoice_date_format"]
         assert v.parse_name_format(row["invoice_name_format"]) == row["invoice_name_format"]
         assert row["multi_amount"] in v.MULTI_AMOUNT_CHOICES
+        assert row["marginal_tax_rate"] is None or 0 <= row["marginal_tax_rate"] <= 100
+        for rate in world.db.execute("SELECT * FROM garagebooks.ev_charging_rate"):
+            assert 1990 <= rate["fbt_year"] <= 2200 and 0 <= rate["cents_per_km"] <= v.MAX_CENTS_PER_KM
     else:
-        assert row["app_url"] is None and row["invoice_name_format"] is None
+        assert row["app_url"] is None and row["invoice_name_format"] is None and row["marginal_tax_rate"] is None
     assert client.get("/settings").status_code == 200       # whatever is saved, the page still draws
 
 

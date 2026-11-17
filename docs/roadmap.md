@@ -40,6 +40,7 @@ directly.
 
 ## Now
 
+<<<<<<< HEAD
 - **L5. Cost after tax** (size M)
   What an expense paid from pre-tax salary really costs, beside its invoice amount. Not built yet. It will
   include the charging reimbursement for an electric car on a novated or associate lease.
@@ -51,11 +52,17 @@ directly.
   *Why now:* A small item that uses the lease estimate and the odometer, both now in place.
   *Depends on:* L1, T1
 
+=======
+- **8. Notifications** (size M)
+  Push notices through a URL you configure (ntfy, Apprise, or a Home Assistant webhook): a reminder coming due, the OneDrive client secret nearing its expiry date (the app already stores it), the OneDrive sign-in lost, new invoices waiting for review, a lease budget heading for a shortfall (L3).
+  *Why now:* Reminders are in place, and they are only useful if you are told when one falls due.
+  *Depends on:* 7
+>>>>>>> origin/roadmap/scheduled-jobs
 
 ## Next
 
 - **9. Status page** (size S–M)
-  One page showing the app version, the TeslaMate version and compatibility check (when there is a TeslaMate), the OneDrive connection and secret expiry, whether the invoice folder is mounted, database size, the app's memory use, and the time of the last backup if you point it at one.
+  One page showing the app version, the TeslaMate version and compatibility check (when there is a TeslaMate), the OneDrive connection and secret expiry, whether the invoice folder is mounted, database size, the app's memory use, and the time of the last backup if you point it at one. It also shows the kilometre pace (L4) for each car with a lease estimate.
   *Depends on:* —
 
 - **10. Charging and energy figures** (size M)
@@ -203,23 +210,28 @@ one of the provider's budget pools.
 - Budget changes from a refinance or a re-budget take effect from their date, without rewriting
   earlier periods.
 
-### L4. Kilometre pace (Now, S)
+### L4. Kilometre pace (Done, S)
 
 From the lease's estimated km and the odometer (TeslaMate's, or the odometer on the latest expense): the reading at the start of the FBT year,
 the km expected by its end (pro rata if the car is held only part of the year), the km per day
-needed to get there, and the km per day actually driven. On the dashboard and the status page.
+needed to get there, and the km per day actually driven. In the app (the FBT year report and the lease page)
+and on the dashboard. The status page (item 9) will show it too once there is one.
 
-### L5. Cost after tax (Now, M)
+### L5. Cost after tax (Done, M)
 
 A packaged expense costs less than its invoice: the GST is claimed back, and the rest comes from
 pre-tax salary. With your marginal tax rate entered once in Settings (the rate, not your salary),
-each packaged expense and the TCO show both the invoice amount and the effective cost, less any
-post-tax contributions. Expenses paid personally are unaffected.
+each packaged expense and the totals show both the invoice amount and the effective cost. Expenses paid
+personally are unaffected. Nothing here is tax advice.
 
-Not built yet. It will also include the charging reimbursement for an electric car on a novated or
-associate lease: the ATO's cents-per-km rate for home charging times the km driven, whatever the
-charging actually cost (4.20 cents per km for the FBT years to 31 March 2026, and 5.47 cents from 1 April 2026). The rate is set per FBT year, so it is
-kept as data by FBT year, like the other ATO figures.
+Built (#91): a **Paid from** choice on an expense (automatic, the package or personally), a **GST-free** tick
+per category, the marginal rate and the ATO's home charging rates by FBT year in Settings, an **After tax**
+part on the FBT year report, two dashboard panels, and, for a battery electric car whose lease has it ticked,
+the home charging reimbursement: the ATO's cents-per-km rate (kept as data by FBT year: 4.20 cents per km for the
+FBT years to 31 March 2026 and 5.47 cents from 1 April 2026) times the km driven, and the tax saved on it. The
+formulas and their simplifications are on [Novated lease calculations](lease-calculations.md#cost-after-tax-l5).
+The reimbursement needs the odometer, so it is in the app only. The existing TCO figures keep their meaning:
+the after-tax figures sit beside them.
 
 ### L6. Read the provider's statements (Later, M)
 
@@ -283,12 +295,17 @@ These are in main since 2026-11-16 and not yet in a release:
 - **2. Selling the car.** A sale date and price per car; TCO and cost per day stop at the sale (#80).
 - **L1. Lease details per car.** The novated lease behind a car (#81).
 - **L2. FBT year and taxable value.** Costs by FBT year, and the car's taxable value and contribution (#82).
+- **L4. Kilometre pace.** The km the lease estimate expects this FBT year against the odometer, in the app and on the dashboard (#88).
 - **3. Change history.** An append-only log of every add, edit and delete, with a page to view it (#76).
 - **4. Reminders by date or odometer.** Recurring reminders, resolved by linking the expense that did the job (#83).
 - **5. Payment calculator.** Work out a payment made of several parts on the amount field (#77).
 - **6. Stricter quality gates.** A higher coverage floor, property-based tests and an SBOM on each release (#78).
 - **7. Scheduled jobs.** A small scheduler for periodic work, run by the app or by an optional worker container from the same image (`python3 -m garagebooks worker`), with each job's last run shown on Settings (#90).
+<<<<<<< HEAD
 - **8. Notifications.** Push notices through an address you set (ntfy, Apprise or a Home Assistant webhook): a reminder coming due or overdue, the OneDrive client secret nearing its expiry date, and the OneDrive sign-in lost (#89). Two notices wait for the features they report on: new invoices waiting for review (with item 13) and a lease budget heading for a shortfall (with L3).
+=======
+- **L5. Cost after tax.** What a packaged expense costs after the GST and pre-tax salary, beside its invoice amount, and the home charging reimbursement (#91).
+>>>>>>> origin/roadmap/scheduled-jobs
 - **Review changes.** Lease form import and documents per lease period, several lease periods per car, associate leases, optional lease budgets, packaging per car, the purchase price on the Cars page, a list of standard service reminders, and the Sold panel only once a car is sold (#85). The manual odometer readings were removed.
 
 These were part of the original plan and are done: the dashboard as a version-controlled file that
@@ -322,7 +339,7 @@ somewhere above; these are the ones adapted rather than taken as written.
 
 - **No dependency on TeslaMate:** The original plan's first system requirement, and the one most easily lost as features pile up. It is now T1, first in Now, with a design rule that every other item follows.
 
-- **Re-ranked on 2026-11-16:** The Now items shipped (see Already in place). Cost after tax (L5) is first in Now because you asked for it, with the charging reimbursement, then kilometre pace (L4), scheduled jobs (7) and notifications (8). Lease budgets (L3) moved to Later because budgets are now optional.
+- **Re-ranked on 2026-11-16:** The Now items shipped (see Already in place). Cost after tax (L5, with the charging reimbursement) was first in Now because you asked for it, and is now built; kilometre pace (L4), scheduled jobs (7) and notifications (8) follow. Lease budgets (L3) moved to Later because budgets are now optional.
 
 - **Hosting, secrets and deployment pipeline:** The installer's choice, not part of this project.
 
