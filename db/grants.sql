@@ -7,7 +7,7 @@ GRANT USAGE ON SCHEMA garagebooks TO :"app_role";
 GRANT SELECT, INSERT, UPDATE, DELETE ON garagebooks.expense TO :"app_role";
 GRANT SELECT, UPDATE ON garagebooks.setting TO :"app_role";
 GRANT SELECT, INSERT ON garagebooks.category TO :"app_role";
-GRANT UPDATE (upload_folder, budget_pool) ON garagebooks.category TO :"app_role";
+GRANT UPDATE (upload_folder, budget_pool, gst_free) ON garagebooks.category TO :"app_role";
 -- Lease details and budgets per car.
 GRANT SELECT, INSERT, UPDATE, DELETE ON garagebooks.lease, garagebooks.lease_budget TO :"app_role";
 GRANT EXECUTE ON FUNCTION garagebooks.fbt_year(date) TO :"app_role";
@@ -19,6 +19,8 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON garagebooks.car, garagebooks.odometer_re
 GRANT EXECUTE ON FUNCTION garagebooks.sync_teslamate_cars() TO :"app_role";
 -- Switching the ownership view between its two forms (with and without TeslaMate) and nothing else.
 GRANT EXECUTE ON FUNCTION garagebooks.build_ownership(boolean) TO :"app_role";
+-- The same for the odometer function the kilometre pace panel uses.
+GRANT EXECUTE ON FUNCTION garagebooks.build_odometer_at(boolean) TO :"app_role";
 -- What it reads from TeslaMate, when there is a TeslaMate in this database.
 SELECT to_regclass('public.cars') IS NOT NULL AND to_regclass('public.positions') IS NOT NULL
        AND to_regclass('public.charging_processes') IS NOT NULL AS has_teslamate \gset
@@ -36,5 +38,9 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON garagebooks.reminder TO :"app_role";
 GRANT SELECT ON garagebooks.reminder_due TO :"app_role";
 -- The change history: the app adds to it (through the triggers) and reads it, never rewrites it.
 GRANT SELECT, INSERT ON garagebooks.change_log TO :"app_role";
+-- Cost after tax: the ATO's home charging rates (the app adds a year and changes a rate), and the one
+-- definition of an expense's cost after tax that the app and the dashboard share.
+GRANT SELECT, INSERT, UPDATE ON garagebooks.ev_charging_rate TO :"app_role";
+GRANT EXECUTE ON FUNCTION garagebooks.expense_after_tax(text) TO :"app_role";
 -- Scheduled jobs: the scheduler adds a row for each job and records each run.
 GRANT SELECT, INSERT, UPDATE ON garagebooks.job TO :"app_role";

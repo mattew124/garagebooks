@@ -44,6 +44,33 @@
     <span>Track lease budgets<br><small>For a salary-packaged car whose provider sets a yearly budget for each running cost. Adds the budgets to
       a car's lease, a budget pool to each category, and the budgets to the FBT year report. Leave it off if you don't follow them:
       budgets already entered are kept.</small></span></label>
+  <section class="stack" id="after-tax-settings">
+    <h2 class="card-title">Cost after tax</h2>
+    <label>Marginal tax rate (%)
+      <input type="text" name="marginal_tax_rate" inputmode="decimal" maxlength="7" autocomplete="off" placeholder="e.g. 34"
+             value="{{ values.marginal_tax_rate if values.marginal_tax_rate is not none else '' }}">
+      {% if errors.marginal_tax_rate %}<span class="error">{{ errors.marginal_tax_rate }}</span>{% endif %}
+      <small>Your marginal income tax rate, <strong>including the 2% Medicare levy</strong> (32% plus the levy is entered as 34). Used to show what an expense paid
+        from a lease package costs after tax, beside what the invoice says. Only the rate is kept, never a salary. Leave it blank and no after-tax figure is shown.
+        This is arithmetic on what you enter, not tax advice.</small></label>
+    <fieldset class="due-fields" id="ev-rates">
+      <legend>ATO rate for home charging an electric car (cents per km)</legend>
+      <small>What a provider may reimburse for charging an electric car at home on a novated or associate lease, by FBT year (the year it starts in:
+        2026 is 1 April 2026 to 31 March 2027). A year with no rate here uses the latest earlier year's, and the FBT year report says which it used.
+        Check the ATO's current figure; add a year when it publishes one.</small>
+      {% for year, cents in ev_rates.items() %}
+      <label class="row"><span>FBT {{ year }}–{{ '%02d' % ((year + 1) % 100) }}</span>
+        <input type="text" name="ev_rate_{{ year }}" inputmode="decimal" maxlength="8" autocomplete="off" value="{{ ev_rate_values.get(year, cents) }}">
+        {% if errors.get('ev_rate_' ~ year) %}<span class="error">{{ errors['ev_rate_' ~ year] }}</span>{% endif %}</label>
+      {% endfor %}
+      <div class="row">
+        <label>Add a year <input type="text" name="new_rate_year" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="e.g. 2027" value="{{ new_rate.year }}">
+          {% if errors.new_rate_year %}<span class="error">{{ errors.new_rate_year }}</span>{% endif %}</label>
+        <label>Cents per km <input type="text" name="new_rate_cents" inputmode="decimal" maxlength="8" autocomplete="off" value="{{ new_rate.cents }}">
+          {% if errors.new_rate_cents %}<span class="error">{{ errors.new_rate_cents }}</span>{% endif %}</label>
+      </div>
+    </fieldset>
+  </section>
   <button type="submit" class="button">Save</button>
 </form>
 <section class="card stack" id="scheduled-jobs">

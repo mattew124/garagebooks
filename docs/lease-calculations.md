@@ -63,7 +63,85 @@ The provider's statement works out how far the car must go, from an estimated an
 | (h) | Odometer needed at (d) | c + g |
 | (i) | Km per day needed | g ÷ f |
 
-GarageBooks adds what the statement can't show: km per day actually driven, from TeslaMate.
+GarageBooks shows (a) to (i) for each lease with an estimate, on the FBT year report and the lease page, and adds what the
+statement can't show, from the odometer (TeslaMate's, or the latest reading entered by hand on or before the moment):
+
+| | Figure | Formula |
+|---|---|---|
+| (j) | Km driven so far | odometer now − (c); for a year that is over, the odometer at (d) − (c) |
+| (k) | Days so far | whole days from (b) to today, up to (f) (today still counts as to drive) |
+| (l) | Km per day actually driven | j ÷ k |
+| (m) | Km ahead (+) or behind (−) the pro-rata pace | j − a × k ÷ e |
+| (n) | Km per day needed from today | (g − j) ÷ (f − k), at least 0; blank when no days remain |
+
+Days held count both ends of the period, so (f) is one more than d − b. Each figure is rounded to 0.1 km once,
+at the end. A figure that needs an odometer that isn't known is blank (shown as *not known*), never 0. The dashboard's
+**Kilometre pace** panel works out the same figures in SQL, using `garagebooks.odometer_at(car, moment)`, which answers like the
+app does with TeslaMate present, absent and held back.
+
+### Cost after tax (L5)
+
+An expense paid from the package costs less than its invoice: the GST is claimed back, and the rest comes
+out of pre-tax salary, so it saves the tax you would otherwise have paid on that part of your pay. This is
+arithmetic on what you enter, with deliberate simplifications, and **it is not tax advice**.
+
+Two things are entered once: your **marginal tax rate** in Settings (a percentage that includes the 2%
+Medicare levy: 32% plus the levy is 34; the rate only, never a salary) and, for each lease, its pre-tax and
+post-tax payments. For an expense paid from the package, on a lease that covers its date:
+
+```text
+ex GST      = invoice amount                      if the category is GST-free
+            = invoice amount × 10 ÷ 11            otherwise
+post share  = post-tax payment ÷ (pre-tax payment + post-tax payment)      (0 when the two add to nothing)
+after tax   = ex GST × ((1 − post share) × (1 − rate) + post share)
+```
+
+An expense paid personally costs its invoice amount. A rebate (a negative amount) follows the same formula.
+The result is rounded half up to the cent, once, at the end. A packaged expense on a date no lease covers
+(you chose *The package* by hand) has a post share of 0.
+
+**Which expenses are packaged.** On the expense form, **Paid from** is *Automatic*, *The package* or
+*Personally*. *Automatic* means paid from the package when a lease of that car covers the expense's date (in
+the app's time zone), the category has a budget pool, and the category isn't a purchase. The other two choices
+override that. Existing expenses are all *Automatic*, so nothing has to be entered again.
+
+**Simplifications.** GST is taken to be a flat 1/11 of an invoice that isn't GST-free (the Categories page has
+a **GST-free** tick, ticked for Registration to start with). The part of the package paid from after-tax pay is
+taken to be the lease's own post-tax share of its payments, applied to every packaged expense. Payroll
+timing, the cap on a package, and anything about your tax return other than the marginal rate are not
+modelled.
+
+**Worked example** (invented figures). An insurance invoice of $1,100.00 (GST included) on a lease paying
+$300.00 pre-tax and $20.00 post-tax a pay, at a marginal rate of 34%:
+
+```text
+ex GST      = 1,100.00 × 10 ÷ 11                        = 1,000.00
+post share  = 20.00 ÷ (300.00 + 20.00)                  = 0.0625
+after tax   = 1,000.00 × (0.9375 × 0.66 + 0.0625)       = 681.25
+```
+
+The same $1,100.00 on a GST-free category is 1,100.00 × 0.68125 = $749.375, which is $749.38.
+
+**Home charging reimbursement.** For a battery electric car on a lease that has *Home charging is reimbursed at
+the ATO's cents-per-km rate* ticked, the FBT year report adds, for each FBT year:
+
+```text
+km             = odometer at the end of the days held in the year (or now, if earlier)
+                 − odometer at their start
+reimbursement  = km × cents per km ÷ 100
+tax saved      = reimbursement × marginal rate
+after-tax cost of the year = after-tax running costs (and TeslaMate's charging, paid personally) − tax saved
+```
+
+The reimbursement and the tax saved are each rounded to the cent. The odometer is TeslaMate's, or the latest
+odometer reading entered by hand or on an expense, as everywhere else in GarageBooks. When either reading isn't
+known, the reimbursement is shown as *not known* and the year's after-tax total says *unavailable*: a missing
+distance is never treated as nothing. The ATO's rate is data, by FBT year, in **Settings** (4.20 cents per km for
+the FBT years 2022 to 2025 and 5.47 cents from 1 April 2026 to start with: check the ATO's current figure and add a
+year when it publishes one). A year with no rate of its own uses the latest earlier year's, and the report says so.
+
+The same definition of an expense's cost after tax is in the database as `garagebooks.expense_after_tax(tz)`, so
+the dashboard and the app agree, and a test holds the SQL and the Python together.
 
 ## Tax year, bracket and Medicare status
 

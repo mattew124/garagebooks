@@ -181,3 +181,30 @@ def test_the_app_writes_the_panel_after_a_sale_and_drops_it_again_when_the_sale_
     client.post(f"/cars/{car_id}/sale", data=sale_again, headers=ORIGIN)
     start(empty_db, monkeypatch, DASHBOARD_DIR=str(tmp_path))                # a restart keeps it, as a car is sold
     assert "Sold" in titles(json.loads(target.read_text()))
+
+
+def overlapping(panels):
+    """Pairs of panels whose grid rectangles share any cell."""
+    found = []
+    for i, a in enumerate(panels):
+        for b in panels[i + 1:]:
+            ga, gb = a["gridPos"], b["gridPos"]
+            if (ga["x"] < gb["x"] + gb["w"] and gb["x"] < ga["x"] + ga["w"]
+                    and ga["y"] < gb["y"] + gb["h"] and gb["y"] < ga["y"] + ga["h"]):
+                found.append((a["title"], b["title"]))
+    return found
+
+
+def test_panel_ids_are_unique_and_no_two_panels_overlap():
+    """Branches that each add a row at the end of the file can land on the same rows; this catches it."""
+    ids = [p["id"] for p in SOURCE["panels"]]
+    assert len(ids) == len(set(ids)), "a panel id is used twice"
+    assert overlapping(SOURCE["panels"]) == []
+    for sold in (True, False):
+        for pace in (True, False):
+            for after_tax in (True, False):
+                dash = dashboard.render("UTC", "", sold=sold, pace=pace, after_tax=after_tax)
+                assert overlapping(dash["panels"]) == [], (sold, pace, after_tax)
+                titles = [p["title"] for p in dash["panels"]]
+                assert (dashboard.PACE_PANEL in titles) is pace
+                assert (dashboard.AFTER_TAX_PANELS[0] in titles) is after_tax

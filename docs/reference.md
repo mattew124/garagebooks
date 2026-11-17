@@ -65,6 +65,15 @@ Held-back figures are shown as *unavailable*, never as zero, and nothing else st
 thread in the app), `worker` (a second container from the same image, started with `docker compose --profile
 worker up -d`) or `off`. See [Scheduled jobs](scheduled-jobs.md).
 
+## Cost after tax in the database
+
+For queries of your own: `garagebooks.expense_after_tax('Australia/Brisbane')` returns every expense with its car,
+date, amount, whether it counts as paid from the package (`packaged`) and `effective_cost`, what it costs after
+tax (the invoice amount for one paid personally, and null for a packaged one while no marginal rate is entered).
+The argument is the time zone that decides which lease covers an expense's date. It reads no TeslaMate table.
+`garagebooks.ev_charging_rate` holds the ATO's home charging rate (cents per km) by FBT year. The rules are on
+[Novated lease calculations](lease-calculations.md#cost-after-tax-l5).
+
 ## Logs
 
 `docker logs` shows gunicorn's request lines plus the app's own events. `LOG_LEVEL` (`debug`, `info` the default, `warning`, `error`; set in `.env`, restart to change) sets both. `info` records startup, the update check's result, schema changes, expenses saved, updated or deleted, OneDrive sign-in and upload results, and anything the invoice folder on the server refuses (a missing folder, no permission). `debug` adds detail such as retries. Tokens, secrets, vendors, notes and amounts are never logged, except that file names, which can contain a vendor, appear at `debug`.

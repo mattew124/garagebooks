@@ -405,3 +405,7 @@ label.check input { flex: none; margin-top: .3rem; }
 #pay-cost { font-size: 1.1rem; }
 .pay-problem { color: var(--bad); margin: .25rem 0; }
 .pay-problem:empty { display: none; }
+
+/* Cost after tax: what a packaged expense costs, small beside its invoice amount. */
+small.after-tax { display: block; font-weight: 400; color: var(--muted); font-size: .8rem; white-space: nowrap; }
+#after-tax-total small { text-transform: none; letter-spacing: 0; }
