@@ -160,6 +160,29 @@ The formulas, their simplifications and a worked example are on
 <!-- screenshot: list-after-tax - The expense list, with a packaged expense's cost after tax beside its amount and the after-tax total -->
 <!-- screenshot: fbt-after-tax - The After tax part of the FBT year report, with the home charging reimbursement -->
 
+## Kilometre pace
+
+When a lease has an **Estimated km per year**, the FBT year report has a **Kilometre pace** section for each lease
+held in the year shown, and the car's lease page has a short version for the current FBT year. They work out:
+
+- the **odometer at the start** (1 April, or the lease's start if later) and the **km expected by the end**
+  (31 March, or the lease's end if earlier): the estimate × days held ÷ days in the FBT year;
+- the **odometer needed at the end** (the start reading plus the km expected) and the **km per day needed** for
+  the whole period;
+- what a provider's statement can't show: the **km driven so far**, the **km per day actually driven**, how far
+  the car is **ahead of or behind** the pro-rata pace today, and the **km per day needed from today** to land on
+  the estimate.
+
+A year that is over counts the whole period, to its end date. A year that hasn't started shows only what is
+expected. The odometer is TeslaMate's where it is available, otherwise your latest reading (an expense's odometer
+counts) on or before the moment: the start of the first day held, and now (or the end of the last day held).
+A figure that needs an odometer that isn't known says **not known**, with the reason (TeslaMate's figures are
+held back, or no reading is on or before that date), never 0. A lease with no estimate says so, with a link to
+edit it. The same figures are on the dashboard's [Kilometre pace](dashboard.md#kilometre-pace) panel. See
+[Lease calculations](lease-calculations.md#kilometre-pace-l4) for the arithmetic.
+
+<!-- screenshot: km-pace - The Kilometre pace section of the FBT year report -->
+
 ## Lease budgets
 
 Budgets are optional and off by default. They suit a salary-packaged car whose provider sets a yearly

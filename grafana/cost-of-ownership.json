@@ -1882,6 +1882,177 @@
       ]
     },
     {
+      "id": 21,
+      "type": "table",
+      "title": "Kilometre pace",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "TeslaMate"
+      },
+      "description": "This FBT year's distance against the lease's estimated km per year, pro rata for the days held. Empty when this car has no current lease with an estimate. The odometer is TeslaMate's or your latest reading; a figure that needs one that isn't known is blank, not 0. Same figures as the FBT year page in GarageBooks.",
+      "gridPos": {
+        "h": 4,
+        "w": 24,
+        "x": 0,
+        "y": 60
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": false
+          },
+          "noValue": "—"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Expected km"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currency:financial: km:suffix"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Odometer at start"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currency:financial: km:suffix"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Odometer needed at end"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currency:financial: km:suffix"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Km per day needed"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currency:financial: km:suffix"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Driven so far"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currency:financial: km:suffix"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Km per day driven"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currency:financial: km:suffix"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Ahead (+) or behind (-)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currency:financial: km:suffix"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Km per day needed from today"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currency:financial: km:suffix"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "TeslaMate"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH t AS (SELECT (now() AT TIME ZONE '$tz')::date AS today),\nl AS (\n  SELECT ls.start_date, ls.end_date, ls.estimated_km_per_year::numeric AS est, t.today, garagebooks.fbt_year(t.today) AS yr\n  FROM garagebooks.lease ls CROSS JOIN t\n  WHERE ls.car_id = $car_id AND ls.estimated_km_per_year IS NOT NULL AND ls.start_date <= t.today AND ls.end_date >= t.today\n  ORDER BY ls.start_date DESC LIMIT 1\n), p AS (\n  SELECT l.*, GREATEST(l.start_date, make_date(l.yr, 4, 1)) AS d0, LEAST(l.end_date, make_date(l.yr + 1, 3, 31)) AS d1,\n         (make_date(l.yr + 1, 4, 1) - make_date(l.yr, 4, 1)) AS in_year\n  FROM l\n), q AS (\n  SELECT p.*, p.d1 - p.d0 + 1 AS held, GREATEST(LEAST(p.today, p.d1 + 1) - p.d0, 0) AS elapsed\n  FROM p\n), o AS (\n  SELECT q.*, garagebooks.odometer_at($car_id, q.d0::timestamp AT TIME ZONE '$tz')::numeric AS s,\n         garagebooks.odometer_at($car_id, LEAST(now(), (q.d1 + 1)::timestamp AT TIME ZONE '$tz'))::numeric AS c\n  FROM q\n), f AS (\n  SELECT o.*, o.est * o.held / o.in_year AS expected, o.est * o.elapsed / o.in_year AS so_far, o.held - o.elapsed AS remaining,\n         CASE WHEN o.s IS NULL OR o.c IS NULL THEN NULL ELSE GREATEST(o.c - o.s, 0) END AS driven\n  FROM o\n)\nSELECT 'FBT ' || yr || '–' || to_char((yr + 1) % 100, 'FM00') AS \"FBT year\",\n       round(expected, 1) AS \"Expected km\", round(s, 1) AS \"Odometer at start\", round(s + expected, 1) AS \"Odometer needed at end\",\n       round(est / in_year, 1) AS \"Km per day needed\", round(driven, 1) AS \"Driven so far\",\n       round(driven / NULLIF(elapsed, 0), 1) AS \"Km per day driven\", round(driven - so_far, 1) AS \"Ahead (+) or behind (-)\",\n       round(CASE WHEN driven IS NULL THEN NULL ELSE GREATEST(expected - driven, 0) END / NULLIF(remaining, 0), 1) AS \"Km per day needed from today\"\nFROM f",
+          "refId": "A"
+        }
+      ]
+    },
+    {
       "id": 23,
       "type": "stat",
       "title": "Running costs after tax",
@@ -1894,7 +2065,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 60
+        "y": 64
       },
       "fieldConfig": {
         "defaults": {
@@ -1955,7 +2126,7 @@
         "h": 6,
         "w": 16,
         "x": 8,
-        "y": 60
+        "y": 64
       },
       "fieldConfig": {
         "defaults": {

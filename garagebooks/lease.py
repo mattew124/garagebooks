@@ -407,3 +407,65 @@ def after_tax_lines(rows, key, rate_percent):
         line["effective"] = None if cost is None or line["effective"] is None else line["effective"] + cost
     return lines
 
+
+# ---- kilometre pace (roadmap L4) -------------------------------------------------------------------
+# The provider's statement works out how far the car must go in an FBT year from the lease's estimated
+# km per year, pro rata for the days held. These figures add what a statement can't show: how far it
+# has gone, and the pace needed from here. Pure arithmetic: the caller reads the odometers
+# (sources.odometer_at) and passes them in, and a figure that depends on a missing input is None, never 0.
+
+TENTH = Decimal("0.1")
+PACE_FIGURES = ("expected_km", "end_km_needed", "per_day_needed", "driven", "per_day_driven", "expected_so_far",
+                "ahead", "per_day_to_go")
+
+
+def _tenth(value):
+    return None if value is None else value.quantize(TENTH, ROUND_HALF_UP)
+
+
+def _decimal(value):
+    return None if value is None else Decimal(str(value))
+
+
+def km_pace(lease, year, today, start_km, current_km):
+    """The kilometre pace of one lease in one FBT year, as a dict.
+
+    `start_km` is the odometer at the start of the days held (1 April, or the lease start if later) and
+    `current_km` the odometer now, or at the end of the days held when that is already past. Either may be
+    None (not known). Days so far are whole days gone before `today`, so today still counts as to drive.
+    `ahead` is the km driven less the pro-rata km expected by now: positive is ahead, negative behind.
+    `per_day_to_go` is what must be driven each remaining day to land on the estimate (None when none
+    remain). Km figures are rounded to 0.1 once, at the end; `state` is not_held, upcoming, current or past."""
+    first, last = _held_range(lease, year)
+    held, in_year = days_held(lease, year), days_in_fbt_year(year)
+    estimate = lease.get("estimated_km_per_year")
+    out = {"year": year, "first": first, "last": last, "days_held": held, "days_in_year": in_year,
+           "estimate": estimate, "start_km": None, "elapsed_days": 0, "remaining_days": held,
+           **dict.fromkeys(PACE_FIGURES)}
+    if not held:
+        out["state"] = "not_held"
+        return out
+    out["state"] = "upcoming" if today < first else "past" if today > last else "current"
+    elapsed = max((min(today, last + timedelta(days=1)) - first).days, 0)
+    out["elapsed_days"], out["remaining_days"] = elapsed, held - elapsed
+    start = None if out["state"] == "upcoming" else _decimal(start_km)
+    now = None if out["state"] == "upcoming" else _decimal(current_km)
+    out["start_km"] = _tenth(start)
+    if estimate is None:
+        return out
+    yearly = Decimal(estimate)
+    expected = yearly * held / in_year
+    out["expected_km"], out["per_day_needed"] = _tenth(expected), _tenth(yearly / in_year)
+    if start is not None:
+        out["end_km_needed"] = _tenth(start + expected)
+    if start is None or now is None:
+        return out
+    driven = max(now - start, Decimal(0))
+    so_far = yearly * elapsed / in_year
+    out.update(driven=_tenth(driven), expected_so_far=_tenth(so_far), ahead=_tenth(driven - so_far))
+    if elapsed:
+        out["per_day_driven"] = _tenth(driven / elapsed)
+    if out["remaining_days"]:
+        out["per_day_to_go"] = _tenth(max(expected - driven, Decimal(0)) / out["remaining_days"])
+    return out
+

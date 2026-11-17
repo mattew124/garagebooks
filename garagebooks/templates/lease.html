@@ -13,6 +13,17 @@
     {% elif f.status == 'current' %}<strong>{{ f.days_remaining }}</strong> day{{ '' if f.days_remaining == 1 else 's' }} remaining
     {% else %}Ended {{ -f.days_remaining }} day{{ '' if f.days_remaining == -1 else 's' }} ago{% endif %}
     · {{ l.start_date.strftime('%d %b %Y') }} to {{ l.end_date.strftime('%d %b %Y') }}</p>
+  {% if l.pace %}{% set p = l.pace %}
+  <p id="lease-km-pace" class="km-pace-short"><strong>Kilometre pace, {{ fbt_label(p.year) }}:</strong>
+    {% if p.estimate is none %}this lease has no estimated km per year, so there is none to work out.
+      <a href="{{ url_for('car_lease_edit', car_id=car.id, lease_id=l.id) }}">Add the estimate</a>.
+    {% elif p.driven is none %}<span class="unavailable">not known</span>{% for reason in p.reasons %} <small>({{ reason }})</small>{% endfor %}.
+    {% else %}{{ p.driven|km }} driven so far,
+      {% if p.ahead > 0 %}{{ p.ahead|abs|km }} ahead of{% elif p.ahead < 0 %}{{ p.ahead|abs|km }} behind{% else %}on{% endif %} the pro-rata pace
+      for {{ p.estimate|km }} a year{% if p.per_day_to_go is not none %}; {{ p.per_day_to_go }} km a day needed from today to land on it{% endif %}.
+    {% endif %}
+    <a href="{{ url_for('car_fbt', car_id=car.id) }}#km-pace">Details</a></p>
+  {% endif %}
 
   <h3>Lease</h3>
   <dl class="facts">

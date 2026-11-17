@@ -177,6 +177,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         sources.sync_cars(conn, found)
         if known["view"] != found.usable and db.build_ownership(conn, found.usable) is not None:
             known["view"] = found.usable
+            db.build_odometer_at(conn, found.usable)
         return found
 
     def refresh_dashboard():
@@ -202,8 +203,13 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                     after_tax = db.get_settings(conn)["marginal_tax_rate"] is not None and bool(db.lease_car_ids(conn))
             except Exception:           # noqa: BLE001 - no database yet: left out until there is something to show
                 after_tax = False
+            try:
+                with connect() as conn:
+                    pace = db.any_estimated_km(conn)
+            except Exception:           # noqa: BLE001 - no database yet: the panel is left out until a lease has an estimate
+                pace = False
             wrote = dashboard.export(dashboard_dir, tz, os.environ.get("BASE_PATH", "").rstrip("/"), start=start,
-                                     teslamate=known["teslamate"], sold=sold, after_tax=after_tax)
+                                     teslamate=known["teslamate"], sold=sold, pace=pace, after_tax=after_tax)
             log.info("Grafana dashboard %s in %s", "written" if wrote else "already up to date", dashboard_dir)
         except OSError as exc:
             log.warning("Could not write the Grafana dashboard to %s: %s", dashboard_dir, exc)
@@ -884,14 +890,42 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 "later_budgets": [b for b in budgets if b["effective_from"] != row["start_date"]],
                 "figures": lease.derived(row, budgets, today)}
 
+    def km_pace_for(conn, car, row, year, today):
+        """The kilometre pace of one lease in one FBT year (lease.km_pace) with the odometers it needs, read
+        through sources.odometer_at: at the start of the days held, and now, or at their end once that is
+        past. Moments are in APP_TZ. `reasons` says why an odometer isn't known; the readings say where
+        each came from."""
+        zone = ZoneInfo(tz)
+        found = lease.km_pace(row, year, today, None, None)
+        found.update(start_reading=None, current_reading=None, reasons=[])
+        if found["state"] not in ("current", "past") or found["estimate"] is None:
+            return found
+        state = teslamate(conn)
+        first, last = found["first"], found["last"]
+        start = sources.odometer_at(conn, state, car["id"], datetime.combine(first, dtime.min, zone))
+        end = min(datetime.now(zone), datetime.combine(last + timedelta(days=1), dtime.min, zone))
+        now = sources.odometer_at(conn, state, car["id"], end)
+        found = lease.km_pace(row, year, today, start and start.km, now and now.km)
+        held_back = car["teslamate_car_id"] is not None and state.state in (sources.UNAVAILABLE, sources.UNTESTED)
+        reasons = []
+        for reading, day in ((start, first), (now, min(today, last))):
+            if reading is None:
+                reasons.append(f"TeslaMate's figures are held back ({state.reason}), so only readings entered by hand count, "
+                               f"and none is on or before {day.day} {day:%b %Y}." if held_back else
+                               f"No odometer reading is on or before {day.day} {day:%b %Y}.")
+        found.update(start_reading=start, current_reading=now, reasons=list(dict.fromkeys(reasons)))
+        return found
+
     def render_lease(car, status=200):
         today = today_here()
         with connect() as conn:
             current = db.current_lease(conn, car["id"], today)
             views = [lease_view(conn, row, today) for row in db.car_leases(conn, car["id"])]
-        shown = next((v for v in views if current and v["id"] == current["id"]), None)
+            shown = next((v for v in views if current and v["id"] == current["id"]), None)
+            if shown and shown["figures"]["status"] == "current":
+                shown["pace"] = km_pace_for(conn, car, shown, lease.fbt_year(today), today)
         others = [v for v in views if v is not shown]
-        return render_template("lease.html", **lease_context(car, shown=shown, others=others, today=today)), status
+        return render_template("lease.html", **lease_context(car, shown=shown, others=others, today=today, fbt_label=lease.fbt_label)), status
 
     def render_lease_form(car, lease_id, values, errors, status=200):
         return render_template("lease_form.html", **lease_context(car, lease_id=lease_id, values=values, errors=errors)), status
@@ -989,8 +1023,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             lease_id = db.add_lease(conn, car_id, values)
         if lease_id is None:      # another lease was added between the check and the save
             return render_lease_form(car, None, request.form, {"start_date": "These dates overlap another lease of this car."}, 400)
-        refresh_dashboard()
         log.info("lease %s added to car %s", lease_id, car_id)
+        refresh_dashboard()
         return redirect(url_for("car_lease", car_id=car_id, msg=lease_msg("lease_added")), 303)
 
     def lease_or_404(car_id, lease_id):
@@ -1022,6 +1056,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         if outcome == "overlap":
             return render_lease_form(car, lease_id, request.form, {"start_date": "These dates overlap another lease of this car."}, 400)
         log.info("lease %s of car %s updated", lease_id, car_id)
+        refresh_dashboard()
         return redirect(url_for("car_lease", car_id=car_id, msg=lease_msg("lease_saved")), 303)
 
     @app.post("/cars/<int:car_id>/lease/<int:lease_id>/delete")
@@ -1030,8 +1065,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         with connect() as conn:
             if not db.delete_lease(conn, car_id, lease_id):
                 abort(404)
-        refresh_dashboard()
         log.info("lease %s of car %s deleted", lease_id, car_id)
+        refresh_dashboard()
         return redirect(url_for("car_lease", car_id=car_id, msg="lease_deleted"), 303)
 
     @app.post("/api/lease-prefill")
@@ -1147,8 +1182,9 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                                              datetime(year + 1, 4, 1, tzinfo=zone), include_manual=False)
             report = lease.fbt_report(leases, costs, charging, year, today)
             after = fbt_after_tax(conn, car, leases, report, year, today, budgets_on)
+            paces = [km_pace_for(conn, car, row, year, today) for row, _budgets, _figures in report["leases"]]
         earlier, later = [y for y in years if y < year], [y for y in years if y > year]
-        return render_template("fbt.html", car=car, report=report, today=today, budgets_on=budgets_on, frequencies={k: v[0] for k, v in lease.FREQUENCIES.items()},
+        return render_template("fbt.html", car=car, report=report, paces=paces, today=today, budgets_on=budgets_on, frequencies={k: v[0] for k, v in lease.FREQUENCIES.items()},
                                previous=earlier[-1] if earlier else None, following=later[0] if later else None,
                                label=lease.fbt_label, after=after)
     # ---- reminders (roadmap item 4) ------------------------------------------------
