@@ -302,9 +302,24 @@ def test_the_dev_stack_can_run_the_worker_but_only_when_asked():
 
 def test_the_browser_tests_python_package_matches_their_playwright_image():
     """The image ships the browsers but not the Python package, which looks for its own build of them.
-    Dependabot bumps the image's tag only, so a mismatch has to fail here rather than in a browser run."""
-    text = (ROOT / "tests" / "browser" / "Dockerfile").read_text()
-    image = re.search(r"^FROM mcr\.microsoft\.com/playwright/python:v(\d+\.\d+\.\d+)-", text, re.M)
-    package = re.search(r"\bplaywright==(\d+\.\d+\.\d+)\b", text)
-    assert image and package, "tests/browser/Dockerfile no longer names both versions"
+    The package's version is in tests/browser/requirements.txt, where Dependabot's pip updates find it."""
+    image = re.search(r"^FROM mcr\.microsoft\.com/playwright/python:v(\d+\.\d+\.\d+)-",
+                      (ROOT / "tests" / "browser" / "Dockerfile").read_text(), re.M)
+    package = re.search(r"^playwright==(\d+\.\d+\.\d+)$",
+                        (ROOT / "tests" / "browser" / "requirements.txt").read_text(), re.M)
+    assert image and package, "the browser tests' image or package version can't be found"
     assert package.group(1) == image.group(1)
+
+
+def test_dependabot_bumps_the_browser_tests_image_and_package_in_one_pull_request():
+    """Bumped apart, the two would never match: one group holds both, and nothing else."""
+    import yaml
+
+    config = yaml.safe_load((ROOT / ".github" / "dependabot.yml").read_text())
+    browser = [u for u in config["updates"] if "/tests/browser" in (u.get("directories") or [u.get("directory")])]
+    assert sorted(u["package-ecosystem"] for u in browser) == ["docker", "pip"]
+    assert {u.get("multi-ecosystem-group") for u in browser} == {"playwright"}
+    assert all(u.get("patterns") for u in browser)
+    assert "schedule" in config["multi-ecosystem-groups"]["playwright"]
+    others = [u for u in config["updates"] if u not in browser]
+    assert all("/tests/browser" not in (u.get("directories") or [u.get("directory")]) for u in others)

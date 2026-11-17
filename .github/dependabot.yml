@@ -1,4 +1,15 @@
 version: 2
+
+# The browser tests need their Playwright image (the browsers) and Python package at the same version. Bumped
+# apart they never match, so one pull request bumps both, and a test fails when they differ.
+multi-ecosystem-groups:
+  playwright:
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "deps"
+
 updates:
   # Python packages: requirements.txt (the app) and requirements-dev.txt (tests and linters).
   - package-ecosystem: pip
@@ -13,9 +24,9 @@ updates:
     commit-message:
       prefix: "deps"
 
-  # The Python base image in the Dockerfile, and the browser-test image.
+  # The Python base image in the Dockerfile.
   - package-ecosystem: docker
-    directories: [/, /tests/browser]
+    directory: /
     schedule:
       interval: weekly
       day: monday
@@ -33,3 +44,13 @@ updates:
         update-types: [minor, patch]
     commit-message:
       prefix: "ci"
+
+  # The browser tests: their Playwright image and Python package, in the playwright group above.
+  - package-ecosystem: docker
+    directory: /tests/browser
+    patterns: ["*"]
+    multi-ecosystem-group: playwright
+  - package-ecosystem: pip
+    directory: /tests/browser
+    patterns: ["*"]
+    multi-ecosystem-group: playwright
