@@ -5,7 +5,7 @@ needs are **not** in the database, so a database backup alone is not enough to r
 
 | What | Where it lives | How to back it up |
 |---|---|---|
-| Expenses, categories, settings, the saved OneDrive sign-in (encrypted) | the `garagebooks` schema | a TeslaMate backup that includes it, or `scripts/backup.sh dump` (below) |
+| Expenses, categories, settings (including the [notification address](notifications.md), which is a secret), the saved OneDrive sign-in (encrypted) | the `garagebooks` schema | a TeslaMate backup that includes it, or `scripts/backup.sh dump` (below) |
 | The encryption key | `GARAGEBOOKS_ENCRYPTION_KEY` in the app's `.env` | copy it to a password manager or another safe place, **never** into the same backup as the database |
 | The invoice files | OneDrive, or the [folder on the server](local-folder.md) | OneDrive keeps them; back the folder up with whatever backs up your share |
 

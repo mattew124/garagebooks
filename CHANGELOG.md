@@ -7,9 +7,57 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+**Notifications.** The app adds the new table and columns itself. If you use the restricted database role
+(`SKIP_MIGRATE=1`), run `scripts/provision-db.sh` again so the role can use the new `notification` table.
+Nothing is sent until you set an address, so nothing changes if you don't.
+
+- **Notifications.** A **Notifications** section on the Settings page takes an address (ntfy, an Apprise
+  API or a Home Assistant webhook) and sends a notice, once each, when a reminder comes due soon and when
+  it is overdue, 30 and 7 days before the OneDrive client secret expires and when it has, and when the
+  OneDrive sign-in stops working. A **Send a test notice** button checks the address. The address is a
+  secret: it is never shown back, logged or put in an error. A new scheduled job, `notifications`, runs
+  every 15 minutes. New invoices waiting for review and a lease budget heading for a shortfall come with
+  the features they report on. See [Notifications](docs/notifications.md).
+
+**Scheduled jobs.** Nothing to do on upgrade: the app adds the new table itself and runs the jobs in the background.
+With the restricted role from `scripts/provision-db.sh` and `SKIP_MIGRATE=1`, run the script again so the role can
+write the new `garagebooks.job` table.
+
+- **Scheduled jobs.** A small scheduler runs periodic work: it looks at TeslaMate again every hour and rewrites the
+  Grafana dashboard every six hours. The **Settings** page has a **Scheduled jobs** section with each job's
+  last run, how it went and when it is next due. `SCHEDULER` says where they run: `app` (the default), `worker`
+  or `off`. For `worker`, start the optional second container with `docker compose --profile worker up -d`
+  (it is the same image, started with `python3 -m garagebooks worker`). See the Scheduled jobs page of the docs.
+
+**Cost after tax (L5).** Nothing to do on upgrade: the app adds the new columns, the rates table and the
+`garagebooks.expense_after_tax(tz)` function itself. If you use the restricted database role (`SKIP_MIGRATE=1`),
+run `scripts/provision-db.sh` again first. Nothing changes until you enter a marginal tax rate in Settings.
+
+- **Cost after tax.** With your **marginal tax rate** entered in Settings (a percentage, Medicare levy included;
+  never a salary), an expense paid from a lease package shows what it costs after tax beside its invoice amount:
+  the GST is claimed back and the rest comes from pre-tax salary. An expense on the **Add expense** form has a
+  **Paid from** choice (automatic, the package or personally), shown for a car with a lease; automatic means a
+  lease covers its date, its category has a budget pool, and it isn't a purchase, so existing expenses need no
+  changes. The Categories page has a **GST-free** tick (Registration starts ticked). The expense list, the FBT
+  year report (a new **After tax** part) and the dashboard (**Running costs after tax** and **After tax by FBT
+  year**, written only while a rate is entered and a car has a lease) show it. The formulas and their
+  simplifications are on the Novated lease calculations page. Not tax advice.
+- **Home charging reimbursement.** A battery electric car's lease has a tick for home charging reimbursed at the
+  ATO's cents-per-km rate. The FBT year report then shows the km driven, the rate used, the reimbursement and the
+  tax saved on it. The ATO's rates by FBT year are in Settings (4.20 cents per km to FBT 2025–26, 5.47 from
+  1 April 2026), and can be changed or added to. With no odometer reading the report says *not known*.
+
 **Lease and car page changes.** Nothing to do on upgrade: the app adds the new columns itself.
 
 - **Dev stacks.** `scripts/dev.sh prune` destroys the dev stacks of merged branches and of removed worktrees, and `scripts/dev.sh auto-prune on` runs it hourly from cron.
+- **Kilometre pace (roadmap L4).** For a lease with an estimated km per year: the FBT year report has a **Kilometre pace**
+  section (the km expected by the end of the year, pro rata for the days held, the odometer at the start and needed at the
+  end, the km per day needed, and what a statement can't show: km driven so far, km per day driven, how far ahead of or behind
+  the pace the car is, and the km per day needed from today), and the lease page has a short version. The dashboard has a
+  **Kilometre pace** table (panel 21), left out until a lease has an estimate. The odometer is TeslaMate's, or your latest
+  reading, and says *not known* rather than 0 when there is none. New in the database: the functions
+  `garagebooks.odometer_at()` and `garagebooks.build_odometer_at()`, which the app creates itself. With
+  `scripts/provision-db.sh` (`SKIP_MIGRATE=1`), run it again so the app's role can switch the function.
 - **Roadmap.** Updated for what has shipped: the Now items are in place, cost after tax (L5) is next, and lease budgets (L3) move to Later.
 - **Lease form import.** The Add a lease page starts with a **Documents** card. Choose the provider's lease
   form or package confirmation (from the computer, by dropping it, or from the car's OneDrive or invoice

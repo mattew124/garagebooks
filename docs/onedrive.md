@@ -99,10 +99,14 @@ sign in as the account whose OneDrive gets the invoices.
     asked to consent to the same two at the first sign-in.
 7. **Certificates & secrets** → **Client secrets** → **New client secret**. Copy its **Value**
     straight away; it's shown only once, and the **Secret ID** next to it is not the secret.
-    Secrets last at most 24 months, so note the **Expires** date.
+    Secrets last at most 24 months, so note the **Expires** date. With [notifications](notifications.md)
+    set up, you are told 30 days and 7 days before it, and when it has passed.
 8. From **Overview**, copy the **Application (client) ID**. It isn't secret.
 9. On the app's **Invoice storage** page, paste the client ID, the secret's value and its expiry date,
     then press **Connect OneDrive**.
+
+[Notifications](notifications.md) can also tell you once if the saved sign-in stops working, so you find
+out before an invoice fails to upload.
 
 A dev stack or second installation needs its own callback address: add it as another **Web**
 redirect URI on the same registration.

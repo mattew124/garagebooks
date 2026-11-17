@@ -2,6 +2,8 @@
 {% block title %}FBT year · {{ car.name }}{% endblock %}
 {% block main_attrs %} class="narrow"{% endblock %}
 {% macro amount(x, reason='') %}{% if x is none %}<strong class="unavailable">unavailable</strong>{% if reason %} <small>({{ reason }})</small>{% endif %}{% else %}{{ x|money }}{% endif %}{% endmacro %}
+{% macro known(x, text) %}{% if x is none %}<strong class="unavailable">not known</strong>{% else %}{{ text }}{% endif %}{% endmacro %}
+{% macro on_day(d) %}{{ d.day }} {{ d.strftime('%b %Y') }}{% endmacro %}
 {% block content %}
 <h1>FBT year: {{ car.name }}</h1>
 <p><a href="{{ url_for('car_lease', car_id=car.id) }}">← Lease</a></p>
@@ -56,6 +58,51 @@
     week, fortnight or month after it (as the lease's pay frequency says); your provider's own pay dates may differ a little.</small></p>
 </section>
 
+{% if paces %}
+<section class="card stack fbt" id="km-pace" aria-labelledby="fbt-pace">
+  <h2 id="fbt-pace">Kilometre pace</h2>
+  {% for p in paces %}{% set lease_row = report.leases[loop.index0][0] %}
+  <div class="km-pace-lease" data-lease="{{ lease_row.id }}">
+    {% if report.leases|length > 1 %}<h3>{{ lease_row.package_name or lease_row.financier or 'Lease' }} <small>{{ on_day(lease_row.start_date) }} to {{ on_day(lease_row.end_date) }}</small></h3>{% endif %}
+    {% if p.estimate is none %}
+    <p class="empty">This lease has no estimated km per year, so there is no kilometre pace to work out.
+      <a href="{{ url_for('car_lease_edit', car_id=car.id, lease_id=lease_row.id) }}">Add the estimate</a> to the lease to see it.</p>
+    {% else %}
+    <dl class="facts">
+      <div><dt>Estimated km per year</dt><dd data-figure="estimate">{{ p.estimate|km }}</dd></div>
+      <div><dt>Start of the days held</dt><dd data-figure="start">{{ on_day(p.first) }}</dd></div>
+      <div><dt>End of the days held</dt><dd data-figure="end">{{ on_day(p.last) }}</dd></div>
+      <div><dt>Days held</dt><dd data-figure="days">{{ p.days_held }} of {{ p.days_in_year }} days</dd></div>
+      <div><dt>Km expected by the end</dt><dd class="derived" data-figure="expected">{{ p.expected_km|km }}</dd></div>
+      <div><dt>Km per day needed, for the whole period</dt><dd class="derived" data-figure="needed-per-day">{{ p.per_day_needed }} km</dd></div>
+      {% if p.state != 'upcoming' %}
+      <div><dt>Odometer at the start</dt><dd data-figure="start-odometer">{{ known(p.start_km, p.start_km|km) }}</dd></div>
+      <div><dt>Odometer needed at the end</dt><dd class="derived" data-figure="needed-odometer">{{ known(p.end_km_needed, p.end_km_needed|km) }}</dd></div>
+      <div><dt>Km driven {{ 'so far' if p.state == 'current' else 'in the period' }}</dt><dd data-figure="driven">{{ known(p.driven, p.driven|km) }}</dd></div>
+      <div><dt>Km per day actually driven</dt><dd data-figure="driven-per-day">{% if p.driven is not none and p.per_day_driven is none %}too early to say{% else %}{{ known(p.per_day_driven, p.per_day_driven ~ ' km') }}{% endif %}</dd></div>
+      <div><dt>{{ 'Against the pro-rata pace today' if p.state == 'current' else 'Against the pro-rata pace' }}</dt><dd class="derived" data-figure="ahead">{% if p.ahead is none %}<strong class="unavailable">not known</strong>{% elif p.ahead > 0 %}{{ p.ahead|abs|km }} ahead{% elif p.ahead < 0 %}{{ p.ahead|abs|km }} behind{% else %}on pace{% endif %}</dd></div>
+      {% if p.state == 'current' %}
+      <div><dt>Km per day needed from today</dt><dd class="derived" data-figure="to-go">{{ known(p.per_day_to_go, p.per_day_to_go ~ ' km') }}</dd></div>
+      {% endif %}
+      {% endif %}
+    </dl>
+    {% if p.state == 'upcoming' %}<p class="km-pace-note"><small>This FBT year has not started, so nothing has been driven against it yet.</small></p>{% endif %}
+    {% for reason in p.reasons %}<p class="fbt-reason"><small>Not known: {{ reason }}</small></p>{% endfor %}
+    {% if p.start_reading or p.current_reading %}
+    <p class="km-pace-note"><small>
+      {% if p.start_reading %}The odometer at the start is {{ 'from TeslaMate' if p.start_reading.source == 'teslamate' else 'the reading entered on ' ~ (p.start_reading.at|day) }}.{% endif %}
+      {% if p.current_reading %}The {{ 'latest' if p.state == 'current' else 'final' }} odometer is {{ 'from TeslaMate' if p.current_reading.source == 'teslamate' else 'the reading entered on ' ~ (p.current_reading.at|day) }}.{% endif %}
+    </small></p>
+    {% endif %}
+    {% endif %}
+  </div>
+  {% endfor %}
+  <p><small>Km expected = the lease's estimated km per year × days held ÷ days in the FBT year. The odometer is TeslaMate's where it
+    is available, otherwise your latest reading (an expense's odometer counts) on or before that moment. Days so far are the whole days gone,
+    so today still counts as to drive. These figures are for your own tracking, not tax advice.</small></p>
+</section>
+{% endif %}
+
 {% if budgets_on %}
 <section class="card stack fbt" aria-labelledby="fbt-costs">
   <h2 id="fbt-costs">Running costs by pool</h2>
@@ -103,6 +150,60 @@
   <p><small>Expenses are placed in the FBT year of their date.</small></p>
 </section>
 {% endif %}
+
+<section class="card stack fbt" id="fbt-after-tax" aria-labelledby="fbt-after-tax-h">
+  <h2 id="fbt-after-tax-h">After tax</h2>
+  {% if not after.rate_set %}
+  <p id="fbt-after-tax-norate">Your marginal tax rate isn't set, so what these costs come to after tax isn't shown.
+    <a href="{{ url_for('settings') }}">Set it in Settings</a>; only the rate is kept, never a salary.</p>
+  {% else %}
+  <div class="table-wrap"><table id="fbt-after-tax-lines">
+    <thead><tr><th>{{ 'Pool' if budgets_on else 'Category' }}</th><th class="num">Invoices</th><th class="num">After tax</th></tr></thead>
+    <tbody>
+    {% for line in after.lines %}
+    <tr{% if budgets_on %} data-pool="{{ line.key }}"{% endif %}><td>{{ line.label }}{% if line.packaged %} <small>{{ line.packaged }} packaged</small>{% endif %}</td>
+      <td class="num">{{ line.invoice|money }}</td><td class="num">{{ amount(line.effective) }}</td></tr>
+    {% endfor %}
+    {% if after.charging %}
+    <tr id="after-tax-teslamate-charging"><td>Charging <small>from TeslaMate, paid personally</small></td>
+      <td class="num">{{ amount(after.charging.value, after.charging.reason) }}</td><td class="num">{{ amount(after.charging.value, after.charging.reason) }}</td></tr>
+    {% endif %}
+    {% if not after.lines and not after.charging %}<tr><td colspan="3" class="empty">No running costs in this FBT year.</td></tr>{% endif %}
+    </tbody>
+    <tfoot>
+      <tr id="fbt-after-tax-running"><th>Running costs</th><td class="num">{{ amount(after.invoice) }}</td><td class="num">{{ amount(after.effective) }}</td></tr>
+      {% if after.reimbursement and after.reimbursement.result %}
+      <tr><th>Less tax saved on reimbursement</th><td></td><td class="num">−{{ after.reimbursement.result.tax_saved|money }}</td></tr>
+      {% endif %}
+      <tr id="fbt-after-tax-total"><th>After-tax cost</th><td></td>
+        <td class="num"><strong>{{ amount(after.total) }}</strong></td></tr>
+    </tfoot>
+  </table></div>
+  {% if after.reimbursement %}
+  {% set r = after.reimbursement %}
+  <div id="fbt-reimbursement">
+    <h3>Home charging reimbursement</h3>
+    {% if r.km is none %}
+    <p><strong class="unavailable">Not known.</strong> The odometer isn't known at the start or the end of the days the car was held, so the distance driven
+      can't be worked out. It comes from TeslaMate or from readings you enter on the <a href="{{ url_for('cars_page') }}">Cars</a> page, and is never counted as nothing.</p>
+    {% elif not r.rate %}
+    <p><strong class="unavailable">There is no rate</strong> in <a href="{{ url_for('settings') }}">Settings</a> for FBT {{ report.year }} or any earlier year,
+      so the reimbursement for the {{ r.km|km }} driven can't be worked out.</p>
+    {% else %}
+    <p>{{ r.km|km }} driven while held and leased in this FBT year × {{ r.rate[1] }} cents per km
+      = <strong>{{ r.result.amount|money }}</strong>. At your marginal rate the tax saved on it is <strong>{{ r.result.tax_saved|money }}</strong>.</p>
+    {% if r.rate[0] != report.year %}
+    <p><small>The rate used is the one for {{ label(r.rate[0]) }}, the latest year with one in <a href="{{ url_for('settings') }}">Settings</a>:
+      there is none for {{ label(report.year) }}.</small></p>{% endif %}
+    {% endif %}
+    <p><small>The reimbursement is the distance times the ATO's cents-per-km rate for home charging an electric car, for the days held under a lease that has it ticked, up to today.</small></p>
+  </div>
+  {% endif %}
+  <p><small>An expense paid from the package has its GST claimed back (1/11 of an invoice that isn't GST-free) and the rest comes from pre-tax salary, so it costs less than
+    its invoice; one paid personally costs what the invoice says. These are deliberate simplifications of the published rules, worked out from the marginal rate in
+    <a href="{{ url_for('settings') }}">Settings</a> and the lease's pre-tax and post-tax payments: see the documentation. Not tax advice.</small></p>
+  {% endif %}
+</section>
 
 <section class="card stack fbt" id="purchases" aria-labelledby="fbt-purchases">
   <h2 id="fbt-purchases">Purchases</h2>

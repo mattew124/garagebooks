@@ -58,6 +58,26 @@ in), for queries of your own. The per-car report is described under [Leases](lea
 
 <!-- screenshot: dashboard-fbt - The Running costs per FBT year panel on the dashboard -->
 
+## Cost after tax
+
+Two panels in a row below the others show what the running costs come to after tax, beside the invoices.
+They are on the dashboard only once a **marginal tax rate** is entered in Settings and some car has a lease;
+saving either rewrites the dashboard, so they appear and go by themselves. An expense paid from the package
+has its GST claimed back and the rest comes from pre-tax salary; one paid personally costs its invoice. The
+rules, the simplifications and a worked example are on
+[Novated lease calculations](lease-calculations.md#cost-after-tax-l5). It is not tax advice.
+
+- **Running costs after tax** gives, for the selected car, the running and charging costs on the invoices and
+  what they cost after tax, all-time and following the **Category** box. TeslaMate's charging, where there is a
+  TeslaMate, counts as paid personally. It shows a dash while a packaged expense can't be worked out.
+- **After tax by FBT year** lists each FBT year with the same two figures and the difference. It ignores the
+  time range, so the years are whole.
+
+The home charging reimbursement needs the odometer, so it is **shown in the app only** (on the FBT year report),
+not on the dashboard. The existing total cost of ownership figures are unchanged: these panels sit beside them.
+
+<!-- screenshot: dashboard-after-tax - The Running costs after tax and After tax by FBT year panels -->
+
 ## Reminders
 
 The **Reminders** table, above the expenses, lists what is open for the selected car, most urgent
@@ -69,6 +89,22 @@ car's latest known one (the same as **Distance** above). With none known, a remi
 *Odometer unknown* and its **Km left** is empty. A reminder due today or later is *Due soon* inside its lead time; the days
 left count from today in the dashboard's time zone. It shows open reminders only, whatever the time range,
 and includes the registration and lease end from the car's [lease](leases.md).
+
+## Kilometre pace
+
+The **Kilometre pace** table, at the bottom of the dashboard, shows the selected car's current lease against its
+estimated km per year, for the current FBT year: **Expected km** (pro rata for the days held), **Odometer at start** and
+**Odometer needed at end**, **Km per day needed**, **Driven so far**, **Km per day driven**, **Ahead (+) or behind (-)** the
+pro-rata pace and **Km per day needed from today**. They are the same figures as the
+[FBT year report](leases.md#kilometre-pace) works out. The table is empty for a car with no current lease or no estimate, and
+the panel is left out of the dashboard altogether until a lease has an estimate. A figure that needs an odometer that isn't
+known is empty, not 0.
+
+The odometer comes from the database function `garagebooks.odometer_at(car, moment)`: TeslaMate's last position at or before
+the moment for a car it tracks, else your latest reading or an expense's odometer. The panel reads none of TeslaMate's tables itself, so it
+works with TeslaMate present, absent or held back (when its figures are held back, only the readings you entered are used).
+
+<!-- screenshot: dashboard-km-pace - The Kilometre pace panel on the dashboard -->
 
 ## Rebates and refunds
 

@@ -403,6 +403,82 @@ def parse_url_setting(raw):
     return url
 
 
+def parse_marginal_rate(raw):
+    """The owner's marginal tax rate (Medicare levy included) as a percentage from 0 to 100: '34', '34.5 %'.
+    Blank -> None (not entered). It is only ever a rate, never a salary."""
+    return _percent(raw, "The marginal tax rate", 2)
+
+
+MAX_CENTS_PER_KM = Decimal("9999.99")  # numeric(6,2)
+
+
+def parse_cents_per_km(raw):
+    """The ATO's home charging rate: '4.2', '5.47c' -> Decimal cents per km, never negative."""
+    cleaned = (raw or "").lower().replace("cents", "").replace("c", "").replace(",", "").strip()
+    if not cleaned:
+        raise ValueError("Enter the rate in cents per km, e.g. 4.20.")
+    try:
+        value = Decimal(cleaned)
+    except InvalidOperation:
+        raise ValueError("The rate in cents per km must be a number, e.g. 4.20.") from None
+    if not value.is_finite() or value < 0 or value > MAX_CENTS_PER_KM:
+        raise ValueError("The rate in cents per km must be between 0 and 9,999.99.")
+    return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def parse_rate_year(raw):
+    """The FBT year a charging rate is for, as the year it starts in: 2026 is FBT 2026-27."""
+    try:
+        year = int((raw or "").strip())
+    except ValueError:
+        raise ValueError("Enter the FBT year as the year it starts in, e.g. 2026.") from None
+    if not 1990 <= year <= 2200:
+        raise ValueError("Enter the FBT year as the year it starts in, e.g. 2026.")
+    return year
+
+
+PAID_FROM = {"auto": None, "package": True, "personal": False}
+
+
+def parse_paid_from(raw):
+    """Where an expense was paid from: automatic (None), the package (True) or personally (False)."""
+    key = (raw or "").strip() or "auto"
+    if key not in PAID_FROM:
+        raise ValueError("Choose where this was paid from: automatic, the package or personally.")
+    return PAID_FROM[key]
+
+
+MAX_NOTIFY_URL_LEN = 500       # the same limit as the column's CHECK
+NOTIFY_FORMATS = ("ntfy", "json")
+
+
+def parse_notify_url(raw):
+    """The Settings 'Notification address'. Blank -> None (notifications off). Otherwise a full http(s)
+    address with a host, no spaces or control characters, at most 500 characters (it may carry a login:
+    https://user:password@host/topic)."""
+    url = (raw or "").strip()
+    if not url:
+        return None
+    try:
+        parts = urlparse(url)
+        usable = parts.scheme in ("http", "https") and bool(parts.hostname)
+    except ValueError:
+        usable = False
+    if not usable or any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in url):
+        raise ValueError("Enter a full address starting with http:// or https://")
+    if len(url) > MAX_NOTIFY_URL_LEN:
+        raise ValueError("That address is too long (500 characters at most).")
+    return url
+
+
+def parse_notify_format(raw):
+    """The Settings notification format: 'ntfy' or 'json'. Blank means ntfy."""
+    choice = (raw or "").strip(" ").lower() or "ntfy"      # only spaces are forgiven, not a newline
+    if choice not in NOTIFY_FORMATS:
+        raise ValueError("Choose ntfy or JSON.")
+    return choice
+
+
 def parse_expense_form(form, tz, valid_car_ids, valid_category_ids):
     """-> (values, errors). `values` is only meaningful when `errors` is empty."""
     values, errors = {}, {}
@@ -431,6 +507,7 @@ def parse_expense_form(form, tz, valid_car_ids, valid_category_ids):
     attempt("invoice_path", parse_invoice_path, form.get("invoice_path"))
     attempt("vendor", _text, form.get("vendor"), MAX_TEXT_LEN, "Vendor")
     attempt("notes", _text, form.get("notes"), MAX_NOTES_LEN, "Notes")
+    attempt("packaged", parse_paid_from, form.get("packaged"))
 
     try:
         values["occurred_at"] = parse_local_datetime(form.get("date"), form.get("time"), tz)
@@ -470,7 +547,7 @@ def _percent(raw, label, places):
     return value.quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP)
 
 
-def parse_lease_form(form, pools, frequencies, fbt_methods, tax_treatments, budgets_on=True):
+def parse_lease_form(form, pools, frequencies, fbt_methods, tax_treatments, budgets_on=True, electric=True):
     """A lease as typed from the provider's statement. -> (values, errors); `values` holds the lease
     columns plus `budgets` ({pool: yearly amount}, blanks left out; None when lease budgets are turned
     off, which leaves any already saved as they are). Whether it overlaps another lease of the car is
@@ -570,6 +647,8 @@ def parse_lease_form(form, pools, frequencies, fbt_methods, tax_treatments, budg
     if values.get("statutory_percent") is None and "statutory_percent" not in errors:
         values["statutory_percent"] = Decimal("20.00")
     values["ev_exempt"] = form.get("ev_exempt") == "on"
+    # The ATO's cents-per-km rate is for a battery electric car; anything else's tick is dropped.
+    values["charging_reimbursed"] = electric and form.get("charging_reimbursed") == "on"
     choice("tax_treatment", tax_treatments, "Choose the tax treatment.")
     text("tax_treatment_note", "The note")
     if values.get("tax_treatment") != "other":

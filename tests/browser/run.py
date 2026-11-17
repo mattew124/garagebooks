@@ -539,6 +539,45 @@ def test_header_stays_tidy_on_a_phone(page):
     shot(page, "header-phone")
 
 
+def test_notifications_settings(page):
+    """The Notifications section: the address is never shown back, a bad one is refused, and the test button
+    says how it went. The address is a closed port on the app's own container (nothing leaves the stack),
+    and is removed again afterwards."""
+    topic = "browser-test-secret-topic"
+    address = f"http://127.0.0.1:9/{topic}"
+    page.goto(UI + "settings")
+    section = page.locator("form[action$='/settings/notifications']")
+    try:
+        page.locator("form[action$='/settings/notifications/test'] button").click()
+        expect(page.locator("main")).to_contain_text("Save an address first")
+        section = page.locator("form[action$='/settings/notifications']")
+        section.locator("input[name=notify_url]").fill("ftp://example.invalid/topic")
+        section.locator("button[type=submit]").click()
+        expect(page.locator(".error", has_text="Enter a full address")).to_be_visible()
+        section = page.locator("form[action$='/settings/notifications']")
+        section.locator("input[name=notify_url]").fill(address)
+        section.locator("select[name=notify_format]").select_option("json")
+        section.locator("button[type=submit]").click()
+        expect(page.locator(".notice")).to_contain_text("Notification settings saved")
+        html = page.content()
+        assert topic not in html, "the saved address was shown back"
+        expect(page.locator("form[action$='/settings/notifications'] small", has_text="Sending to")).to_contain_text("127.0.0.1:9")
+        assert page.locator("input[name=notify_url]").get_attribute("type") == "password"
+        page.locator("form[action$='/settings/notifications/test'] button").click()
+        expect(page.locator("form[action$='/settings/notifications/test'] .error")).to_contain_text("could not be reached")
+        assert topic not in page.content()
+        shot(page, "settings-notifications")
+    finally:
+        page.goto(UI + "settings")
+        section = page.locator("form[action$='/settings/notifications']")
+        if section.locator("input[name=notify_clear]").count():
+            section.locator("input[name=notify_clear]").check()
+            section.locator("button[type=submit]").click()
+            expect(page.locator(".notice")).to_contain_text("Notification settings saved")
+    page.goto(UI + "settings")
+    expect(page.locator("input[name=notify_clear]")).to_have_count(0)
+
+
 def test_header_on_a_desktop(page):
     """One row: title then links on the left, Add on the right."""
     page.goto(UI)
@@ -868,6 +907,22 @@ def test_settings_file_name_defaults_can_be_edited(page):
     page.keyboard.type(" %car")
     assert field.input_value() == default + " %car"
     shot(page, "settings-phone")
+
+
+def test_settings_lists_the_scheduled_jobs(page):
+    """Settings > Scheduled jobs: each built-in job with how often it runs and how its last run went. Read-only."""
+    page.goto(UI + "settings")
+    section = page.locator("#scheduled-jobs")
+    assert section.locator("h2").text_content() == "Scheduled jobs", section.locator("h2").text_content()
+    assert section.locator("#jobs-where").inner_text().strip(), "it says where the jobs run"
+    names = section.locator("li[data-job]").evaluate_all("els => els.map(e => e.dataset.job)")
+    assert names == ["dashboard", "notifications", "teslamate"], names
+    states = section.locator("li[data-job]").evaluate_all("els => els.map(e => e.dataset.state)")
+    assert set(states) <= {"never", "ok", "failed", "running"}, states
+    assert "every hour" in section.locator('li[data-job="teslamate"]').inner_text()
+    assert section.locator("button, input, form").count() == 0
+    section.scroll_into_view_if_needed()
+    shot(page, "settings-jobs")
 
 
 def test_connect_reaches_microsoft(page):
@@ -1318,8 +1373,10 @@ def fbt_checks(page):
     page.get_by_label("Pre-tax part, per pay").fill("300")
     page.get_by_label("Post-tax part, per pay").fill("20")
     page.get_by_label("FBT base value").fill("62000")
+    page.locator("#f-estimated_km_per_year").fill("15000")
     page.get_by_role("button", name="Add lease").click()
     page.wait_for_url(re.compile(r"msg=lease_added"))
+    expect(page.locator("#lease-km-pace")).to_contain_text("not known")       # no odometer reading yet: not 0
     page.goto(UI + "new")                                        # an expense in the Insurance pool, today
     page.select_option("select[name=car_id]", label=MARKER)
     page.select_option("select[name=category_id]", label="Insurance")
@@ -1342,9 +1399,159 @@ def fbt_checks(page):
     expect(page.locator("#pool-total")).to_contain_text("$321.00")
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "sideways scroll on a phone"
     shot(page, "fbt-phone")
+    km_pace_checks(page, today, year)
     page.goto(f"{page.url}?year={year - 3}")                        # a year before the lease: nothing held, still a page
     expect(page.locator("#fbt-notheld")).to_be_visible()
     assert page.get_by_role("link", name=re.compile(r"FBT \d{4}–\d\d →")).count() == 1, "no link on to a year with data"
+
+
+def set_marginal_rate(page, value):
+    """Settings > Marginal tax rate. Blank means not entered."""
+    page.goto(UI + "settings")
+    page.fill("input[name=marginal_tax_rate]", value)
+    page.click("button[type=submit].button")
+    page.wait_for_url(re.compile(r"msg=settings"))
+
+
+def after_tax_dashboard_checks(page):
+    """With a rate and a lease the dashboard has both after-tax panels, and they sit below the Kilometre pace row
+    without covering it (a tall viewport: Grafana only draws the panels in view)."""
+    car_id = re.search(r"/cars/(\d+)/", page.url).group(1)
+    wide = page.context.browser.new_context(viewport={"width": 1280, "height": 3000})
+    graf = wide.new_page()
+    try:
+        for _ in range(12):      # Grafana re-reads the provisioned dashboard every 60 seconds
+            graf.goto(GRAFANA + f"d/garagebooks-tco/cost-of-ownership?var-car_id={car_id}")
+            graf.wait_for_load_state("networkidle")
+            graf.wait_for_timeout(2000)
+            if graf.get_by_text("After tax by FBT year", exact=True).count():
+                break
+            graf.wait_for_timeout(10000)
+        shot(graf, "after-tax-dashboard")
+        expect(graf.get_by_text("Running costs after tax", exact=True).first).to_be_visible(timeout=30000)
+        expect(graf.get_by_text("After tax by FBT year", exact=True).first).to_be_visible()
+    finally:
+        wide.close()
+
+
+def test_cost_after_tax(page):
+    """The marginal rate in Settings, "Paid from" on the form, the after-tax figure in the list and the After tax
+    part of the FBT year report. The rate is put back as it was, and the car (and its expense) deleted, at the end."""
+    page.goto(UI + "settings")
+    before = page.input_value("input[name=marginal_tax_rate]")
+    try:
+        cost_after_tax_checks(page, before)
+    finally:
+        remove_marked(page)
+        set_marginal_rate(page, before)
+
+
+def cost_after_tax_checks(page, before):
+    from datetime import date, timedelta
+    today = date.today()
+    set_marginal_rate(page, "34")
+    assert page.input_value("input[name=marginal_tax_rate]").startswith("34"), "the rate wasn't kept"
+    expect(page.locator("#ev-rates")).to_contain_text("FBT 2026–27")        # the ATO's rates are listed, as data
+    shot(page, "settings-after-tax")
+    page.fill("input[name=marginal_tax_rate]", "101")
+    page.click("button[type=submit].button")
+    expect(page.locator("#after-tax-settings .error")).to_contain_text("between 0 and 100")
+    add_marked_car(page).get_by_role("link", name="Lease").click()
+    page.click("#add-lease-top")
+    page.locator("#f-financier").fill("Example Finance")
+    page.get_by_label("Lease start").fill((today - timedelta(days=60)).isoformat())
+    page.locator("#f-end_date").fill((today + timedelta(days=1035)).isoformat())
+    page.get_by_label("Term (months)").fill("36")
+    page.get_by_label("Paid").select_option("fortnightly")
+    page.get_by_label("Pre-tax part, per pay").fill("300")
+    page.get_by_label("Post-tax part, per pay").fill("20")
+    page.get_by_label("FBT base value").fill("62000")
+    page.locator("#f-charging_reimbursed").check()                         # the marked car is battery electric
+    page.get_by_role("button", name="Add lease").click()
+    page.wait_for_url(re.compile(r"msg=lease_added"))
+    page.goto(UI + "new")
+    page.select_option("select[name=car_id]", label=MARKER)
+    expect(page.locator("#paid-from-field")).to_be_visible()               # the car has a lease
+    page.select_option("select[name=category_id]", label="Insurance")
+    page.fill("input[name=amount]", "1100.00")
+    page.fill("input[name=vendor]", MARKER)
+    shot(page, "form-paid-from")
+    page.click("button[type=submit].button")
+    page.wait_for_url(re.compile(r"msg=saved"))
+    row = page.locator("tr", has_text=MARKER)
+    expect(row.locator("small.after-tax")).to_contain_text("$681.25 after tax")
+    expect(page.locator("#after-tax-total")).to_contain_text("after tax")
+    shot(page, "list-after-tax")
+    row.get_by_role("link", name="Edit").click()                           # paid personally: no after-tax figure
+    page.select_option("select[name=packaged]", "personal")
+    page.click("button[type=submit].button")
+    page.wait_for_url(re.compile(r"msg=updated"))
+    expect(page.locator("tr", has_text=MARKER).locator("small.after-tax")).to_have_count(0)
+    page.locator("tr", has_text=MARKER).get_by_role("link", name="Edit").click()
+    page.select_option("select[name=packaged]", "auto")
+    page.click("button[type=submit].button")
+    page.wait_for_url(re.compile(r"msg=updated"))
+    page.goto(UI + "cars")
+    page.locator(".car", has_text=MARKER).get_by_role("link", name="Lease").click()
+    page.get_by_role("link", name="Costs, taxable value and contributions by FBT year").click()
+    after = page.locator("#fbt-after-tax")
+    expect(after.locator("#fbt-after-tax-lines")).to_contain_text("$681.25")
+    expect(after.locator("#fbt-reimbursement")).to_contain_text("Not known")     # no odometer: never counted as nothing
+    expect(after.locator("#fbt-after-tax-total")).to_contain_text("unavailable")
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "sideways scroll on a phone"
+    shot(page, "fbt-after-tax")
+    after_tax_dashboard_checks(page)
+    set_marginal_rate(page, "")                                                  # no rate: pages say so, show nothing
+    page.goto(UI)
+    expect(page.locator("#no-tax-rate")).to_be_visible()
+    expect(page.locator("small.after-tax")).to_have_count(0)
+
+
+def km_pace_checks(page, today, year):
+    """On the FBT report of the car fbt_checks made (lease from 60 days ago, 15,000 km a year): with no reading at the
+    start the figures that need one say not known; a Purchase expense the day before the lease, with an odometer, gives
+    the start reading, and the figures follow. Then the lease page's short version."""
+    from datetime import timedelta
+    report = page.url
+    section = page.locator("#km-pace")
+    expect(section).to_be_visible()
+    expect(section.locator('[data-figure="expected"]')).to_contain_text("km")
+    expect(section.locator('[data-figure="start-odometer"]')).to_contain_text("not known")
+    expect(section.locator('[data-figure="driven"]')).to_contain_text("not known")
+    page.goto(UI + "new")
+    page.select_option("select[name=car_id]", label=MARKER)
+    page.select_option("select[name=category_id]", label="Initial purchase")
+    page.fill("input[name=date]", (today - timedelta(days=61)).isoformat())
+    page.fill("input[name=amount]", "1.00")
+    page.fill("input[name=odometer_km]", "10000")
+    page.fill("input[name=vendor]", MARKER)
+    page.click("button[type=submit].button")
+    page.wait_for_url(re.compile(r"msg=saved"))
+    page.goto(report)
+    expect(section.locator('[data-figure="start-odometer"]')).to_have_text("10,000 km")
+    expect(section.locator('[data-figure="driven"]')).to_have_text("0 km")
+    assert "not known" not in section.inner_text(), "a kilometre pace figure is still not known"
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "sideways scroll on a phone"
+    shot(page, "km-pace-phone")
+    page.goto(report.split("/fbt")[0] + "/lease")
+    expect(page.locator("#lease-km-pace")).to_contain_text("0 km driven so far")
+    shot(page, "km-pace-lease-phone")
+    car_id = re.search(r"/cars/(\d+)/", report).group(1)
+    wide = page.context.browser.new_context(viewport={"width": 1280, "height": 3000})   # Grafana only draws the panels in view
+    graf = wide.new_page()
+    for _ in range(12):      # Grafana re-reads the provisioned dashboard every 60 seconds: wait for the new panel
+        graf.goto(GRAFANA + f"d/garagebooks-tco/cost-of-ownership?var-car_id={car_id}")
+        graf.wait_for_load_state("networkidle")
+        graf.wait_for_timeout(2000)
+        if graf.get_by_text("Km per day needed from today", exact=True).count():
+            break
+        graf.wait_for_timeout(10000)
+    shot(graf, "km-pace-dashboard")
+    expect(graf.get_by_text("Kilometre pace", exact=True).first).to_be_visible(timeout=30000)
+    expect(graf.get_by_text("Expected km", exact=True).first).to_be_visible()
+    expect(graf.get_by_text("Driven so far", exact=True).first).to_be_visible()
+    wide.close()
+    page.goto(report)                    # back where the caller was
 
 
 def test_reminders(page):
@@ -1548,8 +1755,10 @@ def main():
         step("reminders: add, see them due, resolve from an expense, next one made, reopen",
              test_reminders, page)
         step("FBT year report: taxable value, costs by pool, year links", test_fbt_report, page)
+        step("cost after tax: the rate, Paid from, the list and the FBT year report", test_cost_after_tax, page)
         step("header stays tidy on a phone", test_header_stays_tidy_on_a_phone, page)
         step("phone list shows amount, invoice and edit", test_list_shows_key_fields_on_a_phone, page)
+        step("settings: notifications address is kept secret, refused when bad, tested", test_notifications_settings, page)
         step("history page lists an add, an edit and a delete", test_history_page, page)
         step("a likely duplicate is asked about, then saved anyway", test_duplicate_is_asked_about_before_saving, page)
         step("the duplicate warning can be dismissed", test_duplicate_warning_can_be_dismissed, page)
@@ -1557,6 +1766,7 @@ def main():
         step("OneDrive page and upload field", test_onedrive_page, page)
         step("a PDF dropped on the form is chosen and read", test_pdf_can_be_dropped_on_the_form, page)
         step("file name settings start from the real defaults", test_settings_file_name_defaults_can_be_edited, page)
+        step("Settings lists the scheduled jobs", test_settings_lists_the_scheduled_jobs, page)
         step("Connect OneDrive goes to Microsoft", test_connect_reaches_microsoft, page)
         step("folder browser (read-only)", test_folder_browser, page)
         step("real upload to the OneDrive test folder", test_real_upload, page)

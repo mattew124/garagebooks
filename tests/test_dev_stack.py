@@ -2,6 +2,7 @@
 schema dump filter, and the rules keeping the app behind a login."""
 
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -232,13 +233,68 @@ def test_onedrive_sign_in_saved_before_the_rename_is_still_found():
 
 def compose_services(path):
     text = (ROOT / path).read_text()
-    block = text.split("\nservices:\n", 1)[1].split("\n\n", 1)[0] if "\nservices:\n" in text else ""
+    block = re.search(r"^services:\n((?:[ #].*\n|\n)*)", text, re.M)
+    block = block.group(1) if block else ""
     return set(re.findall(r"^  ([a-z][\w-]*):\s*$", block, re.M))
 
 
 def test_every_override_file_names_a_service_the_main_file_has():
     """An override for a service that doesn't exist starts a broken second container instead."""
     main = compose_services("docker-compose.yml")
-    assert main == {"garagebooks"}
+    assert main == {"garagebooks", "worker"}
     for override in ("docker-compose.traefik.yml", "docker-compose.invoices.yml"):
         assert compose_services(override) and compose_services(override) <= main, override
+
+
+def merged_compose(tmp_path, *files, profiles=(), env=None):
+    """The compose file as Docker reads it: anchors, profiles and overrides resolved. -> the services."""
+    for name in {"docker-compose.yml", *files}:
+        (tmp_path / name).write_text((ROOT / name).read_text())
+    (tmp_path / ".env").write_text("")
+    cmd = ["docker", "compose", *sum((["-f", f] for f in ("docker-compose.yml", *files)), []),
+           *sum((["--profile", p] for p in profiles), []), "config", "--format", "json"]
+    out = subprocess.run(cmd, cwd=tmp_path, env={**{k: v for k, v in os.environ.items() if k != "SCHEDULER"}, **(env or {})}, capture_output=True, text=True, check=True).stdout
+    return json.loads(out)["services"]
+
+
+def test_the_worker_is_off_unless_its_profile_is_asked_for(tmp_path):
+    assert set(merged_compose(tmp_path)) == {"garagebooks"}
+    assert set(merged_compose(tmp_path, profiles=["worker"])) == {"garagebooks", "worker"}
+
+
+def test_the_worker_is_the_same_image_as_hard_as_the_app_and_runs_the_jobs_only(tmp_path):
+    services = merged_compose(tmp_path, profiles=["worker"])
+    app, worker = services["garagebooks"], services["worker"]
+    assert worker["image"] == app["image"] and worker["command"] == ["python3", "-m", "garagebooks", "worker"]
+    for key in ("read_only", "cap_drop", "security_opt", "tmpfs", "restart", "networks", "volumes"):
+        assert worker[key] == app[key], key
+    assert worker["read_only"] is True and worker["cap_drop"] == ["ALL"] and "no-new-privileges:true" in worker["security_opt"]
+    assert "ports" not in worker and worker["healthcheck"] == {"disable": True}      # it listens on nothing
+    assert worker["environment"]["SCHEDULER"] == "worker"
+    assert {k: v for k, v in worker["environment"].items() if k != "SCHEDULER"} == \
+        {k: v for k, v in app["environment"].items() if k != "SCHEDULER"}
+    assert any(v["target"] == "/dashboards" for v in worker["volumes"])               # the dashboard job writes there
+
+
+def test_the_app_runs_the_jobs_itself_unless_told_otherwise(tmp_path):
+    assert merged_compose(tmp_path)["garagebooks"]["environment"]["SCHEDULER"] == "app"
+    assert merged_compose(tmp_path, env={"SCHEDULER": "worker"})["garagebooks"]["environment"]["SCHEDULER"] == "worker"
+
+
+def test_the_worker_gets_the_invoice_folder_the_app_has(tmp_path):
+    services = merged_compose(tmp_path, "docker-compose.invoices.yml", profiles=["worker"], env={"INVOICES_HOST_DIR": "/srv/invoices"})
+    app, worker = services["garagebooks"], services["worker"]
+    assert worker["user"] == app["user"] and worker["volumes"] == app["volumes"]
+    assert worker["environment"]["INVOICES_DIR"] == "/invoices" and worker["environment"]["SCHEDULER"] == "worker"
+    assert worker["command"] == ["python3", "-m", "garagebooks", "worker"]
+
+
+def test_the_dev_stack_can_run_the_worker_but_only_when_asked():
+    """SCHEDULER=worker in dev.env turns the profile on; anything else leaves dev on the app's own jobs."""
+    assert 'profiles: ["worker"]' in DEV and 'command: ["python3", "-m", "garagebooks", "worker"]' in DEV
+    assert "SCHEDULER: ${SCHEDULER:-app}" in DEV and "SCHEDULER: worker" in DEV
+    assert 'COMPOSE_PROFILES="$profile"' in SCRIPT and '!= worker ] && [ "${1:-}" != down' in SCRIPT   # down stops it too
+    env = {k: v for k, v in os.environ.items() if k != "COMPOSE_PROFILES"}
+    out = subprocess.run(["docker", "compose", "-f", str(ROOT / "docker-compose.dev.yml"), "--env-file", "/dev/null",
+                          "config", "--services"], capture_output=True, text=True, check=True, env=env).stdout.split()
+    assert "dev-worker" not in out and "garagebooks-dev" in out
