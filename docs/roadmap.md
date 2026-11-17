@@ -40,24 +40,7 @@ directly.
 
 ## Now
 
-<<<<<<< HEAD
-- **L5. Cost after tax** (size M)
-  What an expense paid from pre-tax salary really costs, beside its invoice amount. Not built yet. It will
-  include the charging reimbursement for an electric car on a novated or associate lease.
-  *Why now:* For a packaged car, the invoice amount overstates what it costs, and the lease details and FBT year it needs (L1, L2) are in place.
-  *Depends on:* L1, L2
-
-- **L4. Kilometre pace** (size S)
-  The km the lease estimate expects this FBT year against the odometer: TeslaMate's, or the odometer on the latest expense.
-  *Why now:* A small item that uses the lease estimate and the odometer, both now in place.
-  *Depends on:* L1, T1
-
-=======
-- **8. Notifications** (size M)
-  Push notices through a URL you configure (ntfy, Apprise, or a Home Assistant webhook): a reminder coming due, the OneDrive client secret nearing its expiry date (the app already stores it), the OneDrive sign-in lost, new invoices waiting for review, a lease budget heading for a shortfall (L3).
-  *Why now:* Reminders are in place, and they are only useful if you are told when one falls due.
-  *Depends on:* 7
->>>>>>> origin/roadmap/scheduled-jobs
+Everything that was here has shipped (see Already in place). The next items are under Next.
 
 ## Next
 
@@ -301,11 +284,8 @@ These are in main since 2026-11-16 and not yet in a release:
 - **5. Payment calculator.** Work out a payment made of several parts on the amount field (#77).
 - **6. Stricter quality gates.** A higher coverage floor, property-based tests and an SBOM on each release (#78).
 - **7. Scheduled jobs.** A small scheduler for periodic work, run by the app or by an optional worker container from the same image (`python3 -m garagebooks worker`), with each job's last run shown on Settings (#90).
-<<<<<<< HEAD
 - **8. Notifications.** Push notices through an address you set (ntfy, Apprise or a Home Assistant webhook): a reminder coming due or overdue, the OneDrive client secret nearing its expiry date, and the OneDrive sign-in lost (#89). Two notices wait for the features they report on: new invoices waiting for review (with item 13) and a lease budget heading for a shortfall (with L3).
-=======
 - **L5. Cost after tax.** What a packaged expense costs after the GST and pre-tax salary, beside its invoice amount, and the home charging reimbursement (#91).
->>>>>>> origin/roadmap/scheduled-jobs
 - **Review changes.** Lease form import and documents per lease period, several lease periods per car, associate leases, optional lease budgets, packaging per car, the purchase price on the Cars page, a list of standard service reminders, and the Sold panel only once a car is sold (#85). The manual odometer readings were removed.
 
 These were part of the original plan and are done: the dashboard as a version-controlled file that
