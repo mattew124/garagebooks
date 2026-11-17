@@ -151,6 +151,60 @@
 </section>
 {% endif %}
 
+<section class="card stack fbt" id="fbt-after-tax" aria-labelledby="fbt-after-tax-h">
+  <h2 id="fbt-after-tax-h">After tax</h2>
+  {% if not after.rate_set %}
+  <p id="fbt-after-tax-norate">Your marginal tax rate isn't set, so what these costs come to after tax isn't shown.
+    <a href="{{ url_for('settings') }}">Set it in Settings</a>; only the rate is kept, never a salary.</p>
+  {% else %}
+  <div class="table-wrap"><table id="fbt-after-tax-lines">
+    <thead><tr><th>{{ 'Pool' if budgets_on else 'Category' }}</th><th class="num">Invoices</th><th class="num">After tax</th></tr></thead>
+    <tbody>
+    {% for line in after.lines %}
+    <tr{% if budgets_on %} data-pool="{{ line.key }}"{% endif %}><td>{{ line.label }}{% if line.packaged %} <small>{{ line.packaged }} packaged</small>{% endif %}</td>
+      <td class="num">{{ line.invoice|money }}</td><td class="num">{{ amount(line.effective) }}</td></tr>
+    {% endfor %}
+    {% if after.charging %}
+    <tr id="after-tax-teslamate-charging"><td>Charging <small>from TeslaMate, paid personally</small></td>
+      <td class="num">{{ amount(after.charging.value, after.charging.reason) }}</td><td class="num">{{ amount(after.charging.value, after.charging.reason) }}</td></tr>
+    {% endif %}
+    {% if not after.lines and not after.charging %}<tr><td colspan="3" class="empty">No running costs in this FBT year.</td></tr>{% endif %}
+    </tbody>
+    <tfoot>
+      <tr id="fbt-after-tax-running"><th>Running costs</th><td class="num">{{ amount(after.invoice) }}</td><td class="num">{{ amount(after.effective) }}</td></tr>
+      {% if after.reimbursement and after.reimbursement.result %}
+      <tr><th>Less tax saved on reimbursement</th><td></td><td class="num">−{{ after.reimbursement.result.tax_saved|money }}</td></tr>
+      {% endif %}
+      <tr id="fbt-after-tax-total"><th>After-tax cost</th><td></td>
+        <td class="num"><strong>{{ amount(after.total) }}</strong></td></tr>
+    </tfoot>
+  </table></div>
+  {% if after.reimbursement %}
+  {% set r = after.reimbursement %}
+  <div id="fbt-reimbursement">
+    <h3>Home charging reimbursement</h3>
+    {% if r.km is none %}
+    <p><strong class="unavailable">Not known.</strong> The odometer isn't known at the start or the end of the days the car was held, so the distance driven
+      can't be worked out. It comes from TeslaMate or from readings you enter on the <a href="{{ url_for('cars_page') }}">Cars</a> page, and is never counted as nothing.</p>
+    {% elif not r.rate %}
+    <p><strong class="unavailable">There is no rate</strong> in <a href="{{ url_for('settings') }}">Settings</a> for FBT {{ report.year }} or any earlier year,
+      so the reimbursement for the {{ r.km|km }} driven can't be worked out.</p>
+    {% else %}
+    <p>{{ r.km|km }} driven while held and leased in this FBT year × {{ r.rate[1] }} cents per km
+      = <strong>{{ r.result.amount|money }}</strong>. At your marginal rate the tax saved on it is <strong>{{ r.result.tax_saved|money }}</strong>.</p>
+    {% if r.rate[0] != report.year %}
+    <p><small>The rate used is the one for {{ label(r.rate[0]) }}, the latest year with one in <a href="{{ url_for('settings') }}">Settings</a>:
+      there is none for {{ label(report.year) }}.</small></p>{% endif %}
+    {% endif %}
+    <p><small>The reimbursement is the distance times the ATO's cents-per-km rate for home charging an electric car, for the days held under a lease that has it ticked, up to today.</small></p>
+  </div>
+  {% endif %}
+  <p><small>An expense paid from the package has its GST claimed back (1/11 of an invoice that isn't GST-free) and the rest comes from pre-tax salary, so it costs less than
+    its invoice; one paid personally costs what the invoice says. These are deliberate simplifications of the published rules, worked out from the marginal rate in
+    <a href="{{ url_for('settings') }}">Settings</a> and the lease's pre-tax and post-tax payments: see the documentation. Not tax advice.</small></p>
+  {% endif %}
+</section>
+
 <section class="card stack fbt" id="purchases" aria-labelledby="fbt-purchases">
   <h2 id="fbt-purchases">Purchases</h2>
   {% if report.purchases %}

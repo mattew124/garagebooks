@@ -335,7 +335,7 @@ def test_the_panel_has_the_reserved_id_sits_below_the_rest_and_moves_nothing():
     dash = shipped()
     mine = panel(dash)
     assert mine["id"] == 21 and mine["type"] == "table" and mine["gridPos"]["w"] == 24
-    others = [p for p in dash["panels"] if p is not mine]
+    others = [p for p in dash["panels"] if p is not mine and p["title"] not in dashboard.AFTER_TAX_PANELS]   # that row is below this one
     assert mine["gridPos"]["y"] >= max(p["gridPos"]["y"] + p["gridPos"]["h"] for p in others)
     assert len({p["id"] for p in dash["panels"]}) == len(dash["panels"])
 

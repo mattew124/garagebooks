@@ -59,6 +59,15 @@ The app looks at the database once a minute and is in one of four states, shown 
 
 Held-back figures are shown as *unavailable*, never as zero, and nothing else stops. When TeslaMate appears, is repaired or is upgraded past, the app notices within a minute, with no restart: it adds TeslaMate's cars, and rewrites the dashboard and the `garagebooks.ownership` view to match. GarageBooks only ever reads TeslaMate's `cars`, `positions` and `charging_processes` tables, and none of its own tables points at them, so TeslaMate can be removed, or delete a car, without touching your expenses.
 
+## Cost after tax in the database
+
+For queries of your own: `garagebooks.expense_after_tax('Australia/Brisbane')` returns every expense with its car,
+date, amount, whether it counts as paid from the package (`packaged`) and `effective_cost`, what it costs after
+tax (the invoice amount for one paid personally, and null for a packaged one while no marginal rate is entered).
+The argument is the time zone that decides which lease covers an expense's date. It reads no TeslaMate table.
+`garagebooks.ev_charging_rate` holds the ATO's home charging rate (cents per km) by FBT year. The rules are on
+[Novated lease calculations](lease-calculations.md#cost-after-tax-l5).
+
 ## Logs
 
 `docker logs` shows gunicorn's request lines plus the app's own events. `LOG_LEVEL` (`debug`, `info` the default, `warning`, `error`; set in `.env`, restart to change) sets both. `info` records startup, the update check's result, schema changes, expenses saved, updated or deleted, OneDrive sign-in and upload results, and anything the invoice folder on the server refuses (a missing folder, no permission). `debug` adds detail such as retries. Tokens, secrets, vendors, notes and amounts are never logged, except that file names, which can contain a vendor, appear at `debug`.

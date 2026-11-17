@@ -2051,6 +2051,124 @@
           "refId": "A"
         }
       ]
+    },
+    {
+      "id": 23,
+      "type": "stat",
+      "title": "Running costs after tax",
+      "description": "What the running costs entered for this car (and TeslaMate's charging) come to on the invoices, and what they cost after tax: an expense paid from the package has its GST claimed back and the rest comes from pre-tax salary. All-time (ignores the dashboard time range). Follows the Category filter. A dash while a packaged expense can't be worked out. Cost after tax is worked out from the marginal tax rate saved in GarageBooks' Settings and each lease's pre-tax and post-tax payments (see the documentation); it is not tax advice. The home charging reimbursement needs the odometer, so it is shown in GarageBooks (the FBT year report), not here.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "TeslaMate"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 64
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "noValue": "–",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "currency:financial:$",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "textMode": "value_and_name",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "TeslaMate"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH x AS (\n  SELECT t.amount, t.packaged, t.effective_cost\n  FROM garagebooks.expense_after_tax('$tz') t\n  JOIN garagebooks.expense e ON e.id = t.expense_id JOIN garagebooks.category c ON c.id = e.category_id\n  WHERE t.car_id = $car_id AND c.kind IN ('running', 'energy') AND c.name IN ($category)\n), tm AS (\n  SELECT CASE WHEN 'Charging' IN ($category) THEN COALESCE((SELECT teslamate_charging_total FROM garagebooks.ownership WHERE car_id = $car_id), 0) ELSE 0 END AS v\n)\nSELECT COALESCE(SUM(x.amount), 0) + (SELECT v FROM tm) AS \"Invoices\",\n       CASE WHEN bool_or(x.packaged AND x.effective_cost IS NULL) THEN NULL\n            ELSE COALESCE(SUM(x.effective_cost), 0) + (SELECT v FROM tm) END AS \"After tax\"\nFROM x",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 24,
+      "type": "table",
+      "title": "After tax by FBT year",
+      "description": "Each FBT year (1 April to 31 March, from each expense's date in the dashboard's time zone): the running costs on the invoices (TeslaMate's charging included), what they cost after tax, and the difference. Ignores the dashboard time range. A dash where a packaged expense can't be worked out. Cost after tax is worked out from the marginal tax rate saved in GarageBooks' Settings and each lease's pre-tax and post-tax payments (see the documentation); it is not tax advice. The home charging reimbursement needs the odometer, so it is shown in GarageBooks (the FBT year report), not here.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "TeslaMate"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 16,
+        "x": 8,
+        "y": 64
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Invoices|After tax|Saved"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currency:financial:$"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "TeslaMate"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT 'FBT ' || y || '–' || lpad(((y + 1) % 100)::text, 2, '0') AS \"FBT year\",\n       SUM(invoice) AS \"Invoices\",\n       CASE WHEN bool_or(missing) THEN NULL ELSE SUM(effective) END AS \"After tax\",\n       CASE WHEN bool_or(missing) THEN NULL ELSE SUM(invoice) - SUM(effective) END AS \"Saved\"\nFROM (\n  SELECT garagebooks.fbt_year((t.occurred_at AT TIME ZONE '$tz')::date) AS y, t.amount AS invoice,\n         COALESCE(t.effective_cost, 0) AS effective, (t.packaged AND t.effective_cost IS NULL) AS missing\n  FROM garagebooks.expense_after_tax('$tz') t\n  JOIN garagebooks.expense e ON e.id = t.expense_id JOIN garagebooks.category c ON c.id = e.category_id\n  WHERE t.car_id = $car_id AND c.kind IN ('running', 'energy')\n  /*teslamate*/ UNION ALL\n  SELECT garagebooks.fbt_year(((cp.start_date AT TIME ZONE 'UTC') AT TIME ZONE '$tz')::date), cp.cost, cp.cost, false\n  FROM charging_processes cp\n  WHERE cp.car_id = (SELECT teslamate_car_id FROM garagebooks.car WHERE id = $car_id) AND cp.cost IS NOT NULL /*end*/\n) x GROUP BY y ORDER BY y",
+          "refId": "A"
+        }
+      ]
     }
   ]
 }

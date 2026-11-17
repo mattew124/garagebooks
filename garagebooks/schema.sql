@@ -660,3 +660,75 @@ END
 $fn$;
 REVOKE ALL ON FUNCTION garagebooks.build_odometer_at(boolean) FROM PUBLIC;
 SELECT garagebooks.build_odometer_at(true);
+
+-- Cost after tax (roadmap L5): what an expense paid from pre-tax salary through a novated lease's package
+-- costs once the GST is claimed back and the rest comes from pre-tax salary. All of it is read-only
+-- arithmetic on what is entered; nothing here is tax advice, and no salary is ever stored.
+--   setting.marginal_tax_rate  the owner's marginal rate as a percentage, Medicare levy included (34 for
+--                              32 + 2); NULL = not entered, and no after-tax figure is shown anywhere
+--   expense.packaged           true = paid from the package, false = paid personally, NULL = automatic:
+--                              packaged when a lease of the car covers the date, the category has a budget
+--                              pool and is not a purchase
+--   category.gst_free          the category's invoices carry no GST (registration and CTP, say). Added
+--                              once, with its defaults; the owner's later edits are never overwritten
+--   lease.charging_reimbursed  the provider reimburses home charging at the ATO's cents-per-km rate
+ALTER TABLE garagebooks.setting ADD COLUMN IF NOT EXISTS marginal_tax_rate numeric(5, 2)
+    CHECK (marginal_tax_rate IS NULL OR marginal_tax_rate BETWEEN 0 AND 100);
+ALTER TABLE garagebooks.expense ADD COLUMN IF NOT EXISTS packaged boolean;
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_schema = 'garagebooks' AND table_name = 'category' AND column_name = 'gst_free') THEN
+        ALTER TABLE garagebooks.category ADD COLUMN gst_free boolean NOT NULL DEFAULT false;
+        -- The defaults are not an edit by anyone: keep them out of the change history.
+        ALTER TABLE garagebooks.category DISABLE TRIGGER log_change;
+        UPDATE garagebooks.category SET gst_free = true WHERE name = 'Registration';
+        ALTER TABLE garagebooks.category ENABLE TRIGGER log_change;
+    END IF;
+END $$;
+ALTER TABLE garagebooks.lease ADD COLUMN IF NOT EXISTS charging_reimbursed boolean NOT NULL DEFAULT false;
+
+-- The ATO's rate for reimbursing an electric car's home charging, in cents per km, by FBT year (the year
+-- it starts in, as fbt_year() numbers them). Data, not code: add or change a year on the Settings page.
+-- A year with no row uses the latest earlier year's rate; a year before the first has none.
+CREATE TABLE IF NOT EXISTS garagebooks.ev_charging_rate (
+    fbt_year      integer PRIMARY KEY,
+    cents_per_km  numeric(6, 2) NOT NULL CHECK (cents_per_km >= 0)
+);
+INSERT INTO garagebooks.ev_charging_rate (fbt_year, cents_per_km) VALUES
+    (2022, 4.20), (2023, 4.20), (2024, 4.20), (2025, 4.20), (2026, 5.47)
+ON CONFLICT (fbt_year) DO NOTHING;
+
+-- Every expense with whether it is packaged and what it costs after tax, in the time zone `tz` (the date
+-- an expense is on decides the lease that covers it, as for the FBT year). The one definition the app
+-- and the dashboard share; tests/test_after_tax.py holds it to lease.effective_cost(). With no rate
+-- entered effective_cost is NULL for a packaged expense: never the invoice standing in for it.
+--   ex_gst    = amount, or amount x 10 / 11 when the category is not GST-free
+--   post      = the lease's post-tax payment / (pre-tax + post-tax payment), 0 with no lease or no payments
+--   effective = ex_gst x ((1 - post) x (1 - rate) + post), rounded half away from zero to the cent
+-- Written as one division so nothing is rounded before the end. It reads no TeslaMate table.
+CREATE OR REPLACE FUNCTION garagebooks.expense_after_tax(tz text)
+RETURNS TABLE (expense_id bigint, car_id smallint, occurred_at timestamptz, amount numeric,
+               packaged boolean, effective_cost numeric)
+LANGUAGE sql STABLE
+AS $fn$
+    SELECT e.id, e.car_id, e.occurred_at, e.amount, p.packaged,
+           CASE WHEN NOT p.packaged THEN e.amount
+                WHEN r.rate IS NULL THEN NULL
+                ELSE round(e.amount * CASE WHEN k.gst_free THEN 1 ELSE 10 END
+                               * (q.pre * (100 - r.rate) + 100 * q.post)
+                               / ((CASE WHEN k.gst_free THEN 1 ELSE 11 END) * 100 * (q.pre + q.post)), 2) END
+    FROM garagebooks.expense e
+    JOIN garagebooks.category k ON k.id = e.category_id
+    LEFT JOIN LATERAL (SELECT l.pretax_payment, l.posttax_payment FROM garagebooks.lease l
+                       WHERE l.car_id = e.car_id
+                         AND (e.occurred_at AT TIME ZONE tz)::date BETWEEN l.start_date AND l.end_date
+                       ORDER BY l.start_date LIMIT 1) l ON true
+    CROSS JOIN LATERAL (SELECT COALESCE(e.packaged, l.pretax_payment IS NOT NULL AND k.budget_pool IS NOT NULL
+                                                    AND k.kind <> 'purchase') AS packaged) p
+    CROSS JOIN LATERAL (SELECT CASE WHEN COALESCE(l.pretax_payment, 0) + COALESCE(l.posttax_payment, 0) > 0
+                                    THEN l.pretax_payment ELSE 1 END AS pre,
+                                   CASE WHEN COALESCE(l.pretax_payment, 0) + COALESCE(l.posttax_payment, 0) > 0
+                                    THEN l.posttax_payment ELSE 0 END AS post) q
+    CROSS JOIN (SELECT (SELECT marginal_tax_rate FROM garagebooks.setting WHERE id = 1) AS rate) r
+$fn$;

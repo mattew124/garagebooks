@@ -350,3 +350,47 @@ def test_a_candidate_sorts_before_its_release_and_by_number(major, minor, patch,
     assert updates.parse(f"{base}-rc{n}") < updates.parse(base) == updates.parse(f"v{base}")
     assert updates.parse(f"{base}-rc{n}") < updates.parse(f"{base}-rc{n + 1}")
     assert updates.parse(base) < updates.parse(f"{major}.{minor}.{patch + 1}")
+
+
+# ---- cost after tax: the marginal rate, the EV charging rates, "paid from" ------------------------------
+
+@given(anything)
+@example("100.005")
+@example("-0")
+@example("1e2")
+def test_marginal_rate_is_a_percentage_or_refused_politely(raw):
+    got = only_value_error(v.parse_marginal_rate, raw)
+    if got is not None:
+        assert Decimal(0) <= got <= Decimal(100) and got == got.quantize(Decimal("0.01"))
+
+
+@given(st.decimals(min_value=0, max_value=100, places=2))
+def test_marginal_rate_round_trips_how_the_settings_page_shows_it(value):
+    assert v.parse_marginal_rate(f"{value:f}") == value
+    assert v.parse_marginal_rate(f"{value:f} %") == value
+
+
+@given(anything)
+@example("1e999999999")
+def test_cents_per_km_is_a_small_non_negative_figure_or_refused_politely(raw):
+    got = only_value_error(v.parse_cents_per_km, raw)
+    if got is not None:
+        assert Decimal(0) <= got <= v.MAX_CENTS_PER_KM and got == got.quantize(Decimal("0.01"))
+
+
+@given(st.decimals(min_value=0, max_value=v.MAX_CENTS_PER_KM, places=2))
+def test_cents_per_km_round_trips(value):
+    assert v.parse_cents_per_km(f"{value:f}") == value
+
+
+@given(anything)
+def test_a_rate_year_is_a_plausible_whole_year_or_refused_politely(raw):
+    got = only_value_error(v.parse_rate_year, raw)
+    if got is not None:
+        assert isinstance(got, int) and 1990 <= got <= 2200
+
+
+@given(anything)
+def test_paid_from_is_one_of_three_answers_or_refused_politely(raw):
+    got = only_value_error(v.parse_paid_from, raw)
+    assert got in (None, True, False)

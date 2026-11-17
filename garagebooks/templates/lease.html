@@ -62,6 +62,7 @@
     <div><dt>Valuation method</dt><dd>{{ fbt_methods[l.fbt_method] }}</dd></div>
     <div><dt>Statutory percentage</dt><dd>{{ pct(l.statutory_percent) }}</dd></div>
     <div><dt>Exempt electric car</dt><dd>{{ 'Yes' if l.ev_exempt else 'No' }}</dd></div>
+    {% if l.charging_reimbursed %}<div><dt>Home charging reimbursed</dt><dd>Yes, at the ATO's cents-per-km rate</dd></div>{% endif %}
     <div><dt>Tax treatment</dt><dd>{% if l.tax_treatment == 'other' %}{{ l.tax_treatment_note or 'Other' }}{% elif l.tax_treatment %}{{ tax_treatments[l.tax_treatment] }}{% else %}—{% endif %}</dd></div>
     <div><dt>Estimated km per year</dt><dd>{{ (l.estimated_km_per_year|km) if l.estimated_km_per_year is not none else '—' }}</dd></div>
   </dl>
