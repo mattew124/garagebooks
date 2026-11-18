@@ -76,7 +76,8 @@
     <td class="claim-state{{ ' none' if short }}" data-label="Claim">
       {%- if ledger -%}
       {%- if e.state == 'claimed' -%}
-      {{ e.claim_reference or (e.pay.reference if e.pay) or 'Claimed' }}{% if e.claim_status %} · {{ e.claim_status }}{% endif %}
+      {% if e.direct and not e.claim_provider_id and not e.pay %}Paid by the provider directly{% if e.direct.description %} · {{ e.direct.description }}{% endif %} · {{ e.direct.amount|money }} · {{ e.direct.occurred_on|day }}
+      {%- else %}{{ e.claim_reference or (e.pay.reference if e.pay) or 'Claimed' }}{% endif %}{% if e.claim_status %} · {{ e.claim_status }}{% endif %}
       {%- if e.claim_approved is not none %} · approved {{ e.claim_approved|money }}{% endif %}
       {%- if e.claim_paid_date %} · paid {{ e.claim_paid_date|day }}{% endif %}
       {%- if not e.claim_provider_id %} <small>(claimed at the provider)</small>{% endif %}

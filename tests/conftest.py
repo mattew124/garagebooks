@@ -141,6 +141,8 @@ def admin(pg):
                      " garagebooks.odometer_reading, garagebooks.reminder RESTART IDENTITY CASCADE")
         if TESLAMATE:
             conn.execute("TRUNCATE positions, charging_processes RESTART IDENTITY CASCADE")   # CASCADE: real TeslaMate tables (drives...) reference them
+        conn.execute("UPDATE garagebooks.provider_sync SET state = 'idle', started_at = NULL, finished_at = NULL,"
+                     " outcome = NULL, message = NULL, since = NULL")      # no sync from an earlier test
         conn.execute("DELETE FROM garagebooks.lease")          # a test's lease on the first car; its budgets go with it
         conn.execute("DELETE FROM garagebooks.car WHERE id <> 1")
         if not TESLAMATE:

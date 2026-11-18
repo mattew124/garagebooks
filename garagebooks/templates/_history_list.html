@@ -7,7 +7,7 @@
   <thead><tr><th>Date</th><th>Car</th><th>What</th><th class="num">Amount</th><th>Expense</th></tr></thead>
   <tbody>
   {% for t in transactions %}
-  <tr data-tx="{{ t.provider_id }}" data-match="{{ 'per-km' if t.kind == 'per_km_charging' else ('matched' if t.expense_id else 'unmatched') }}">
+  <tr data-tx="{{ t.provider_id }}" data-match="{{ 'per-km' if t.kind == 'per_km_charging' else ('other' if t.kind == 'other' else ('matched' if t.expense_id else 'unmatched')) }}">
     <td class="date" data-label="Date">{{ t.occurred_on|day }}</td>
     <td class="cat" data-label="Car">{% if t.car_name %}<span class="chip hue-{{ t.car_id % 10 }}">{{ t.car_name }}</span>{% else %}–{% endif %}</td>
     <td class="vendor" data-label="What" title="{{ t.description or t.type or '' }}">{{ t.description or t.type or '–' }}{% if t.payee %} · {{ t.payee }}{% endif %}</td>
@@ -16,6 +16,7 @@
       {{ t.status or '–' }}{% if t.reference %} · {{ t.reference }}{% endif %}<br>
       {%- if t.expense_id %}<a href="{{ url_for('edit', expense_id=t.expense_id) }}">{{ t.expense_category }}{% if t.expense_vendor %} · {{ t.expense_vendor }}{% endif %}</a>
       {%- elif t.kind == 'per_km_charging' %}<span class="muted">Per-km charging: no expense needed</span>
+      {%- elif t.kind == 'other' %}<span class="muted">Not a claim: no expense needed</span>
       {%- else %}<span class="flag">No matching expense</span>{% endif %}
     </td>
   </tr>

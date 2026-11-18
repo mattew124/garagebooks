@@ -25,6 +25,7 @@ MAX_INVOICE_BYTES = 10 * 1024 * 1024
 # A connector drives a browser, and a call can take a minute. Gunicorn's own timeout (gunicorn.conf.py)
 # is longer, so the page shows this module's message rather than a killed worker.
 TIMEOUT_SECONDS = 150
+SYNC_TIMEOUT_SECONDS = 900   # a full history sync; it runs in the background, not in a web request
 # What the connector may ask for in a 422, and how each is typed. Anything else is ignored.
 FIELD_KEYS = ("policy_number", "start", "end", "description", "provider", "invoice_date")
 FIELD_TYPES = ("date", "text")
@@ -143,10 +144,12 @@ class Connector:
     def health(self, timeout=None):
         return self.call("GET", "health", timeout=timeout)
 
-    def transactions(self, cars):
-        """The provider's transaction history (the connector chooses the period), with each row's car given as
-        one of `cars` ([{id, name, make, model}]) where the connector can tell."""
-        return self.call("POST", "transactions", {"cars": list(cars)})
+    def transactions(self, cars, since=None):
+        """The provider's claim and transaction history from `since` (a date; the connector chooses when None),
+        with each row's car given as one of `cars` ([{id, name, make, model}]) where the connector can tell.
+        The provider's own site is slow (minutes for years of history), so this waits much longer than the rest."""
+        body = {"cars": list(cars), **({"since": since.isoformat()} if since else {})}
+        return self.call("POST", "transactions", body, timeout=SYNC_TIMEOUT_SECONDS)
 
     def preview(self, expense, invoice):
         return self.call("POST", "preview", {"expense": expense, "invoice": invoice})
@@ -221,7 +224,7 @@ def clean_fields(form):
 
 # ---- the claims page: where each expense stands, and the provider's transaction history ----------------------
 
-TRANSACTION_KINDS = ("claim_payment", "per_km_charging", "other")
+TRANSACTION_KINDS = ("claim_payment", "per_km_charging", "direct_payment", "other")
 MAX_TRANSACTIONS = 20000
 
 
@@ -281,23 +284,21 @@ def clean_transaction(item, car_ids):
             "claim_provider_id": text(item.get("claim_provider_id"), 200), "reference": text(item.get("reference"), 200)}
 
 
-def match_by_figures(lines, expenses):
-    """Pair each claim line with the one expense it must be: the same car (or, if the connector couldn't say,
-    any car), local day and amount, when exactly one line and exactly one expense fit. Anything ambiguous is
-    left alone. `lines`, `expenses`: [(id, car_id, day, amount)] -> {line id: expense id}."""
-    by_expense = defaultdict(list)
-    for eid, car, day, amount in expenses:
-        by_expense[(car, day, abs(amount))].append(eid)
-        by_expense[(None, day, abs(amount))].append(eid)
-    by_payment = defaultdict(list)
-    for tid, car, day, amount in lines:
-        by_payment[(car, day, abs(amount))].append(tid)
-    out = {}
-    for (car, day, amount), tids in by_payment.items():
-        eids = by_expense.get((car, day, amount), [])
-        if len(tids) == 1 and len(eids) == 1:
-            out[tids[0]] = eids[0]
-    return out
+def match_by_figures(lines, expenses, days=0, tolerance=Decimal(0)):
+    """Pair each claim line (or payment) with the one expense it must be: the same car (or any, if the connector
+    couldn't say), within `days` of its day, and within `tolerance` (a fraction, 0.15 = 15%) of its amount. Only a
+    pair where exactly one expense fits the line and exactly one line fits the expense is made: anything ambiguous
+    is left alone. `lines`, `expenses`: [(id, car_id, day, amount)] -> {line id: expense id}."""
+    def fits(line, exp):
+        (_l, lcar, lday, lamount), (_e, ecar, eday, eamount) = line, exp
+        return ((lcar is None or lcar == ecar) and abs((lday - eday).days) <= days
+                and abs(abs(lamount) - abs(eamount)) <= abs(eamount) * Decimal(tolerance))
+    fitting = {ln[0]: [e[0] for e in expenses if fits(ln, e)] for ln in lines}
+    wanted = defaultdict(list)
+    for lid, eids in fitting.items():
+        for eid in eids:
+            wanted[eid].append(lid)
+    return {lid: eids[0] for lid, eids in fitting.items() if len(eids) == 1 and len(wanted[eids[0]]) == 1}
 
 
 def clean_claim_line(item, car_ids):

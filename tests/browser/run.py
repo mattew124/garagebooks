@@ -1592,6 +1592,13 @@ def test_list_with_a_claim_link_fits_a_phone(page):
         remove_marked(page)
 
 
+def sync_provider_history(page):
+    """Press Sync provider history: it starts in the background, the page shows it running and reloads itself when done."""
+    page.get_by_role("button", name="Sync provider history").click()
+    page.wait_for_url(re.compile(r"msg=claims_sync_started"))
+    expect(page.locator("#sync-running")).to_have_count(0, timeout=40000)
+
+
 def test_claims(page):
     """Claim an expense through the stand-in connector: preview, a field it asks for, the sign-in with its
     code, submit, the badge and the reference, refusing to delete a claimed expense, refreshing the status,
@@ -1679,8 +1686,7 @@ def test_claims(page):
                         "paid_date": today.isoformat(), "description": "Tyres", "car_id": None}]})
         page.goto(UI + "claims")
         expect(page.locator("#provider-status")).to_contain_text("Signed in")
-        page.get_by_role("button", name="Sync provider history").click()
-        page.wait_for_url(re.compile(r"msg=claims_synced"))
+        sync_provider_history(page)
         expect(page.locator("tr[data-tx=K1]")).to_contain_text("no expense needed")
         expect(page.locator("tr[data-tx=T9]")).to_contain_text("No matching expense")
         expect(page.locator("tr[data-tx=T1] a")).to_have_count(1)             # matched through its claim
@@ -1701,8 +1707,7 @@ def test_claims(page):
         # Once the provider's history no longer has it (the stand-in is reset), a sync frees the expense.
         fake_connector(page)
         page.goto(UI + "claims")
-        page.get_by_role("button", name="Sync provider history").click()
-        page.wait_for_url(re.compile(r"msg=claims_synced"))
+        sync_provider_history(page)
         page.goto(UI)
         expect(page.locator("tbody tr", has_text=MARKER).locator("a.claim-link")).to_have_count(1)
     finally:

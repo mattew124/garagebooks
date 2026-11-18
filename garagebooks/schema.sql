@@ -710,3 +710,24 @@ CREATE TABLE IF NOT EXISTS garagebooks.provider_claim (
 );
 CREATE INDEX IF NOT EXISTS provider_claim_expense_idx ON garagebooks.provider_claim (expense_id);
 CREATE INDEX IF NOT EXISTS provider_claim_claim_idx ON garagebooks.provider_claim (provider_id);
+
+-- Fetching the provider's history can take minutes (its own site is slow), so the app does it in the background
+-- and keeps the state of the one running sync here, where every web worker can see it. One row, always id 1.
+-- outcome: 'synced', 'signin' (the provider needs signing in) or 'problem' (message says why). A 'running' sync
+-- older than half an hour is taken to have died with its worker.
+CREATE TABLE IF NOT EXISTS garagebooks.provider_sync (
+    id          integer PRIMARY KEY CHECK (id = 1),
+    state       text NOT NULL DEFAULT 'idle' CHECK (state IN ('idle', 'running')),
+    started_at  timestamptz,
+    finished_at timestamptz,
+    outcome     text CHECK (outcome IN ('synced', 'signin', 'problem')),
+    message     text,
+    since       date
+);
+INSERT INTO garagebooks.provider_sync (id) VALUES (1) ON CONFLICT DO NOTHING;
+
+-- 'direct_payment': the provider paid something itself on the owner's behalf, with no claim made (a registration
+-- renewal, say). It belongs to an expense like a claim does, and is matched to one by car, nearby day and amount.
+ALTER TABLE garagebooks.provider_transaction DROP CONSTRAINT IF EXISTS provider_transaction_kind_check;
+ALTER TABLE garagebooks.provider_transaction ADD CONSTRAINT provider_transaction_kind_check
+    CHECK (kind IN ('claim_payment', 'per_km_charging', 'direct_payment', 'other'));
