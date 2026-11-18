@@ -58,9 +58,16 @@ scripts/teslamate-compat.sh 4.5.0 --record   # after it passes: update compat.py
 It starts a throwaway Postgres, lets the real `teslamate/teslamate` image migrate it, runs the
 whole suite on that schema, and compares the
 newest migration with the recorded one. Exit status 0 means tested, 1 means a failure,
-2 means it passes but is newer than recorded. A weekly *TeslaMate compatibility* workflow runs it against
-the latest release and opens an issue when it doesn't exit 0. After `--record`, update the CHANGELOG
-(an upgrade note) and the README line naming the tested release.
+2 means it passes but is newer than recorded. `--if-new` exits 0 at once when the release is already the
+recorded one. A daily *TeslaMate compatibility* workflow runs it with `--if-new` against the latest release
+(so nothing runs unless there is a new one). On a failure (exit 1) it opens an issue. When the tests pass on a
+newer release (exit 2) it runs `--record`, which updates `compat.py`, the README line and the CHANGELOG, opens a
+pull request and runs CI on it. When the next tag is clear (`scripts/auto_rc.py`: the next `-rcN` of a version that
+has only had candidates, or `-rc1` of a PATCH after a stable release when the only unreleased change is the
+compatibility entry), it then merges the pull request, renames the CHANGELOG entry, tags that candidate and
+starts the Release workflow, so the image is built for you to test. It never tags a stable release. If the tag
+isn't clear, the pull request is left open. It needs *Allow GitHub Actions to create pull requests* turned on in
+the repository's Actions settings.
 
 
 ## Tax rates for the lease workbook

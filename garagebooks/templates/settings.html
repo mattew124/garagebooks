@@ -98,7 +98,7 @@
 <h2 id="notifications">Notifications</h2>
 <form method="post" action="{{ url_for('notifications_save') }}" class="card stack">
   <p>Push a notice to your phone when a reminder comes due, the OneDrive client secret is nearing its expiry date, or the
-    OneDrive sign-in is lost. Each is sent once. Leave the address empty to keep notifications off.</p>
+    OneDrive sign-in is lost, or (if you tick the box below) TeslaMate is upgraded past what GarageBooks was tested with. Each is sent once. Leave the address empty to keep notifications off.</p>
   <label>Notification address
     <input type="password" name="notify_url" maxlength="500" autocomplete="off" spellcheck="false"
            placeholder="{{ 'Saved: ' ~ notify.host ~ ' (leave blank to keep it)' if notify.host else 'https://ntfy.example/your-topic' }}">
@@ -114,6 +114,8 @@
     </select>
     {% if notify.errors.notify_format %}<span class="error">{{ notify.errors.notify_format }}</span>{% endif %}
     <small>ntfy sends the message as plain text. JSON sends <code>title</code>, <code>message</code> and <code>body</code>.</small></label>
+  <label class="check" for="notify-teslamate"><input id="notify-teslamate" type="checkbox" name="notify_teslamate" value="1" {{ 'checked' if notify.teslamate }}>
+    <span>Tell me when TeslaMate is newer than GarageBooks has been tested with (its figures are held back until you upgrade)</span></label>
   <small>Examples (use your own): ntfy <code>https://ntfy.example/your-topic</code>; an Apprise API
     <code>https://apprise.example/notify/your-key</code> with JSON; a Home Assistant webhook
     <code>https://homeassistant.example/api/webhook/your-webhook-id</code> with JSON.

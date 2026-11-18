@@ -14,6 +14,7 @@ GarageBooks can push a notice to your phone when something needs you. You give i
 | **OneDrive client secret expires** | 30 days and again 7 days before the expiry date you entered on the Invoice storage page. | No: once for each. |
 | **OneDrive client secret has expired** | Once the date has passed. | No: once. |
 | **OneDrive sign-in lost** | When the app finds that Microsoft no longer accepts the saved sign-in. | Once each time it is lost. |
+| **TeslaMate is newer than tested** | Only if you tick the box on the Settings page (off by default). When the TeslaMate database moves past the release GarageBooks was tested with, so its figures are [held back](reference.md#teslamate-version). | Once for each new TeslaMate migration. |
 
 Each notice names the car, the reminder and what it is due on. A reminder with an odometer reading that
 isn't known (TeslaMate absent or held back, and no reading entered by hand) is told on its date alone:

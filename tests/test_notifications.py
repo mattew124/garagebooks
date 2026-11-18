@@ -619,3 +619,54 @@ def test_the_address_is_never_written_to_the_change_history_or_the_log(page, cap
     with connect(url) as conn:
         assert conn.execute("SELECT count(*) AS n FROM garagebooks.change_log WHERE after_row::text LIKE '%your-secret-topic%'").fetchone()["n"] == 0
     assert "your-secret-topic" not in caplog.text
+
+
+# ---- TeslaMate newer than tested (opt-in) --------------------------------------------------------------
+
+UNTESTED_TM = sources.TeslaMate(sources.UNTESTED, "Newer than tested.", False, 20270101000000)
+
+
+def set_teslamate_notice(url, on):
+    with connect(url) as conn:
+        conn.execute("UPDATE garagebooks.setting SET notify_teslamate = %s", (on,))
+
+
+def test_a_newer_teslamate_is_told_only_when_the_box_is_ticked(world):
+    _, url, sender = world
+    assert tell(url, sender, teslamate=UNTESTED_TM) == "nothing new"      # off unless asked for
+    set_teslamate_notice(url, True)
+    try:
+        assert tell(url, sender, teslamate=UNTESTED_TM) == "1 sent"
+        assert "TeslaMate" in sender.titles()[0] and "held back" in sender.sent[0]["message"]
+        assert keys(url) == ["teslamate:20270101000000:untested"]
+    finally:
+        set_teslamate_notice(url, False)
+
+
+def test_a_newer_teslamate_is_told_once_and_again_for_a_later_migration(world):
+    _, url, sender = world
+    set_teslamate_notice(url, True)
+    try:
+        tell(url, sender, teslamate=UNTESTED_TM)
+        assert tell(url, sender, teslamate=UNTESTED_TM) == "nothing new"
+        assert tell(url, sender, teslamate=sources.TeslaMate(sources.UNTESTED, "x", False, 20270202000000)) == "1 sent"
+        assert tell(url, sender, teslamate=sources.TeslaMate(sources.OK)) == "nothing new"     # nothing to tell when fine
+    finally:
+        set_teslamate_notice(url, False)
+
+
+def test_the_settings_checkbox_saves_and_shows_the_choice(page):
+    client, url, _ = page
+    html = client.get("/settings").data.decode()
+    assert 'name="notify_teslamate"' in html and "checked" not in html.split('name="notify_teslamate"', 1)[1].split(">", 1)[0]
+    client.post("/settings/notifications", data={"notify_url": URL, "notify_format": "ntfy", "notify_teslamate": "1"}, headers=ORIGIN)
+    try:
+        with connect(url) as conn:
+            assert conn.execute("SELECT notify_teslamate FROM garagebooks.setting").fetchone()["notify_teslamate"] is True
+        assert "checked" in client.get("/settings").data.decode().split('name="notify_teslamate"', 1)[1].split(">", 1)[0]
+        client.post("/settings/notifications", data={"notify_url": "", "notify_format": "ntfy"}, headers=ORIGIN)
+        with connect(url) as conn:
+            assert conn.execute("SELECT notify_teslamate FROM garagebooks.setting").fetchone()["notify_teslamate"] is False
+    finally:
+        with connect(url) as conn:
+            conn.execute("UPDATE garagebooks.setting SET notify_url = NULL, notify_format = NULL, notify_teslamate = false")

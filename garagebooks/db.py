@@ -265,6 +265,16 @@ def save_notify(conn, url, fmt):
     conn.execute("UPDATE garagebooks.setting SET notify_url = %s, notify_format = %s WHERE id = 1", (url, fmt))
 
 
+def get_notify_teslamate(conn):
+    """Whether to send a notice when TeslaMate is newer than the tested release (Settings). Off by default."""
+    row = conn.execute("SELECT notify_teslamate FROM garagebooks.setting WHERE id = 1").fetchone()
+    return bool(row and row["notify_teslamate"])
+
+
+def save_notify_teslamate(conn, on):
+    conn.execute("UPDATE garagebooks.setting SET notify_teslamate = %s WHERE id = 1", (bool(on),))
+
+
 def lease_budgets_on(conn):
     """Whether the owner tracks the provider's yearly budget pools (Settings). Off unless turned on."""
     return bool(get_settings(conn)["lease_budgets"])

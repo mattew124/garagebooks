@@ -2,7 +2,7 @@
 # =============================================================================
 # teslamate-compat.sh — test this project against a real TeslaMate release.
 #
-#   scripts/teslamate-compat.sh [VERSION|latest] [--record]
+#   scripts/teslamate-compat.sh [VERSION|latest] [--record] [--if-new]
 #
 # Starts a throwaway Postgres, lets the real teslamate/teslamate:VERSION image migrate it
 # (the image's own entrypoint does that), then:
@@ -12,15 +12,18 @@
 #
 # Exit status: 0 = tested and nothing to change; 1 = the tests failed; 2 = the tests pass but
 # TeslaMate is newer than compat.py records (run with --record).
-# --record, after a pass, updates compat.py to VERSION.
+# --record, after a pass, updates compat.py, the README line and the CHANGELOG (an entry at the top of
+# Unreleased) to VERSION, so only the review and the release are left.
+# --if-new exits 0 at once, running nothing, when VERSION is the release already recorded.
 # =============================================================================
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-version="" record=0
+version="" record=0 if_new=0
 for arg in "$@"; do
     case "$arg" in
         --record) record=1 ;;
+        --if-new) if_new=1 ;;
         *) version="$arg" ;;
     esac
 done
@@ -30,6 +33,10 @@ version="${version:-$tested}"
 if [ "$version" = latest ]; then
     version="$(curl -fsSL https://api.github.com/repos/teslamate-org/teslamate/releases/latest \
         | .venv/bin/python -c 'import json,sys; print(json.load(sys.stdin)["tag_name"].lstrip("v"))')"
+fi
+if [ "$if_new" = 1 ] && [ "$version" = "$tested" ]; then
+    echo "compat: TeslaMate $version is already the recorded release; nothing new."
+    exit 0
 fi
 image="teslamate/teslamate:$version"
 echo "compat: TeslaMate $version (this release was tested with $tested)"
@@ -65,7 +72,20 @@ fi
 if [ "$record" = 1 ] && { [ "$status" = 0 ] || [ "$status" = 2 ]; }; then
     sed -i -E "s/^TESTED_TESLAMATE = .*/TESTED_TESLAMATE = \"$version\"/; s/^TESTED_MIGRATION = .*/TESTED_MIGRATION = $newest/" \
         garagebooks/compat.py
-    echo "compat: recorded TeslaMate $version (migration $newest). Review 'git diff', update the docs and CHANGELOG."
+    sed -i -E "s/^Tested with TeslaMate [0-9][0-9.]*\./Tested with TeslaMate $version./" README.md
+    VERSION="$version" PREVIOUS="$tested" .venv/bin/python - <<'PY'
+import os
+import pathlib
+version, previous = os.environ["VERSION"], os.environ["PREVIOUS"]
+path = pathlib.Path("CHANGELOG.md")
+text = path.read_text()
+marker = "## Unreleased\n\n"
+entry = (f"**TeslaMate {version}.** Tested with TeslaMate {version} (it was {previous}). Nothing to do on upgrade: pull the new image. "
+         f"A TeslaMate database up to that release no longer has its figures held back.\n\n")
+if marker in text and f"**TeslaMate {version}.**" not in text:
+    path.write_text(text.replace(marker, marker + entry, 1))
+PY
+    echo "compat: recorded TeslaMate $version (migration $newest). Review 'git diff'."
     status=0
 fi
 exit "$status"

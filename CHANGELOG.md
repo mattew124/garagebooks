@@ -18,6 +18,13 @@ Nothing is sent until you set an address, so nothing changes if you don't.
   secret: it is never shown back, logged or put in an error. A new scheduled job, `notifications`, runs
   every 15 minutes. New invoices waiting for review and a lease budget heading for a shortfall come with
   the features they report on. See [Notifications](docs/notifications.md).
+- **A notice when TeslaMate is newer than tested.** An optional box under Notifications on the Settings page
+  (off by default) sends one notice for each new TeslaMate migration the app holds its figures back on. The log
+  line for the same event is a `WARNING` (`ERROR` with `ALLOW_UNTESTED_TESLAMATE=1`), so a log alert can use it too.
+  The *TeslaMate compatibility* workflow now runs daily (nothing runs unless there is a newer TeslaMate release) and,
+  when the tests pass, records the release in `compat.py`, the README and this file in a pull request, runs CI on it,
+  merges it and tags the next release candidate, which the Release workflow builds for you to test. It never tags a
+  stable release.
 
 **Scheduled jobs.** Nothing to do on upgrade: the app adds the new table itself and runs the jobs in the background.
 With the restricted role from `scripts/provision-db.sh` and `SKIP_MIGRATE=1`, run the script again so the role can
