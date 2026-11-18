@@ -260,6 +260,16 @@ def test_the_claims_page_uses_the_all_pages_list(client, admin, tyres):
 
 # ---- per car and other filters, on both pages -------------------------------------------------------------
 
+def test_the_provider_history_uses_the_same_rows_and_dates(client, admin, fake, tyres):
+    sync(client, fake, tx("T1", day="2026-11-07"))
+    page = said(client.get("/claims"))
+    history = row_of(page, "tx", "T1")
+    for cell in ('<td class="date"', '<td class="cat"', '<td class="vendor"', 'td class="num amount"', '<td class="claim-state"'):
+        assert cell in history and cell in row_of(page, "expense", str(tyres)), cell
+    assert "07 Nov 2026" in history and "07 Nov 2026" in row_of(page, "expense", str(tyres))     # one date format
+    assert "strftime" not in page
+
+
 def test_both_pages_filter_by_car(client, admin, fake, tyres):
     second_car(admin)
     other = expense(admin, car=2, amount="300.00")

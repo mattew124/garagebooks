@@ -47,7 +47,7 @@
 
 {% if expenses %}
 <div class="table-wrap">
-<table>
+<table class="expense-table">
   <colgroup><col class="c-date"><col class="c-cat"><col class="c-vendor"><col class="c-amount"><col class="c-odo"><col class="c-inv">{% if ledger %}<col class="c-claim">{% endif %}<col class="c-act"></colgroup>
   <thead><tr>
     {% for key, label, cls in (('date', 'Date', ''), ('category', 'Category', ''), ('vendor', 'Vendor', ''),
@@ -74,7 +74,7 @@
       {%- if e.state == 'claimed' -%}
       {{ e.claim_reference or (e.pay.reference if e.pay) or 'Claimed' }}{% if e.claim_status %} · {{ e.claim_status }}{% endif %}
       {%- if e.claim_approved is not none %} · approved {{ e.claim_approved|money }}{% endif %}
-      {%- if e.claim_paid_date %} · paid {{ e.claim_paid_date.strftime('%d %b %Y') }}{% endif %}
+      {%- if e.claim_paid_date %} · paid {{ e.claim_paid_date|day }}{% endif %}
       {%- if not e.claim_provider_id %} <small>(claimed at the provider)</small>{% endif %}
       {%- if e.pay %}<br><span class="pay pay-{{ e.pay.state }}">{{ {'paid': 'Reimbursed in full', 'part': 'Part paid: ' ~ (e.pay.gap|money) ~ ' to come', 'unpaid': 'Awaiting payment', 'over': 'Overpaid by ' ~ (e.pay.gap|money)}[e.pay.state] }}</span>{% endif %}
       {%- elif e.state == 'ready' -%}Ready to claim

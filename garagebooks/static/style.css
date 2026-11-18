@@ -176,6 +176,9 @@ col.c-amount { width: var(--col-amount, 13%); }
 col.c-odo { width: var(--col-odo, 13%); }
 col.c-inv { width: var(--col-inv, 10%); }
 col.c-act { width: var(--col-act, 8%); }
+col.c-claim { width: var(--col-claim, 22%); }
+[data-view=rows] .list table.history-table { min-width: 0; }
+.flag { color: var(--bad, #b3261e); font-weight: 600; }
 [data-view=rows] .list th { position: relative; }
 .col-resize { position: absolute; top: 0; right: -.6rem; width: 1.2rem; height: 100%; z-index: 1; cursor: col-resize; touch-action: none; }
 .col-resize::after { content: ""; position: absolute; left: 50%; top: 28%; height: 44%; width: 2px; margin-left: -1px;
@@ -419,6 +422,5 @@ a.claim-link { font-weight: 600; }
 .provider-status[data-state=signed_out] strong, .provider-status[data-state=unreachable] { color: var(--bad, #b3261e); }
 td .muted { color: var(--muted); }
 #claims-filter { margin-bottom: 1.5rem; }
-col.c-claim { width: 22%; }
 .pay-paid { color: var(--good); }
 .pay-part, .pay-over { color: var(--bad, #b3261e); }

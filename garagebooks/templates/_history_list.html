@@ -1,0 +1,27 @@
+{# The provider's history, in the same rows-or-tiles system as the expense list: the same cell classes (so the
+   tiles layout, the column widths and the date format are shared), one row per transaction. #}
+{% if transactions %}
+<div class="card list"><div class="table-wrap">
+<table class="history-table">
+  <colgroup><col class="c-date"><col class="c-cat"><col class="c-vendor"><col class="c-amount"><col class="c-claim"></colgroup>
+  <thead><tr><th>Date</th><th>Car</th><th>What</th><th class="num">Amount</th><th>Expense</th></tr></thead>
+  <tbody>
+  {% for t in transactions %}
+  <tr data-tx="{{ t.provider_id }}" data-match="{{ 'per-km' if t.kind == 'per_km_charging' else ('matched' if t.expense_id else 'unmatched') }}">
+    <td class="date" data-label="Date">{{ t.occurred_on|day }}</td>
+    <td class="cat" data-label="Car">{% if t.car_name %}<span class="chip hue-{{ t.car_id % 10 }}">{{ t.car_name }}</span>{% else %}–{% endif %}</td>
+    <td class="vendor" data-label="What" title="{{ t.description or t.type or '' }}">{{ t.description or t.type or '–' }}{% if t.payee %} · {{ t.payee }}{% endif %}</td>
+    <td class="num amount{{ ' credit' if t.amount < 0 }}" data-label="Amount">{{ t.amount|money }}</td>
+    <td class="claim-state" data-label="Expense">
+      {{ t.status or '–' }}{% if t.reference %} · {{ t.reference }}{% endif %}<br>
+      {%- if t.expense_id %}<a href="{{ url_for('edit', expense_id=t.expense_id) }}">{{ t.expense_category }}{% if t.expense_vendor %} · {{ t.expense_vendor }}{% endif %}</a>
+      {%- elif t.kind == 'per_km_charging' %}<span class="muted">Per-km charging: no expense needed</span>
+      {%- else %}<span class="flag">No matching expense</span>{% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table></div></div>
+{% else %}
+<p class="empty">{% if synced %}No provider transactions match.{% else %}Nothing yet: choose Sync provider history.{% endif %}</p>
+{% endif %}

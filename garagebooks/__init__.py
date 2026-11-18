@@ -299,7 +299,10 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
 
     @app.template_filter("day")
     def day(value):
-        return value.astimezone(ZoneInfo(tz)).strftime("%d %b %Y")
+        """A date as the lists show it: a timestamp in the app's time zone, or a plain date as it is."""
+        if isinstance(value, datetime):
+            value = value.astimezone(ZoneInfo(tz))
+        return value.strftime("%d %b %Y")
 
     static_versions = {}
 
