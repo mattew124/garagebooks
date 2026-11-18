@@ -656,3 +656,33 @@ $fn$;
 DROP TRIGGER IF EXISTS log_change ON garagebooks.expense_claim;
 CREATE TRIGGER log_change AFTER INSERT OR UPDATE OR DELETE ON garagebooks.expense_claim
     FOR EACH ROW EXECUTE FUNCTION garagebooks.log_change();
+
+-- ---- the provider's transaction history (a cache) ----------------------------------------------------
+-- What the claims connector says the provider paid or deducted, kept here so the Claims page can be filtered
+-- and still opens when the connector is down. Rebuilt from the connector on every sync: nothing here is the
+-- owner's own data, and it is not in the change history. (provider, provider_id) is the connector's own key.
+-- kind: 'claim_payment' (a claim paid out), 'per_km_charging' (an electric car's cents-per-km home charging
+-- reimbursement: it has no expense, and needs none) or 'other'. claim_provider_id is the claim it belongs to,
+-- when the connector knows. expense_id is the expense it was matched to by the app (never by hand); deleting
+-- the expense leaves the transaction unmatched.
+CREATE TABLE IF NOT EXISTS garagebooks.provider_transaction (
+    id                bigserial PRIMARY KEY,
+    provider          text NOT NULL CHECK (btrim(provider) <> ''),
+    provider_id       text NOT NULL CHECK (btrim(provider_id) <> ''),
+    occurred_on       date NOT NULL,
+    amount            numeric(12, 2) NOT NULL,
+    gst               numeric(12, 2),
+    type              text,
+    status            text,
+    description       text,
+    payee             text,
+    kind              text NOT NULL DEFAULT 'other' CHECK (kind IN ('claim_payment', 'per_km_charging', 'other')),
+    car_id            integer REFERENCES garagebooks.car (id) ON DELETE SET NULL,
+    claim_provider_id text,
+    reference         text,
+    expense_id        bigint REFERENCES garagebooks.expense (id) ON DELETE SET NULL,
+    synced_at         timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (provider, provider_id)
+);
+CREATE INDEX IF NOT EXISTS provider_transaction_on_idx ON garagebooks.provider_transaction (occurred_on DESC);
+CREATE INDEX IF NOT EXISTS provider_transaction_expense_idx ON garagebooks.provider_transaction (expense_id);

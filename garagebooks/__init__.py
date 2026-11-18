@@ -76,6 +76,8 @@ MESSAGES = {
     "learned_deleted": "Removed.",
     "claim_forgotten": "Claim record removed. The provider still has the claim, if one was made there.",
     "claims_refreshed": "Claim statuses refreshed.",
+    "claims_synced": "Provider history synced.",
+    "claims_signin": "Sign in to the provider first, then sync again.",
     "claims_none": "No claims are waiting on the provider: nothing to refresh.",
 }
 
@@ -1276,7 +1278,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         spans = db.lease_spans(conn)
         return {r["id"] for r in rows
                 if claim_lib.claimable(r["budget_pool"], r["amount"], claim_lib.covered(spans, r["car_id"], local_day(r)),
-                                       r["claim_provider_id"] is not None)}
+                                       r["claim_provider_id"] is not None or r["provider_matched"])}
 
     def claim_summary(conn, row):
         """What the edit page says about claiming this expense: the claim recorded, or whether it can be claimed."""
@@ -1290,12 +1292,12 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         if row["claim_provider_id"]:
             ref = f" (reference {row['claim_reference']})" if row["claim_reference"] else ""
             return f"This expense has already been claimed{ref}."
-        if row["budget_pool"] not in claim_lib.CLAIMABLE_POOLS:
-            return "This expense can't be claimed: its category isn't one of the provider's claimable budget pools."
-        if row["amount"] <= 0:
-            return "This expense can't be claimed: only money spent can be claimed, not a refund."
-        if not claim_lib.covered(db.lease_spans(conn), row["car_id"], local_day(row)):
-            return "This expense can't be claimed: no lease for this car covers its date."
+        if row["provider_matched"]:
+            return "This expense has already been claimed: a payment from the provider matches it."
+        reason = claim_lib.block_reason(row["budget_pool"], row["amount"],
+                                        claim_lib.covered(db.lease_spans(conn), row["car_id"], local_day(row)))
+        if reason:
+            return f"This expense can't be claimed: {reason}."
         return None
 
     def claim_invoice(row):
@@ -1411,6 +1413,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 "status": claim_lib.text(reply.body.get("status"), 200),
                 "amount": claim_lib.number(reply.body.get("amount")) or row["amount"],
                 "gst": claim_lib.number(fields.get("gst")), "fields": json.dumps(fields) if fields else None})
+            db.rematch_transactions(conn, tz, claim_lib.match_by_figures)
         log.info("expense %s claimed (provider reference recorded: %s)", expense_id, bool(reference))
         if not stored:
             log.warning("expense %s was claimed twice at once; the first record was kept", expense_id)
@@ -1422,20 +1425,80 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         with connect() as conn:
             if not db.delete_claim(conn, expense_id):
                 abort(404)
+            db.rematch_transactions(conn, tz, claim_lib.match_by_figures)
         log.info("claim record for expense %s removed", expense_id)
         return redirect(url_for("index", **list_view(), msg="claim_forgotten"), 303)
+
+    def claims_filters():
+        """What the claims page is being filtered by, from the address: only valid values are kept."""
+        def day(name):
+            try:
+                return date.fromisoformat(request.args.get(name, ""))
+            except ValueError:
+                return None
+        return {"car": request.args.get("car", type=int) or None, "from": day("from"), "to": day("to"),
+                "state": request.args.get("state") if request.args.get("state") in ("claimed", "matched", "ready", "blocked") else None,
+                "tx": request.args.get("tx") if request.args.get("tx") in ("matched", "unmatched", "per_km") else None}
+
+    def provider_status():
+        """-> {state: 'signed_in'|'signed_out'|'unreachable', provider, message}: asked of the connector now, briefly."""
+        try:
+            reply = connector.health(timeout=5)
+        except claim_lib.ConnectorError as exc:
+            return {"state": "unreachable", "provider": None, "message": exc.user_message}
+        if not reply.ok:
+            return {"state": "unreachable", "provider": None, "message": reply.error}
+        saved = reply.body.get("session_saved") is True
+        return {"state": "signed_in" if saved else "signed_out", "message": None,
+                "provider": claim_lib.text(reply.body.get("provider"), 100)}
 
     @app.get("/claims")
     def claims_page():
         need_connector()
+        f = claims_filters()
         with connect() as conn:
-            rows = db.claim_rows(conn)
-            expenses = db.list_expenses(conn)
-            todo_ids = claim_open_ids(conn, expenses)
+            cars = db.cars(conn)
+            if f["car"] not in {c["id"] for c in cars}:
+                f["car"] = None
+            spans = db.lease_spans(conn)
+            expenses = []
+            for e in db.ledger_expenses(conn, f["car"], f["from"], f["to"], tz):
+                state, reason = claim_lib.expense_state(
+                    e["budget_pool"], e["amount"], claim_lib.covered(spans, e["car_id"], local_day(e)),
+                    e["claim_provider_id"] is not None, e["provider_matched"])
+                if f["state"] in (None, state):
+                    expenses.append({**e, "state": state, "reason": reason and reason[0].upper() + reason[1:]})
+            transactions = db.transaction_rows(conn, f["car"], f["from"], f["to"], f["tx"])
+            synced = db.last_synced(conn)
+        status = provider_status()
         message = MESSAGES.get(request.args.get("msg", ""))
         problem = request.args.get("problem", "")[:300] if request.args.get("msg") == "claims_problem" else None
-        return render_template("claims.html", claims=rows, todo=[e for e in expenses if e["id"] in todo_ids],
-                               message=message, problem=problem)
+        return render_template("claims.html", expenses=expenses, transactions=transactions, cars=cars, f=f,
+                               synced=synced, status=status, message=message, problem=problem,
+                               signin=status["state"] == "signed_out" or request.args.get("msg") == "claims_signin")
+
+    @app.post("/claims/sync")
+    def claims_sync():
+        """Fetch the provider's transaction history through the connector, keep it, and line it up with the expenses."""
+        need_connector()
+        with connect() as conn:
+            cars = [{"id": c["id"], "name": c["name"], "make": c["make"], "model": c["model"]} for c in db.cars(conn)]
+        try:
+            reply = connector.transactions(cars)
+        except claim_lib.ConnectorError as exc:
+            return redirect(url_for("claims_page", msg="claims_problem", problem=exc.user_message), 303)
+        if reply.needs_signin:
+            return redirect(url_for("claims_page", msg="claims_signin"), 303)
+        if not reply.ok:
+            return redirect(url_for("claims_page", msg="claims_problem", problem=reply.error), 303)
+        car_ids = {c["id"] for c in cars}
+        items = reply.body.get("transactions")
+        rows = [r for r in (claim_lib.clean_transaction(i, car_ids)
+                            for i in (items if isinstance(items, list) else [])[:claim_lib.MAX_TRANSACTIONS]) if r]
+        with connect() as conn:
+            db.save_transactions(conn, claim_lib.text(reply.body.get("provider"), 100) or "Claims connector", rows)
+            db.rematch_transactions(conn, tz, claim_lib.match_by_figures)
+        return redirect(url_for("claims_page", msg="claims_synced"), 303)
 
     @app.post("/claims/refresh")
     def claims_refresh():

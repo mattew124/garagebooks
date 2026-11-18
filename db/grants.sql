@@ -38,3 +38,5 @@ GRANT SELECT ON garagebooks.reminder_due TO :"app_role";
 GRANT SELECT, INSERT ON garagebooks.change_log TO :"app_role";
 -- Claims sent to the salary packaging provider's connector, one per expense.
 GRANT SELECT, INSERT, UPDATE, DELETE ON garagebooks.expense_claim TO :"app_role";
+-- The provider's transaction history, cached from the claims connector.
+GRANT SELECT, INSERT, UPDATE, DELETE ON garagebooks.provider_transaction TO :"app_role";

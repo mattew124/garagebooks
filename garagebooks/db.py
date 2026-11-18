@@ -286,7 +286,8 @@ _SELECT = """
            e.invoice_url, e.invoice_path,
            c.make AS car_make, c.model AS car_model, cat.budget_pool,
            cl.provider AS claim_provider, cl.provider_id AS claim_provider_id, cl.reference AS claim_reference,
-           cl.status AS claim_status, cl.paid_date AS claim_paid_date, cl.approved_amount AS claim_approved
+           cl.status AS claim_status, cl.paid_date AS claim_paid_date, cl.approved_amount AS claim_approved,
+           EXISTS (SELECT 1 FROM garagebooks.provider_transaction pt WHERE pt.expense_id = e.id) AS provider_matched
     FROM garagebooks.expense e
     JOIN garagebooks.car c ON c.id = e.car_id
     JOIN garagebooks.category cat ON cat.id = e.category_id
@@ -761,3 +762,84 @@ def touch_claim_check(conn, provider_id):
 
 def delete_claim(conn, expense_id):
     return conn.execute("DELETE FROM garagebooks.expense_claim WHERE expense_id = %s", (expense_id,)).rowcount == 1
+
+
+# ---- the provider's transaction history (a cache of what the claims connector says) ---------------------------
+
+def ledger_expenses(conn, car_id=None, start=None, end=None, tz="UTC"):
+    """Every expense, newest first, for the claims page: optionally one car's, and between two local dates."""
+    where, params = [], []
+    if car_id:
+        where.append("e.car_id = %s")
+        params.append(car_id)
+    if start:
+        where.append("(e.occurred_at AT TIME ZONE %s)::date >= %s")
+        params += [tz, start]
+    if end:
+        where.append("(e.occurred_at AT TIME ZONE %s)::date <= %s")
+        params += [tz, end]
+    clause = ("WHERE " + " AND ".join(where)) if where else ""
+    return conn.execute(f"{_SELECT} {clause} ORDER BY e.occurred_at DESC, e.id DESC", params).fetchall()
+
+
+TRANSACTION_COLUMNS = ("provider_id", "occurred_on", "amount", "gst", "type", "status", "description", "payee",
+                       "kind", "car_id", "claim_provider_id", "reference")
+
+
+def save_transactions(conn, provider, rows):
+    """Add or refresh the cached rows (the connector's key is what makes a row the same one). -> how many."""
+    for row in rows:
+        conn.execute(
+            f"INSERT INTO garagebooks.provider_transaction (provider, {', '.join(TRANSACTION_COLUMNS)}) "
+            f"VALUES (%(provider)s, {', '.join('%(' + c + ')s' for c in TRANSACTION_COLUMNS)}) "
+            "ON CONFLICT (provider, provider_id) DO UPDATE SET "
+            + ", ".join(f"{c} = EXCLUDED.{c}" for c in TRANSACTION_COLUMNS[1:]) + ", synced_at = now()",
+            {**row, "provider": provider})
+    return len(rows)
+
+
+def rematch_transactions(conn, tz, match_by_figures):
+    """Work out again which expense each cached transaction belongs to: first the claim made from here (the
+    connector names the claim), then a single payment that fits a single expense by car, day and amount. A per-km
+    charging payment never matches: it has no expense."""
+    conn.execute("UPDATE garagebooks.provider_transaction SET expense_id = NULL WHERE expense_id IS NOT NULL")
+    conn.execute(
+        "UPDATE garagebooks.provider_transaction pt SET expense_id = cl.expense_id FROM garagebooks.expense_claim cl"
+        " WHERE pt.claim_provider_id = cl.provider_id AND pt.kind <> 'per_km_charging'")
+    payments = [(r["id"], r["car_id"], r["occurred_on"], r["amount"]) for r in conn.execute(
+        "SELECT id, car_id, occurred_on, amount FROM garagebooks.provider_transaction"
+        " WHERE expense_id IS NULL AND kind = 'claim_payment'")]
+    free = [(r["id"], r["car_id"], r["day"], r["amount"]) for r in conn.execute(
+        "SELECT e.id, e.car_id, (e.occurred_at AT TIME ZONE %s)::date AS day, e.amount FROM garagebooks.expense e"
+        " WHERE NOT EXISTS (SELECT 1 FROM garagebooks.expense_claim cl WHERE cl.expense_id = e.id)"
+        " AND NOT EXISTS (SELECT 1 FROM garagebooks.provider_transaction pt WHERE pt.expense_id = e.id)", (tz,))]
+    for tid, eid in match_by_figures(payments, free).items():
+        conn.execute("UPDATE garagebooks.provider_transaction SET expense_id = %s WHERE id = %s", (eid, tid))
+
+
+def transaction_rows(conn, car_id=None, start=None, end=None, match=None):
+    """The cached transactions, newest first, with the expense each belongs to. `match`: 'matched', 'unmatched'
+    (a payment with no expense, per-km charging excepted) or 'per_km'."""
+    where, params = [], []
+    if car_id:
+        where.append("pt.car_id = %s")
+        params.append(car_id)
+    if start:
+        where.append("pt.occurred_on >= %s")
+        params.append(start)
+    if end:
+        where.append("pt.occurred_on <= %s")
+        params.append(end)
+    where.append({"matched": "pt.expense_id IS NOT NULL",
+                  "unmatched": "pt.expense_id IS NULL AND pt.kind <> 'per_km_charging'",
+                  "per_km": "pt.kind = 'per_km_charging'"}.get(match, "true"))
+    return conn.execute(
+        "SELECT pt.*, c.name AS car_name, cat.name AS expense_category, e.vendor AS expense_vendor"
+        " FROM garagebooks.provider_transaction pt LEFT JOIN garagebooks.car c ON c.id = pt.car_id"
+        " LEFT JOIN garagebooks.expense e ON e.id = pt.expense_id"
+        " LEFT JOIN garagebooks.category cat ON cat.id = e.category_id"
+        f" WHERE {' AND '.join(where)} ORDER BY pt.occurred_on DESC, pt.id DESC", params).fetchall()
+
+
+def last_synced(conn):
+    return conn.execute("SELECT max(synced_at) AS at FROM garagebooks.provider_transaction").fetchone()["at"]

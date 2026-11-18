@@ -11,7 +11,9 @@ import logging
 import os
 import urllib.error
 import urllib.request
+from collections import defaultdict
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 from urllib.parse import urlparse
 
@@ -107,7 +109,7 @@ class Connector:
                                      "Check CLAIMS_CONNECTOR_TOKEN_FILE.") from exc
         return (self.token or "").strip()
 
-    def call(self, method, path, body=None):
+    def call(self, method, path, body=None, timeout=None):
         """-> Reply. A connector's own error answers (4xx, 5xx with a JSON body) are replies, not exceptions."""
         data = None if body is None else json.dumps(body).encode()
         request = urllib.request.Request(  # nosec B310 - the URL is the installer's own CLAIMS_CONNECTOR_URL, http(s) only
@@ -115,7 +117,7 @@ class Connector:
             headers={"Authorization": f"Bearer {self._token()}", "Accept": "application/json",
                      **({"Content-Type": "application/json"} if data is not None else {})})
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as resp:  # nosec B310 - see above
+            with urllib.request.urlopen(request, timeout=timeout or self.timeout) as resp:  # nosec B310 - see above
                 status, raw = resp.status, resp.read()
         except urllib.error.HTTPError as exc:
             status, raw = exc.code, exc.read()
@@ -138,8 +140,13 @@ class Connector:
             raise ConnectorError("The claims connector refused the token. Check CLAIMS_CONNECTOR_TOKEN.")
         return Reply(status, parsed)
 
-    def health(self):
-        return self.call("GET", "health")
+    def health(self, timeout=None):
+        return self.call("GET", "health", timeout=timeout)
+
+    def transactions(self, cars):
+        """The provider's transaction history (the connector chooses the period), with each row's car given as
+        one of `cars` ([{id, name, make, model}]) where the connector can tell."""
+        return self.call("POST", "transactions", {"cars": list(cars)})
 
     def preview(self, expense, invoice):
         return self.call("POST", "preview", {"expense": expense, "invoice": invoice})
@@ -210,3 +217,72 @@ def clean_fields(form):
         else:
             out["gst"] = str(amount)
     return out, errors
+
+
+# ---- the claims page: where each expense stands, and the provider's transaction history ----------------------
+
+TRANSACTION_KINDS = ("claim_payment", "per_km_charging", "other")
+MAX_TRANSACTIONS = 20000
+
+
+def block_reason(pool, amount, has_lease):
+    """Why an expense can't be claimed (a phrase), or None. Whether it was claimed already is not asked here."""
+    if pool not in CLAIMABLE_POOLS:
+        return "its category isn't one of the provider's claimable budget pools"
+    if amount is None or amount <= 0:
+        return "only money spent can be claimed, not a refund"
+    if not has_lease:
+        return "no lease for this car covers its date"
+    return None
+
+
+def expense_state(pool, amount, has_lease, claimed, provider_matched):
+    """-> (state, reason): 'claimed' (claimed from here), 'matched' (the provider's history has a payment for
+    it), 'ready' (can be claimed now) or 'blocked' (with the reason)."""
+    if claimed:
+        return "claimed", None
+    if provider_matched:
+        return "matched", None
+    reason = block_reason(pool, amount, has_lease)
+    return ("blocked", reason) if reason else ("ready", None)
+
+
+def clean_transaction(item, car_ids):
+    """One row of the connector's transaction list as the cache keeps it, or None if it is unusable.
+    `car_ids` is the set of car ids the app has: a car the app doesn't know is dropped to None."""
+    if not isinstance(item, dict):
+        return None
+    provider_id = text(item.get("provider_id"), 200)
+    amount = number(item.get("amount"))
+    try:
+        day = date.fromisoformat(str(item.get("date"))[:10])
+    except ValueError:
+        return None
+    if not provider_id or amount is None:
+        return None
+    car_id = item.get("car_id")
+    return {"provider_id": provider_id, "occurred_on": day, "amount": amount, "gst": number(item.get("gst")),
+            "type": text(item.get("type"), 200), "status": text(item.get("status"), 200),
+            "description": text(item.get("description"), 500), "payee": text(item.get("payee"), 300),
+            "kind": item.get("kind") if item.get("kind") in TRANSACTION_KINDS else "other",
+            "car_id": car_id if isinstance(car_id, int) and not isinstance(car_id, bool) and car_id in car_ids else None,
+            "claim_provider_id": text(item.get("claim_provider_id"), 200), "reference": text(item.get("reference"), 200)}
+
+
+def match_by_figures(transactions, expenses):
+    """Pair each claim payment with the one expense it must be: the same car (or, if the connector couldn't say,
+    any car), local day and amount, when exactly one payment and exactly one expense fit. Anything ambiguous is
+    left alone. `transactions`: [(id, car_id, day, amount)], `expenses`: [(id, car_id, day, amount)] -> {tx id: expense id}."""
+    by_expense = defaultdict(list)
+    for eid, car, day, amount in expenses:
+        by_expense[(car, day, abs(amount))].append(eid)
+        by_expense[(None, day, abs(amount))].append(eid)
+    by_payment = defaultdict(list)
+    for tid, car, day, amount in transactions:
+        by_payment[(car, day, abs(amount))].append(tid)
+    out = {}
+    for (car, day, amount), tids in by_payment.items():
+        eids = by_expense.get((car, day, amount), [])
+        if len(tids) == 1 and len(eids) == 1:
+            out[tids[0]] = eids[0]
+    return out

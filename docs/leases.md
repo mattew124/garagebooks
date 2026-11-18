@@ -161,12 +161,19 @@ larger than 10 MB.
 
 <!-- screenshot: claim-page - The Claim page: what will be claimed, the amounts and the Submit claim button -->
 
-<!-- screenshot: claims-page - The Claims page: claimed expenses with their status, and the ones still to claim -->
+<!-- screenshot: claims-page - The Claims page: the provider status, every expense with where it stands, and the provider history lined up with them -->
 
-**Claims** in the header lists every claim with its reference, status, approved amount and the date it
-was paid, and the expenses still waiting to be claimed. **Refresh claim statuses** asks the provider
-about each claim that isn't yet marked paid. A claimed expense can't be deleted by mistake: remove its
-claim record first (Edit, then **Remove claim record**), which doesn't cancel the claim at the provider.
+**Claims** in the header is the ledger. At the top it says whether the provider is signed in (with **Sign in**
+when it isn't) and when its history was last synced. Below, **Expenses** lists every expense with where it
+stands: claimed (with its reference, status, approved amount and paid date), paid by the provider (matched to its
+history), ready to claim, or why it can't be claimed (its category has no claimable pool, it is a refund, or no
+lease covers its date). **Provider history** is what the provider's own transaction list says, with the
+expense each payment belongs to, or **No matching expense**. The one exception is an electric car's per-kilometre
+charging reimbursement, which has no expense. Filter both by car, dates, an expense's state and whether a payment
+has an expense. **Sync provider history** fetches the history through the connector and keeps a copy in the
+database; **Refresh claim statuses** asks the provider about each claim that isn't yet marked paid. A claimed
+expense can't be deleted by mistake: remove its claim record first (Edit, then **Remove claim record**), which
+doesn't cancel the claim at the provider.
 
 ## Reminders for registration and the end of the lease
 

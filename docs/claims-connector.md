@@ -153,6 +153,34 @@ Body: `{"provider_ids": ["98765", "98766"]}`. 200:
 `paid_date` is `YYYY-MM-DD` or `null`. A claim with `"status": null` keeps whatever the app already
 knew.
 
+### `POST /v1/transactions`
+
+Body: `{"cars": [{"id": 1, "name": "Family car", "make": "Example", "model": "Model A"}], "since": "2026-01-01", "to": "2026-11-18"}`.
+`cars` is every car GarageBooks has, so the connector can say which one a transaction belongs to; `since` and
+`to` are optional (`YYYY-MM-DD`), and a connector picks its own period, such as three years, when they are
+missing. 200:
+
+```json
+{"ok": true, "provider": "Example Salary Packaging", "transactions": [
+  {"provider_id": "a1b2#1", "date": "2026-11-14", "amount": 1100.00, "gst": 100.00, "type": "Reimbursement",
+   "status": "Paid", "description": "Tyres", "payee": "Example Tyres Pty Ltd", "kind": "claim_payment",
+   "car_id": 1, "claim_provider_id": "98765", "reference": "REF0001"}
+]}
+```
+
+- `provider_id` is the connector's stable key for the transaction: the same transaction always has the same
+  one, so a repeat sync updates it instead of adding it twice.
+- `kind` is `claim_payment` (the provider paid a claim out), `per_km_charging` (an electric car's
+  cents-per-kilometre home charging reimbursement, which is paid with no expense behind it) or `other`
+  (anything else the provider shows, such as a salary deduction).
+- `car_id` is one of the `cars` ids, or `null` when the connector can't tell. `claim_provider_id` and
+  `reference` name the claim a payment belongs to, or are `null`.
+- `provider` is optional, and names the provider on the cached rows.
+
+Errors are as for preview (409 `needs: signin` offers the sign-in below). GarageBooks keeps what it is told
+in its own database (`garagebooks.provider_transaction`), so its page can be filtered and still opens when the
+connector is down.
+
 ### Signing in
 
 A provider that asks for a code (a text message, say) needs a person. The app drives it like this:
@@ -182,9 +210,19 @@ with `provider_id` `98765` and reference `REF0001`, and the app records them aga
 shows `REF0001` beside it. A week later, **Refresh claim statuses** calls `POST /v1/status` with
 `{"provider_ids": ["98765"]}` and learns the claim is paid.
 
+## How the history lines up with expenses
+
+After each sync the app matches every `claim_payment` to an expense: first by `claim_provider_id`, when the
+payment belongs to a claim made from GarageBooks, then by the same car, day (in `APP_TZ`) and amount when exactly
+one payment and exactly one unclaimed expense fit. A payment that fits two expenses stays unmatched rather
+than guessed at. An expense matched this way is treated as already claimed and isn't offered for claiming
+again. A `per_km_charging` payment is the one kind that needs no expense, and is never flagged. Every other
+payment without an expense is shown as **No matching expense**, so a claim made on the provider's own site, or an
+expense not yet entered, stands out.
+
 ## What the app stores
 
-One row per claimed expense, in `garagebooks.expense_claim`: the provider's name, `provider_id`,
+The history cache is described above. One row per claimed expense, in `garagebooks.expense_claim`: the provider's name, `provider_id`,
 reference, status, the amount, the fields typed, when it was submitted, and later the approved amount,
 paid date and when the status was last checked. The row appears in the [change history](reference.md#change-history).
 A claimed expense can't be deleted until you remove its claim record (on its Edit page), which asks

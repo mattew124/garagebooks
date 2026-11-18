@@ -1618,11 +1618,32 @@ def test_claims(page):
             "paid_date": today.isoformat()}}})
         # (the reset above also forgot the stand-in's own counter, so P0001 is the only id it knows)
         page.goto(UI + "claims")
-        expect(page.locator("tbody tr", has_text="REF0001")).to_have_count(1)
+        expect(page.locator("tr[data-expense]", has_text="REF0001")).to_have_count(1)
         page.get_by_role("button", name="Refresh claim statuses").click()
         page.wait_for_url(re.compile(r"msg=claims_refreshed"))
-        expect(page.locator("tbody tr", has_text="REF0001")).to_contain_text("Paid")
-        expect(page.locator("tbody tr", has_text="REF0001")).to_contain_text("$1,100.00")
+        expect(page.locator("tr[data-expense]", has_text="REF0001")).to_contain_text("Paid")
+        expect(page.locator("tr[data-expense]", has_text="REF0001")).to_contain_text("$1,100.00")
+
+        # The ledger: the provider's status, its history synced into the database and lined up with the expenses.
+        fake_connector(page, {"signed_in": True, "transactions": [
+            {"provider_id": "T1", "date": today.isoformat(), "amount": 1100.0, "gst": 100.0, "type": "Reimbursement",
+             "status": "Paid", "description": "Tyres", "payee": "Example Tyres Pty Ltd", "kind": "claim_payment",
+             "car_id": None, "claim_provider_id": "P0001", "reference": "REF0001"},
+            {"provider_id": "K1", "date": today.isoformat(), "amount": 42.0, "gst": 0, "type": "Reimbursement",
+             "status": "Paid", "description": "Home charging per km", "payee": None, "kind": "per_km_charging",
+             "car_id": None, "claim_provider_id": None, "reference": None},
+            {"provider_id": "T9", "date": today.isoformat(), "amount": 7.0, "gst": 0, "type": "Reimbursement",
+             "status": "Paid", "description": "Example parking", "payee": None, "kind": "claim_payment",
+             "car_id": None, "claim_provider_id": None, "reference": None}]})
+        page.goto(UI + "claims")
+        expect(page.locator("#provider-status")).to_contain_text("Signed in")
+        page.get_by_role("button", name="Sync provider history").click()
+        page.wait_for_url(re.compile(r"msg=claims_synced"))
+        expect(page.locator("tr[data-tx=K1]")).to_contain_text("no expense needed")
+        expect(page.locator("tr[data-tx=T9]")).to_contain_text("No matching expense")
+        expect(page.locator("tr[data-tx=T1] a")).to_have_count(1)             # matched through its claim
+        page.goto(UI + "claims?tx=unmatched")
+        expect(page.locator("tr[data-tx]")).to_have_count(1)
         shot(page, "claims-page")
 
         # The record can be removed (the claim stays with the provider), after which it can be claimed again.

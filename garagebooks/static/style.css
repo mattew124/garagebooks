@@ -411,3 +411,10 @@ a.claim-link { font-weight: 600; }
 .claim-figures { display: grid; grid-template-columns: max-content 1fr; gap: .25rem 1rem; margin: 0; }
 .claim-figures dt { color: var(--muted); }
 .claim-figures dd { margin: 0; font-variant-numeric: tabular-nums; }
+
+/* The Claims page: the provider's sign-in status, and the muted reason an expense can't be claimed. */
+.provider-status { margin: 0 0 1rem; }
+.provider-status small { margin-left: .5rem; color: var(--muted); }
+.provider-status[data-state=signed_out] strong, .provider-status[data-state=unreachable] { color: var(--bad, #b3261e); }
+td .muted { color: var(--muted); }
+#claims-filter { margin-bottom: 1.5rem; }

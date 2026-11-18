@@ -1,54 +1,103 @@
 {% extends "base.html" %}
 {% block title %}Claims{% endblock %}
 {% block content %}
+<script src="{{ url_for('static', filename='claims.js') }}" defer></script>
 <div class="page-head">
   <h1>Claims</h1>
-  <form method="post" action="{{ url_for('claims_refresh') }}" data-claim-wait>
-    <button type="submit" class="secondary">Refresh claim statuses</button>
-  </form>
+  <div class="row">
+    <form method="post" action="{{ url_for('claims_sync') }}" data-claim-wait>
+      <button type="submit" class="secondary">Sync provider history</button>
+    </form>
+    <form method="post" action="{{ url_for('claims_refresh') }}" data-claim-wait>
+      <button type="submit" class="secondary">Refresh claim statuses</button>
+    </form>
+  </div>
 </div>
+{% if message %}<p class="notice" role="status">{{ message }}</p>{% endif %}
 {% if problem %}<p class="notice bad" role="alert">{{ problem }}</p>{% endif %}
 <p class="claim-wait" role="status" hidden>Asking the provider. This can take a minute.</p>
-<h2 class="card-title">Claimed</h2>
-{% if claims %}
+
+<p id="provider-status" class="provider-status" data-state="{{ status.state }}">
+  {% if status.state == 'signed_in' %}<strong>{{ status.provider or 'The provider' }}</strong>: Signed in.
+  {% elif status.state == 'signed_out' %}<strong>{{ status.provider or 'The provider' }}</strong>: Not signed in.
+  {% else %}The claims connector can't be reached: {{ status.message }}{% endif %}
+  {% if synced %}<small>History last synced {{ synced|when }}.</small>
+  {% else %}<small>History not synced yet.</small>{% endif %}
+</p>
+{% if signin %}{% set retry_url = url_for('claims_page') %}{% include "_claim_signin.html" %}{% endif %}
+
+<form method="get" action="{{ url_for('claims_page') }}" class="card filter" id="claims-filter">
+  <label><span class="label">Car</span>
+    <select name="car"><option value="">All cars</option>
+      {% for c in cars %}<option value="{{ c.id }}"{% if f.car == c.id %} selected{% endif %}>{{ c.name }}</option>{% endfor %}
+    </select></label>
+  <label><span class="label">From</span><input type="date" name="from" value="{{ f['from'] or '' }}"></label>
+  <label><span class="label">To</span><input type="date" name="to" value="{{ f.to or '' }}"></label>
+  <label><span class="label">Expenses</span>
+    <select name="state"><option value="">All</option>
+      {% for key, label in (('ready', 'Ready to claim'), ('claimed', 'Claimed'), ('matched', 'Paid by the provider'), ('blocked', "Can't be claimed")) %}
+      <option value="{{ key }}"{% if f.state == key %} selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select></label>
+  <label><span class="label">Provider history</span>
+    <select name="tx"><option value="">All</option>
+      {% for key, label in (('unmatched', 'No matching expense'), ('matched', 'Matched to an expense'), ('per_km', 'Per-km charging')) %}
+      <option value="{{ key }}"{% if f.tx == key %} selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select></label>
+  <button type="submit" class="secondary">Filter</button>
+  <a href="{{ url_for('claims_page') }}">Clear</a>
+</form>
+
+<h2 class="card-title">Expenses</h2>
+{% if expenses %}
 <div class="card list"><div class="table-wrap">
 <table>
-  <thead><tr><th>Date</th><th>Expense</th><th class="num">Amount</th><th>Reference</th><th>Status</th><th class="num">Approved</th><th>Paid</th><th></th></tr></thead>
+  <thead><tr><th>Date</th><th>Car</th><th>Expense</th><th class="num">Amount</th><th>Where it stands</th><th></th></tr></thead>
   <tbody>
-  {% for c in claims %}
-  <tr>
-    <td data-label="Date">{{ c.occurred_at|day }}</td>
-    <td data-label="Expense">{{ c.category }}{% if c.vendor %} · {{ c.vendor }}{% endif %}</td>
-    <td class="num" data-label="Amount">{{ c.amount|money }}</td>
-    <td data-label="Reference">{{ c.reference or '–' }}</td>
-    <td data-label="Status">{{ c.status or '–' }}</td>
-    <td class="num" data-label="Approved">{{ c.approved_amount|money if c.approved_amount is not none else '–' }}</td>
-    <td data-label="Paid">{{ c.paid_date.strftime('%d %b %Y') if c.paid_date else '–' }}</td>
-    <td class="actions"><a href="{{ url_for('edit', expense_id=c.expense_id) }}">Open</a></td>
-  </tr>
-  {% endfor %}
-  </tbody>
-</table></div></div>
-{% else %}
-<p class="empty">Nothing has been claimed yet.</p>
-{% endif %}
-<h2 class="card-title">Still to claim</h2>
-{% if todo %}
-<div class="card list"><div class="table-wrap">
-<table>
-  <thead><tr><th>Date</th><th>Expense</th><th class="num">Amount</th><th></th></tr></thead>
-  <tbody>
-  {% for e in todo %}
-  <tr>
+  {% for e in expenses %}
+  <tr data-expense="{{ e.id }}" data-state="{{ e.state }}">
     <td data-label="Date">{{ e.occurred_at|day }}</td>
+    <td data-label="Car">{{ e.car_name }}</td>
     <td data-label="Expense">{{ e.category }}{% if e.vendor %} · {{ e.vendor }}{% endif %}</td>
     <td class="num" data-label="Amount">{{ e.amount|money }}</td>
-    <td class="actions"><a class="claim-link" href="{{ url_for('claim_page', expense_id=e.id) }}">Claim</a></td>
+    <td data-label="Where it stands">
+      {% if e.state == 'claimed' %}Claimed{% if e.claim_reference %} · {{ e.claim_reference }}{% endif %} · {{ e.claim_status or 'Submitted' }}{% if e.claim_approved is not none %} · approved {{ e.claim_approved|money }}{% endif %}{% if e.claim_paid_date %} · paid {{ e.claim_paid_date.strftime('%d %b %Y') }}{% endif %}
+      {% elif e.state == 'matched' %}Paid by the provider (matched to its history)
+      {% elif e.state == 'ready' %}Ready to claim
+      {% else %}<span class="muted">{{ e.reason }}</span>{% endif %}
+    </td>
+    <td class="actions">{% if e.state == 'ready' %}<a class="claim-link" href="{{ url_for('claim_page', expense_id=e.id) }}">Claim</a>
+      {% else %}<a href="{{ url_for('edit', expense_id=e.id) }}">Open</a>{% endif %}</td>
   </tr>
   {% endfor %}
   </tbody>
 </table></div></div>
 {% else %}
-<p class="empty">No expenses are waiting to be claimed.</p>
+<p class="empty">No expenses match.</p>
+{% endif %}
+
+<h2 class="card-title">Provider history</h2>
+{% if transactions %}
+<div class="card list"><div class="table-wrap">
+<table>
+  <thead><tr><th>Date</th><th>Car</th><th>What</th><th class="num">Amount</th><th>Status</th><th>Expense</th></tr></thead>
+  <tbody>
+  {% for t in transactions %}
+  <tr data-tx="{{ t.provider_id }}" data-match="{{ 'per-km' if t.kind == 'per_km_charging' else ('matched' if t.expense_id else 'unmatched') }}">
+    <td data-label="Date">{{ t.occurred_on.strftime('%d %b %Y') }}</td>
+    <td data-label="Car">{{ t.car_name or '–' }}</td>
+    <td data-label="What">{{ t.description or t.type or '–' }}{% if t.payee %} · {{ t.payee }}{% endif %}{% if t.reference %} <small>({{ t.reference }})</small>{% endif %}</td>
+    <td class="num" data-label="Amount">{{ t.amount|money }}</td>
+    <td data-label="Status">{{ t.status or '–' }}</td>
+    <td data-label="Expense">
+      {% if t.expense_id %}<a href="{{ url_for('edit', expense_id=t.expense_id) }}">{{ t.expense_category }}{% if t.expense_vendor %} · {{ t.expense_vendor }}{% endif %}</a>
+      {% elif t.kind == 'per_km_charging' %}<span class="muted">Per-km charging: no expense needed</span>
+      {% else %}<span class="notice bad">No matching expense</span>{% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table></div></div>
+{% else %}
+<p class="empty">{% if synced %}No provider transactions match.{% else %}Nothing yet: choose Sync provider history.{% endif %}</p>
 {% endif %}
 {% endblock %}
