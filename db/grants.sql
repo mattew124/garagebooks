@@ -40,3 +40,4 @@ GRANT SELECT, INSERT ON garagebooks.change_log TO :"app_role";
 GRANT SELECT, INSERT, UPDATE, DELETE ON garagebooks.expense_claim TO :"app_role";
 -- The provider's transaction history, cached from the claims connector.
 GRANT SELECT, INSERT, UPDATE, DELETE ON garagebooks.provider_transaction TO :"app_role";
+GRANT SELECT, INSERT, UPDATE, DELETE ON garagebooks.provider_claim TO :"app_role";

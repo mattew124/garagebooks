@@ -1,0 +1,97 @@
+<div class="card list">
+<form class="filter" method="get" data-live>
+  <label><span class="label">Category</span>
+    <select name="category" data-autosubmit>
+      <option value="">All categories</option>
+      {% for c in categories %}
+      <option value="{{ c.id }}" {{ 'selected' if c.id == category_id }}>{{ c.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  {% if cars|length > 1 %}
+  <label><span class="label">Car</span>
+    <select name="car" data-autosubmit>
+      <option value="">All cars</option>
+      {% for c in cars %}<option value="{{ c.id }}" {{ 'selected' if c.id == view.get('car') }}>{{ c.name }}</option>{% endfor %}
+    </select>
+  </label>
+  {% endif %}
+  <label><span class="label">From</span><input type="date" name="from" value="{{ view.get('from', '') }}" data-autosubmit></label>
+  <label><span class="label">To</span><input type="date" name="to" value="{{ view.get('to', '') }}" data-autosubmit></label>
+  {% if claims_enabled %}
+  <label><span class="label">Claims</span>
+    <select name="state" data-autosubmit>
+      <option value="">All</option>
+      {% for key, label in (('ready', 'Ready to claim'), ('claimed', 'Claimed'), ('unpaid', 'Claimed, not yet reimbursed in full'), ('blocked', "Can't be claimed")) %}
+      <option value="{{ key }}" {{ 'selected' if view.get('state') == key }}>{{ label }}</option>{% endfor %}
+    </select>
+  </label>
+  {% endif %}
+  <label><span class="label">Sort by</span>
+    <select name="sort" data-autosubmit>
+      {% for key, label in sorts.items() %}<option value="{{ key }}" {{ 'selected' if key == view.get('sort', 'date') }}>{{ label }}</option>{% endfor %}
+    </select>
+  </label>
+  <label><span class="label">Order</span>
+    <select name="dir" data-autosubmit>
+      <option value="desc" {{ 'selected' if view.get('dir', 'desc') == 'desc' }}>Descending</option>
+      <option value="asc" {{ 'selected' if view.get('dir') == 'asc' }}>Ascending</option>
+    </select>
+  </label>
+  <noscript><button>Apply</button></noscript>
+  <div class="view-toggle" role="group" aria-label="Layout">
+    <button type="button" data-view-choice="rows" aria-pressed="false">Rows</button>
+    <button type="button" data-view-choice="tiles" aria-pressed="false">Tiles</button>
+  </div>
+</form>
+
+{% if expenses %}
+<div class="table-wrap">
+<table>
+  <colgroup><col class="c-date"><col class="c-cat"><col class="c-vendor"><col class="c-amount"><col class="c-odo"><col class="c-inv">{% if ledger %}<col class="c-claim">{% endif %}<col class="c-act"></colgroup>
+  <thead><tr>
+    {% for key, label, cls in (('date', 'Date', ''), ('category', 'Category', ''), ('vendor', 'Vendor', ''),
+                               ('amount', 'Amount', 'num'), ('odometer', 'Odometer', 'num')) %}
+    {% set on = view.get('sort', 'date') == key %}
+    <th class="{{ cls }}" {% if on %}aria-sort="{{ 'ascending' if view.get('dir', 'desc') == 'asc' else 'descending' }}"{% endif %}>
+      <a class="sort" href="{{ sort_link(key) }}">{{ label }}{% if on %} <span aria-hidden="true">{{ '▲' if view.get('dir', 'desc') == 'asc' else '▼' }}</span>{% endif %}</a></th>
+    {% endfor %}
+    <th>Invoice</th>{% if ledger %}<th>Claim</th>{% endif %}<th></th>
+  </tr></thead>
+  <tbody>
+  {% for e in expenses %}
+  <tr data-expense="{{ e.id }}"{% if ledger %} data-state="{{ e.state }}"{% endif %}>
+    <td class="date" data-label="Date" title="{{ e.occurred_at|when }}">{{ e.occurred_at|day }}</td>
+    <td class="cat" data-label="Category"><span class="chip hue-{{ e.category_id % 10 }}">{{ e.category }}</span>{% if e.car_name and expenses|map(attribute='car_id')|unique|list|length > 1 %} <small>({{ e.car_name }})</small>{% endif %}</td>
+    <td class="vendor" data-label="Vendor" title="{{ e.vendor or '' }}">{{ e.vendor or '–' }}</td>
+    <td class="num amount{{ ' credit' if e.amount < 0 }}" data-label="Amount">{{ e.amount|money }}</td>
+    <td class="num odo" data-label="Odometer">{{ e.odometer_km|km }}</td>
+    {# A stored invoice is served by the app; anything else is the link that was pasted or uploaded. #}
+    {% set inv = url_for('invoice', expense_id=e.id) if e.invoice_path else e.invoice_url %}
+    <td class="inv{{ '' if inv else ' none' }}" data-label="Invoice">{% if inv %}<a href="{{ inv }}" target="_blank" rel="noopener noreferrer">PDF ↗</a>{% else %}–{% endif %}</td>
+    {% if ledger %}
+    <td class="claim-state" data-label="Claim">
+      {%- if e.state == 'claimed' -%}
+      {{ e.claim_reference or (e.pay.reference if e.pay) or 'Claimed' }}{% if e.claim_status %} · {{ e.claim_status }}{% endif %}
+      {%- if e.claim_approved is not none %} · approved {{ e.claim_approved|money }}{% endif %}
+      {%- if e.claim_paid_date %} · paid {{ e.claim_paid_date.strftime('%d %b %Y') }}{% endif %}
+      {%- if not e.claim_provider_id %} <small>(claimed at the provider)</small>{% endif %}
+      {%- if e.pay %}<br><span class="pay pay-{{ e.pay.state }}">{{ {'paid': 'Reimbursed in full', 'part': 'Part paid: ' ~ (e.pay.gap|money) ~ ' to come', 'unpaid': 'Awaiting payment', 'over': 'Overpaid by ' ~ (e.pay.gap|money)}[e.pay.state] }}</span>{% endif %}
+      {%- elif e.state == 'ready' -%}Ready to claim
+      {%- else -%}<span class="muted">{{ e.reason }}</span>{% endif -%}
+    </td>
+    {% endif %}
+    <td class="actions"><a href="{{ url_for('edit', expense_id=e.id, **view) }}">Edit</a>
+      {%- if claims_enabled %}
+      {%- if e.id in claim_open %} <a class="claim-link" href="{{ url_for('claim_page', expense_id=e.id, **view) }}">Claim</a>
+      {%- elif e.claim_provider_id and not ledger %} <a class="badge claim-badge" href="{{ url_for('edit', expense_id=e.id, **view) }}" title="Claimed: see the claim">{{ e.claim_reference or 'Claimed' }}{% if e.claim_status %} · {{ e.claim_status }}{% endif %}{% if e.claim_paid_date %} · paid {{ e.claim_paid_date.strftime('%d %b') }}{% endif %}</a>{% endif %}
+      {%- endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<p class="empty">No expenses yet. <a href="{{ url_for('new') }}">Add the first one</a> — the initial purchase is a good start.</p>
+{% endif %}
+</div>

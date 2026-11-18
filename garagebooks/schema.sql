@@ -686,3 +686,27 @@ CREATE TABLE IF NOT EXISTS garagebooks.provider_transaction (
 );
 CREATE INDEX IF NOT EXISTS provider_transaction_on_idx ON garagebooks.provider_transaction (occurred_on DESC);
 CREATE INDEX IF NOT EXISTS provider_transaction_expense_idx ON garagebooks.provider_transaction (expense_id);
+
+-- The provider's claim history (also a cache): one row per claim line, so a payment, which may be only part of
+-- a claim, can be checked against what the claim should have paid. expense_id is the expense the line is for:
+-- the claim made from here (expense_claim.provider_id), else the one expense with the line's car, day and
+-- amount. Both are set by the app, and a deleted expense leaves the line unmatched.
+CREATE TABLE IF NOT EXISTS garagebooks.provider_claim (
+    id              bigserial PRIMARY KEY,
+    provider        text NOT NULL CHECK (btrim(provider) <> ''),
+    provider_id     text NOT NULL CHECK (btrim(provider_id) <> ''),
+    line_id         text NOT NULL DEFAULT '',
+    reference       text,
+    occurred_on     date NOT NULL,
+    amount          numeric(12, 2) NOT NULL,
+    approved_amount numeric(12, 2),
+    status          text,
+    paid_date       date,
+    description     text,
+    car_id          integer REFERENCES garagebooks.car (id) ON DELETE SET NULL,
+    expense_id      bigint REFERENCES garagebooks.expense (id) ON DELETE SET NULL,
+    synced_at       timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (provider, provider_id, line_id)
+);
+CREATE INDEX IF NOT EXISTS provider_claim_expense_idx ON garagebooks.provider_claim (expense_id);
+CREATE INDEX IF NOT EXISTS provider_claim_claim_idx ON garagebooks.provider_claim (provider_id);

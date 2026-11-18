@@ -287,7 +287,7 @@ _SELECT = """
            c.make AS car_make, c.model AS car_model, cat.budget_pool,
            cl.provider AS claim_provider, cl.provider_id AS claim_provider_id, cl.reference AS claim_reference,
            cl.status AS claim_status, cl.paid_date AS claim_paid_date, cl.approved_amount AS claim_approved,
-           EXISTS (SELECT 1 FROM garagebooks.provider_transaction pt WHERE pt.expense_id = e.id) AS provider_matched
+           EXISTS (SELECT 1 FROM garagebooks.provider_claim pc WHERE pc.expense_id = e.id) AS provider_matched
     FROM garagebooks.expense e
     JOIN garagebooks.car c ON c.id = e.car_id
     JOIN garagebooks.category cat ON cat.id = e.category_id
@@ -300,28 +300,40 @@ SORTS = {"date": "e.occurred_at", "category": "cat.name", "vendor": "NULLIF(lowe
          "amount": "e.amount", "odometer": "e.odometer_km"}
 
 
-def list_expenses(conn, category_id=None, limit=1000, sort="date", direction="desc"):
-    """Sorted either way. Blank vendors and odometers always come last, whichever way round."""
+def _filters(category_id, car_id, start, end, tz):
+    where, params = [], []
+    if category_id:
+        where.append("e.category_id = %s")
+        params.append(category_id)
+    if car_id:
+        where.append("e.car_id = %s")
+        params.append(car_id)
+    if start:
+        where.append("(e.occurred_at AT TIME ZONE %s)::date >= %s")
+        params += [tz, start]
+    if end:
+        where.append("(e.occurred_at AT TIME ZONE %s)::date <= %s")
+        params += [tz, end]
+    return ("WHERE " + " AND ".join(where)) if where else "", params
+
+
+def list_expenses(conn, category_id=None, limit=1000, sort="date", direction="desc", car_id=None, start=None, end=None,
+                  tz="UTC"):
+    """Sorted either way, optionally one category's or one car's and between two local dates. Blank vendors and
+    odometers always come last, whichever way round."""
     order = SORTS.get(sort, SORTS["date"])
     way = "ASC" if direction == "asc" else "DESC"
-    where, params = "", []
-    if category_id:
-        where = "WHERE e.category_id = %s"
-        params.append(category_id)
+    where, params = _filters(category_id, car_id, start, end, tz)
     params.append(limit)
     return conn.execute(
         f"{_SELECT} {where} ORDER BY {order} {way} NULLS LAST, e.occurred_at {way}, e.id {way} LIMIT %s", params
     ).fetchall()
 
 
-def totals(conn, category_id=None):
-    where, params = "", []
-    if category_id:
-        where = "WHERE category_id = %s"
-        params.append(category_id)
+def totals(conn, category_id=None, car_id=None, start=None, end=None, tz="UTC"):
+    where, params = _filters(category_id, car_id, start, end, tz)
     return conn.execute(
-        f"SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS n FROM garagebooks.expense {where}",
-        params,
+        f"SELECT COALESCE(SUM(e.amount), 0) AS total, COUNT(*) AS n FROM garagebooks.expense e {where}", params,
     ).fetchone()
 
 
@@ -766,28 +778,15 @@ def delete_claim(conn, expense_id):
 
 # ---- the provider's transaction history (a cache of what the claims connector says) ---------------------------
 
-def ledger_expenses(conn, car_id=None, start=None, end=None, tz="UTC"):
-    """Every expense, newest first, for the claims page: optionally one car's, and between two local dates."""
-    where, params = [], []
-    if car_id:
-        where.append("e.car_id = %s")
-        params.append(car_id)
-    if start:
-        where.append("(e.occurred_at AT TIME ZONE %s)::date >= %s")
-        params += [tz, start]
-    if end:
-        where.append("(e.occurred_at AT TIME ZONE %s)::date <= %s")
-        params += [tz, end]
-    clause = ("WHERE " + " AND ".join(where)) if where else ""
-    return conn.execute(f"{_SELECT} {clause} ORDER BY e.occurred_at DESC, e.id DESC", params).fetchall()
-
-
 TRANSACTION_COLUMNS = ("provider_id", "occurred_on", "amount", "gst", "type", "status", "description", "payee",
                        "kind", "car_id", "claim_provider_id", "reference")
 
 
 def save_transactions(conn, provider, rows):
-    """Add or refresh the cached rows (the connector's key is what makes a row the same one). -> how many."""
+    """Make the cache the connector's current answer: add or refresh these rows (its key is what makes a row the
+    same one) and drop any the connector no longer reports, or reported under another name. -> how many."""
+    conn.execute("DELETE FROM garagebooks.provider_transaction WHERE provider <> %s OR NOT (provider_id = ANY(%s))",
+                 (provider, [r["provider_id"] for r in rows]))
     for row in rows:
         conn.execute(
             f"INSERT INTO garagebooks.provider_transaction (provider, {', '.join(TRANSACTION_COLUMNS)}) "
@@ -798,23 +797,65 @@ def save_transactions(conn, provider, rows):
     return len(rows)
 
 
-def rematch_transactions(conn, tz, match_by_figures):
-    """Work out again which expense each cached transaction belongs to: first the claim made from here (the
-    connector names the claim), then a single payment that fits a single expense by car, day and amount. A per-km
+CLAIM_LINE_COLUMNS = ("reference", "occurred_on", "amount", "approved_amount", "status", "paid_date", "description", "car_id")
+
+
+def save_claim_lines(conn, provider, rows):
+    """Make the cached claim lines the connector's current answer (like save_transactions). -> how many."""
+    conn.execute("DELETE FROM garagebooks.provider_claim WHERE provider <> %s"
+                 " OR NOT ((provider_id, line_id) IN (SELECT * FROM unnest(%s::text[], %s::text[])))",
+                 (provider, [r["provider_id"] for r in rows], [r["line_id"] for r in rows]))
+    for row in rows:
+        conn.execute(
+            f"INSERT INTO garagebooks.provider_claim (provider, provider_id, line_id, {', '.join(CLAIM_LINE_COLUMNS)}) "
+            f"VALUES (%(provider)s, %(provider_id)s, %(line_id)s, {', '.join('%(' + c + ')s' for c in CLAIM_LINE_COLUMNS)}) "
+            "ON CONFLICT (provider, provider_id, line_id) DO UPDATE SET "
+            + ", ".join(f"{c} = EXCLUDED.{c}" for c in CLAIM_LINE_COLUMNS) + ", synced_at = now()",
+            {**row, "provider": provider})
+    return len(rows)
+
+
+def rematch(conn, tz, match_by_figures):
+    """Line the provider's history up with the expenses again. A claim line belongs to the expense claimed from
+    here with its claim id, else to the one expense with its car, day and amount (when exactly one line and one
+    expense fit). A payment then follows its claim to that expense, so a part payment is no problem. A per-km
     charging payment never matches: it has no expense."""
+    conn.execute("UPDATE garagebooks.provider_claim SET expense_id = NULL WHERE expense_id IS NOT NULL")
     conn.execute("UPDATE garagebooks.provider_transaction SET expense_id = NULL WHERE expense_id IS NOT NULL")
     conn.execute(
-        "UPDATE garagebooks.provider_transaction pt SET expense_id = cl.expense_id FROM garagebooks.expense_claim cl"
-        " WHERE pt.claim_provider_id = cl.provider_id AND pt.kind <> 'per_km_charging'")
-    payments = [(r["id"], r["car_id"], r["occurred_on"], r["amount"]) for r in conn.execute(
-        "SELECT id, car_id, occurred_on, amount FROM garagebooks.provider_transaction"
-        " WHERE expense_id IS NULL AND kind = 'claim_payment'")]
+        "UPDATE garagebooks.provider_claim pc SET expense_id = cl.expense_id FROM garagebooks.expense_claim cl"
+        " WHERE pc.provider_id = cl.provider_id")
+    lines = [(r["id"], r["car_id"], r["occurred_on"], r["amount"]) for r in conn.execute(
+        "SELECT id, car_id, occurred_on, amount FROM garagebooks.provider_claim WHERE expense_id IS NULL")]
     free = [(r["id"], r["car_id"], r["day"], r["amount"]) for r in conn.execute(
         "SELECT e.id, e.car_id, (e.occurred_at AT TIME ZONE %s)::date AS day, e.amount FROM garagebooks.expense e"
         " WHERE NOT EXISTS (SELECT 1 FROM garagebooks.expense_claim cl WHERE cl.expense_id = e.id)"
-        " AND NOT EXISTS (SELECT 1 FROM garagebooks.provider_transaction pt WHERE pt.expense_id = e.id)", (tz,))]
-    for tid, eid in match_by_figures(payments, free).items():
-        conn.execute("UPDATE garagebooks.provider_transaction SET expense_id = %s WHERE id = %s", (eid, tid))
+        " AND NOT EXISTS (SELECT 1 FROM garagebooks.provider_claim pc WHERE pc.expense_id = e.id)", (tz,))]
+    for lid, eid in match_by_figures(lines, free).items():
+        conn.execute("UPDATE garagebooks.provider_claim SET expense_id = %s WHERE id = %s", (eid, lid))
+    conn.execute(
+        "UPDATE garagebooks.provider_transaction pt SET expense_id = x.expense_id FROM"
+        " (SELECT provider_id, min(expense_id) AS expense_id FROM garagebooks.provider_claim"
+        "  WHERE expense_id IS NOT NULL GROUP BY provider_id) x"
+        " WHERE x.provider_id = pt.claim_provider_id AND pt.kind <> 'per_km_charging'")
+    conn.execute(
+        "UPDATE garagebooks.provider_transaction pt SET expense_id = cl.expense_id FROM garagebooks.expense_claim cl"
+        " WHERE pt.expense_id IS NULL AND cl.provider_id = pt.claim_provider_id AND pt.kind <> 'per_km_charging'")
+
+
+def reimbursements(conn):
+    """-> {expense_id: {claim, reference, expected, received}}: for each expense with a claim in the provider's
+    history, what the whole claim should pay (the approved amounts, else the amounts claimed) and what the
+    payments in the history say was paid for it."""
+    rows = conn.execute(
+        "SELECT l.expense_id, c.provider_id AS claim, c.reference, c.expected, COALESCE(p.received, 0) AS received"
+        " FROM (SELECT DISTINCT expense_id, provider_id FROM garagebooks.provider_claim WHERE expense_id IS NOT NULL) l"
+        " JOIN (SELECT provider_id, min(reference) AS reference, sum(COALESCE(approved_amount, amount)) AS expected"
+        "       FROM garagebooks.provider_claim GROUP BY provider_id) c ON c.provider_id = l.provider_id"
+        " LEFT JOIN (SELECT claim_provider_id, sum(abs(amount)) AS received FROM garagebooks.provider_transaction"
+        "            WHERE kind = 'claim_payment' AND claim_provider_id IS NOT NULL GROUP BY claim_provider_id) p"
+        "   ON p.claim_provider_id = l.provider_id").fetchall()
+    return {r["expense_id"]: r for r in rows}
 
 
 def transaction_rows(conn, car_id=None, start=None, end=None, match=None):

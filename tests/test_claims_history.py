@@ -1,8 +1,10 @@
-"""The Claims page as a ledger: every expense with where it stands, and the provider's transaction history,
-cached in the database and lined up with the expenses. The connector is tests/fake_connector.py; all values
+"""The Claims page as a ledger: the All page's expense list with where each expense stands on claiming, and the
+provider's claim and transaction history, cached in the database. Payments are tied to claims (which may be paid
+in parts), and claims to expenses. The connector is tests/fake_connector.py; all values
 are invented. Runs on either kind of database."""
 
 import re
+from decimal import Decimal
 
 import psycopg
 import pytest
@@ -18,8 +20,15 @@ def tx(pid="T1", day="2026-11-07", amount=1200.0, kind="claim_payment", car_id=1
             "car_id": car_id, "claim_provider_id": claim, "reference": None, **extra}
 
 
-def sync(client, fake, *rows):
+def line(claim="P0001", line_id="L1", day="2026-11-07", amount=1200.0, approved=None, car_id=1, reference="REF0001", **extra):
+    return {"provider_id": claim, "reference": reference, "line_id": line_id, "date": day, "amount": amount,
+            "approved_amount": approved, "status": "Approved", "paid_date": None, "description": "Tyres",
+            "car_id": car_id, **extra}
+
+
+def sync(client, fake, *rows, claims=()):
     fake.config["transactions"] = list(rows)
+    fake.config["claims"] = list(claims)
     resp = client.post("/claims/sync", headers=ORIGIN)
     assert resp.status_code == 303, resp.data
     return resp
@@ -49,28 +58,54 @@ def test_without_a_connector_there_is_no_sync(pg, monkeypatch, tmp_path):
 
 # ---- the cache ------------------------------------------------------------------------------------------
 
-def test_a_sync_keeps_the_providers_transactions_and_does_not_repeat_them(client, admin, fake):
-    sync(client, fake, tx("T1"), tx("T2", amount=62.1, day="2026-11-09"))
-    sync(client, fake, tx("T1"), tx("T2", amount=62.1, day="2026-11-09", status="Processed"))
-    rows = stored(admin)
-    assert [r["provider_id"] for r in rows] == ["T1", "T2"] and rows[1]["status"] == "Processed"
-    assert str(rows[1]["amount"]) == "62.10" and rows[0]["synced_at"] is not None
-    assert last_call(fake, "/v1/transactions")[3]["cars"][0]["id"] == 1        # the connector is told the cars
+def last_call(fake, path):
+    return [c for c in fake.calls if c[1] == path][-1]
 
 
 def claims_made(fake):
     return [c for c in fake.calls if c[1] in ("/v1/preview", "/v1/submit")]
 
 
-def last_call(fake, path):
-    return [c for c in fake.calls if c[1] == path][-1]
+def lines(admin):
+    return admin.execute("SELECT * FROM garagebooks.provider_claim ORDER BY provider_id, line_id").fetchall()
+
+
+def test_a_sync_keeps_the_providers_history_under_its_name_and_does_not_repeat_it(client, admin, fake):
+    sync(client, fake, tx("T1"), tx("T2", amount=62.1, day="2026-11-09"), claims=[line()])
+    sync(client, fake, tx("T1"), tx("T2", amount=62.1, day="2026-11-09", status="Processed"), claims=[line(approved=1100.0)])
+    rows = stored(admin)
+    assert [r["provider_id"] for r in rows] == ["T1", "T2"] and rows[1]["status"] == "Processed"
+    assert str(rows[1]["amount"]) == "62.10" and rows[0]["provider"] == "Example Salary Packaging"
+    (claim,) = lines(admin)
+    assert claim["approved_amount"] == Decimal("1100.00") and claim["provider"] == "Example Salary Packaging"
+    assert last_call(fake, "/v1/transactions")[3]["cars"][0]["id"] == 1        # the connector is told the cars
+
+
+def test_a_connector_that_starts_naming_itself_does_not_duplicate_the_cache(client, admin, fake):
+    admin.execute("INSERT INTO garagebooks.provider_transaction (provider, provider_id, occurred_on, amount)"
+                  " VALUES ('Claims connector', 'T1', '2026-11-07', 1200)")
+    admin.execute("INSERT INTO garagebooks.provider_claim (provider, provider_id, occurred_on, amount)"
+                  " VALUES ('Claims connector', 'P0001', '2026-11-07', 1200)")
+    sync(client, fake, tx("T1"), claims=[line()])
+    assert [r["provider"] for r in stored(admin)] == ["Example Salary Packaging"]
+    assert [r["provider"] for r in lines(admin)] == ["Example Salary Packaging"]
+
+
+def test_a_sync_drops_what_the_provider_no_longer_reports(client, admin, fake):
+    sync(client, fake, tx("T1"), tx("T2", amount=5.0), claims=[line(), line("P2", line_id="L2")])
+    sync(client, fake, tx("T2", amount=5.0), claims=[line()])
+    assert [r["provider_id"] for r in stored(admin)] == ["T2"] and [c["provider_id"] for c in lines(admin)] == ["P0001"]
+    sync(client, fake)
+    assert stored(admin) == [] and lines(admin) == []
 
 
 def test_junk_rows_are_skipped_not_fatal(client, admin, fake):
     sync(client, fake, tx("T1"), {"provider_id": "", "date": "2026-01-01", "amount": 5}, {"provider_id": "T3", "date": "nope", "amount": 5},
-         {"provider_id": "T4", "date": "2026-01-01", "amount": "x"}, "text", tx("T5", kind="weird", car_id=99))
+         {"provider_id": "T4", "date": "2026-01-01", "amount": "x"}, "text", tx("T5", kind="weird", car_id=99),
+         claims=[line(), "text", {"provider_id": "", "date": "2026-01-01", "amount": 1}, line("P2", day="nope"), line("P3", car_id=99, paid_date="junk")])
     rows = {r["provider_id"]: r for r in stored(admin)}
     assert set(rows) == {"T1", "T5"} and rows["T5"]["kind"] == "other" and rows["T5"]["car_id"] is None
+    assert [c["provider_id"] for c in lines(admin)] == ["P0001", "P3"] and lines(admin)[1]["car_id"] is None
 
 
 def test_the_page_opens_from_the_cache_when_the_connector_is_down(client, admin, fake):
@@ -94,85 +129,112 @@ def test_a_connector_error_on_sync_is_shown_and_keeps_the_cache(client, admin, f
     assert "site is down" in page and len(stored(admin)) == 1
 
 
-# ---- lining transactions up with expenses ---------------------------------------------------------------
+# ---- claims to expenses, payments to claims -------------------------------------------------------------
 
-def test_a_transaction_follows_the_claim_made_from_the_app(client, admin, fake, tyres):
+def test_a_claim_made_from_the_app_is_the_expenses_claim_and_its_payments_follow_it(client, admin, fake, tyres):
     submit(client, tyres)                                         # the fake answers provider id P0001
-    sync(client, fake, tx("T1", amount=1199.0, day="2026-11-12", claim="P0001"))   # a different date and amount
+    sync(client, fake, tx("T1", amount=600.0, day="2026-11-12", claim="P0001"), claims=[line(amount=1199.0, day="2026-11-08")])
+    assert lines(admin)[0]["expense_id"] == tyres and stored(admin)[0]["expense_id"] == tyres
+    assert f"/{tyres}/edit" in row_of(said(client.get("/claims")), "tx", "T1")
+
+
+def test_a_payment_follows_its_claim_even_before_the_claim_history_is_synced(client, admin, fake, tyres):
+    submit(client, tyres)
+    sync(client, fake, tx("T1", amount=600.0, claim="P0001"))
     assert stored(admin)[0]["expense_id"] == tyres
-    page = said(client.get("/claims"))
-    assert f'/{tyres}/edit' in row_of(page, "tx", "T1")
 
 
-def test_a_payment_matches_one_expense_by_car_date_and_amount(client, admin, fake):
+def test_a_claim_made_at_the_provider_matches_one_expense_by_car_day_and_amount(client, admin, fake):
     lease(admin)
     a = expense(admin, amount="1200.00")
     b = expense(admin, amount="80.00", at="2026-11-08 04:05+00")
-    sync(client, fake, tx("T1"), tx("T2", amount=80.0, day="2026-11-08"), tx("T3", amount=77.0, day="2026-11-08"))
-    got = {r["provider_id"]: r["expense_id"] for r in stored(admin)}
-    assert got == {"T1": a, "T2": b, "T3": None}
+    sync(client, fake, tx("T1", claim="P1"), claims=[line("P1"), line("P2", amount=80.0, day="2026-11-08"),
+                                                       line("P3", amount=77.0, day="2026-11-08")])
+    got = {c["provider_id"]: c["expense_id"] for c in lines(admin)}
+    assert got == {"P1": a, "P2": b, "P3": None} and stored(admin)[0]["expense_id"] == a
 
 
-def test_a_payment_that_fits_two_expenses_is_left_unmatched(client, admin, fake):
+def test_a_claim_line_that_fits_two_expenses_is_left_unmatched(client, admin, fake):
     lease(admin)
     expense(admin, amount="80.00")
     expense(admin, amount="80.00")
-    sync(client, fake, tx("T1", amount=80.0))
-    assert stored(admin)[0]["expense_id"] is None
+    sync(client, fake, claims=[line(amount=80.0)])
+    assert lines(admin)[0]["expense_id"] is None
 
 
 def test_another_cars_expense_is_never_a_match(client, admin, fake):
     second_car(admin)
     expense(admin, car=2)
-    sync(client, fake, tx("T1", car_id=1))
-    assert stored(admin)[0]["expense_id"] is None
-
-
-def test_only_claim_payments_match_by_amount(client, admin, fake):
-    lease(admin)
-    expense(admin)
-    sync(client, fake, tx("T1", kind="other"))
-    assert stored(admin)[0]["expense_id"] is None
+    sync(client, fake, claims=[line(car_id=1)])
+    assert lines(admin)[0]["expense_id"] is None
 
 
 def test_per_km_charging_needs_no_expense_and_is_not_flagged(client, admin, fake):
     lease(admin)
     sync(client, fake, tx("K1", kind="per_km_charging", amount=42.0), tx("T9", amount=5.0))
     page = said(client.get("/claims"))
-    assert row_of(page, "match", "per-km") and "no expense needed" in row_of(page, "match", "per-km").lower()
-    assert "No matching expense" in row_of(page, "tx", "T9")
-    assert "No matching expense" not in row_of(page, "tx", "K1")
+    assert "no expense needed" in row_of(page, "match", "per-km").lower()
+    assert "No matching expense" in row_of(page, "tx", "T9") and "No matching expense" not in row_of(page, "tx", "K1")
     only = said(client.get("/claims?tx=unmatched"))
     assert row_of(only, "tx", "T9") and not row_of(only, "tx", "K1")
 
 
-def test_rematching_follows_changes_and_a_deleted_expense_frees_the_transaction(client, admin, fake):
+def test_a_deleted_expense_frees_its_claim_and_payments(client, admin, fake):
     lease(admin)
     a = expense(admin)
-    sync(client, fake, tx("T1"))
+    sync(client, fake, tx("T1", claim="P1"), claims=[line("P1")])
     assert stored(admin)[0]["expense_id"] == a
     admin.execute("DELETE FROM garagebooks.expense WHERE id = %s", (a,))
-    assert stored(admin)[0]["expense_id"] is None
+    assert stored(admin)[0]["expense_id"] is None and lines(admin)[0]["expense_id"] is None
 
 
-def test_an_expense_paid_outside_the_app_is_not_offered_for_claiming_again(client, admin, fake, tyres):
-    sync(client, fake, tx("T1"))                                   # matched by car, date and amount
+def test_an_expense_claimed_at_the_provider_is_not_offered_for_claiming_again(client, admin, fake, tyres):
+    sync(client, fake, claims=[line("P1")])
     page = said(client.get("/claims"))
-    assert row_of(page, "expense", str(tyres)).count("data-state=\"matched\"") == 1
+    assert 'data-state="claimed"' in row_of(page, "expense", str(tyres)) and "claimed at the provider" in page
     assert f"/{tyres}/claim" not in page
     assert "already" in said(client.get(f"/{tyres}/claim")).lower() and not claims_made(fake)
 
 
-def test_removing_a_claim_record_frees_its_transaction_so_the_expense_can_be_claimed_again(client, admin, fake, tyres):
+def test_removing_a_claim_record_rematches(client, admin, fake, tyres):
     submit(client, tyres)
-    sync(client, fake, tx("T1", amount=1199.0, claim="P0001"))
-    assert stored(admin)[0]["expense_id"] == tyres
+    sync(client, fake, tx("T1", amount=600.0, claim="P0001"), claims=[line(amount=1199.0, day="2026-11-08")])
+    assert lines(admin)[0]["expense_id"] == tyres
     client.post(f"/{tyres}/claim/forget", headers=ORIGIN)
-    assert stored(admin)[0]["expense_id"] is None
+    assert lines(admin)[0]["expense_id"] is None and stored(admin)[0]["expense_id"] is None
     assert f"/{tyres}/claim" in said(client.get("/claims"))
 
 
-# ---- every expense is on the page, with where it stands -------------------------------------------------
+# ---- is the claim fully reimbursed? ---------------------------------------------------------------------
+
+def pay_text(client, tyres):
+    return re.sub(r"\s+", " ", row_of(said(client.get("/claims")), "expense", str(tyres)))
+
+
+def test_part_payments_are_added_up_against_what_the_claim_should_pay(client, admin, fake, tyres):
+    submit(client, tyres)
+    claim = [line(amount=1200.0, approved=1100.0)]
+    sync(client, fake, claims=claim)
+    assert "Awaiting payment" in pay_text(client, tyres)
+    sync(client, fake, tx("T1", amount=600.0, claim="P0001"), claims=claim)
+    assert "Part paid: $500.00 to come" in pay_text(client, tyres)
+    sync(client, fake, tx("T1", amount=600.0, claim="P0001"), tx("T2", amount=500.0, day="2026-11-20", claim="P0001"), claims=claim)
+    assert "Reimbursed in full" in pay_text(client, tyres)
+    sync(client, fake, tx("T1", amount=600.0, claim="P0001"), tx("T2", amount=600.0, day="2026-11-20", claim="P0001"), claims=claim)
+    assert "Overpaid by $100.00" in pay_text(client, tyres)
+
+
+def test_the_claims_filter_finds_what_isnt_reimbursed_in_full(client, admin, fake, tyres):
+    submit(client, tyres)
+    other = expense(admin, category="Insurance", amount="900.00", at="2026-10-01 04:00+00")
+    submit(client, other)                                          # P0002
+    sync(client, fake, tx("T1", amount=900.0, claim="P0002"),
+         claims=[line(approved=1100.0), line("P0002", reference="REF0002", amount=900.0, day="2026-10-01")])
+    page = said(client.get("/claims?state=unpaid"))
+    assert row_of(page, "expense", str(tyres)) and not row_of(page, "expense", str(other))
+
+
+# ---- every expense is on the page, listed as on the All page ----------------------------------------------
 
 def test_every_expense_is_listed_with_its_state_or_the_reason_it_cant_be_claimed(client, admin, tyres):
     claimed = expense(admin, category="Insurance", amount="900.00", at="2026-10-01 04:00+00")
@@ -189,14 +251,23 @@ def test_every_expense_is_listed_with_its_state_or_the_reason_it_cant_be_claimed
         assert f"/{eid}/claim" not in row
 
 
-# ---- per car and other filters --------------------------------------------------------------------------
+def test_the_claims_page_uses_the_all_pages_list(client, admin, tyres):
+    claims_page, all_page = said(client.get("/claims")), said(client.get("/"))
+    for marker in ('class="card list"', 'class="filter"', 'name="sort"', 'a class="sort"', "data-view-choice", 'data-live'):
+        assert marker in claims_page and marker in all_page, marker
+    assert 'name="state"' in claims_page and "Claim</th>" in claims_page and "Claim</th>" not in all_page
 
-def test_the_claims_page_filters_by_car(client, admin, fake, tyres):
+
+# ---- per car and other filters, on both pages -------------------------------------------------------------
+
+def test_both_pages_filter_by_car(client, admin, fake, tyres):
     second_car(admin)
     other = expense(admin, car=2, amount="300.00")
     sync(client, fake, tx("T1"), tx("T2", amount=300.0, car_id=2))
+    for path in ("/claims?car=2", "/?car=2"):
+        page = said(client.get(path))
+        assert row_of(page, "expense", str(other)) and not row_of(page, "expense", str(tyres)), path
     page = said(client.get("/claims?car=2"))
-    assert row_of(page, "expense", str(other)) and not row_of(page, "expense", str(tyres))
     assert row_of(page, "tx", "T2") and not row_of(page, "tx", "T1")
     both = said(client.get("/claims"))
     assert row_of(both, "expense", str(tyres)) and row_of(both, "expense", str(other))
@@ -204,13 +275,13 @@ def test_the_claims_page_filters_by_car(client, admin, fake, tyres):
     assert client.get("/claims?car=abc").status_code == 200       # junk is ignored, not an error
 
 
-def test_transactions_filter_by_date_and_the_expenses_by_state(client, admin, fake, tyres):
+def test_dates_filter_both_lists_and_junk_is_ignored(client, admin, fake, tyres):
     claimed = expense(admin, category="Insurance", amount="900.00", at="2026-10-01 04:00+00")
     submit(client, claimed)
     sync(client, fake, tx("T1", day="2026-09-01"), tx("T2", day="2026-11-09", amount=5.0))
     page = said(client.get("/claims?from=2026-10-15&to=2026-12-31"))
     assert row_of(page, "tx", "T2") and not row_of(page, "tx", "T1")
-    assert row_of(page, "expense", str(tyres)) and not row_of(page, "expense", str(claimed))   # the dates filter both tables
+    assert row_of(page, "expense", str(tyres)) and not row_of(page, "expense", str(claimed))
     ready = said(client.get("/claims?state=ready"))
     assert row_of(ready, "expense", str(tyres)) and not row_of(ready, "expense", str(claimed))
     assert client.get("/claims?from=x&to=y&state=zzz&tx=zzz").status_code == 200
@@ -241,11 +312,16 @@ def test_the_restricted_role_can_use_the_cache(pg, admin):
                     " VALUES ('P', 'x', '2026-01-01', 1)")
         app.execute("UPDATE garagebooks.provider_transaction SET status = 'Paid'")
         assert app.execute("DELETE FROM garagebooks.provider_transaction").rowcount == 1
+        app.execute("INSERT INTO garagebooks.provider_claim (provider, provider_id, occurred_on, amount)"
+                    " VALUES ('P', 'c', '2026-01-01', 1)")
+        app.execute("UPDATE garagebooks.provider_claim SET status = 'Paid'")
+        assert app.execute("DELETE FROM garagebooks.provider_claim").rowcount == 1
 
 
-def test_a_transaction_is_unique_per_provider_and_key(admin):
-    q = "INSERT INTO garagebooks.provider_transaction (provider, provider_id, occurred_on, amount) VALUES ('P', 'x', '2026-01-01', 1)"
-    admin.execute(q)
-    with pytest.raises(psycopg.errors.UniqueViolation):
+def test_a_cached_row_is_unique_per_provider_and_key(admin):
+    for table in ("provider_transaction", "provider_claim"):
+        q = f"INSERT INTO garagebooks.{table} (provider, provider_id, occurred_on, amount) VALUES ('P', 'x', '2026-01-01', 1)"
         admin.execute(q)
-    admin.execute("DELETE FROM garagebooks.provider_transaction")
+        with pytest.raises(psycopg.errors.UniqueViolation):
+            admin.execute(q)
+        admin.execute(f"DELETE FROM garagebooks.{table}")

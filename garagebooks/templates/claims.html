@@ -21,61 +21,19 @@
   {% if status.state == 'signed_in' %}<strong>{{ status.provider or 'The provider' }}</strong>: Signed in.
   {% elif status.state == 'signed_out' %}<strong>{{ status.provider or 'The provider' }}</strong>: Not signed in.
   {% else %}The claims connector can't be reached: {{ status.message }}{% endif %}
-  {% if synced %}<small>History last synced {{ synced|when }}.</small>
-  {% else %}<small>History not synced yet.</small>{% endif %}
+  {% if synced %}<small>History last synced {{ synced|when }}.</small>{% else %}<small>History not synced yet.</small>{% endif %}
 </p>
 {% if signin %}{% set retry_url = url_for('claims_page') %}{% include "_claim_signin.html" %}{% endif %}
 
-<form method="get" action="{{ url_for('claims_page') }}" class="card filter" id="claims-filter">
-  <label><span class="label">Car</span>
-    <select name="car"><option value="">All cars</option>
-      {% for c in cars %}<option value="{{ c.id }}"{% if f.car == c.id %} selected{% endif %}>{{ c.name }}</option>{% endfor %}
-    </select></label>
-  <label><span class="label">From</span><input type="date" name="from" value="{{ f['from'] or '' }}"></label>
-  <label><span class="label">To</span><input type="date" name="to" value="{{ f.to or '' }}"></label>
-  <label><span class="label">Expenses</span>
-    <select name="state"><option value="">All</option>
-      {% for key, label in (('ready', 'Ready to claim'), ('claimed', 'Claimed'), ('matched', 'Paid by the provider'), ('blocked', "Can't be claimed")) %}
-      <option value="{{ key }}"{% if f.state == key %} selected{% endif %}>{{ label }}</option>{% endfor %}
-    </select></label>
-  <label><span class="label">Provider history</span>
-    <select name="tx"><option value="">All</option>
-      {% for key, label in (('unmatched', 'No matching expense'), ('matched', 'Matched to an expense'), ('per_km', 'Per-km charging')) %}
-      <option value="{{ key }}"{% if f.tx == key %} selected{% endif %}>{{ label }}</option>{% endfor %}
-    </select></label>
-  <button type="submit" class="secondary">Filter</button>
-  <a href="{{ url_for('claims_page') }}">Clear</a>
-</form>
-
-<h2 class="card-title">Expenses</h2>
-{% if expenses %}
-<div class="card list"><div class="table-wrap">
-<table>
-  <thead><tr><th>Date</th><th>Car</th><th>Expense</th><th class="num">Amount</th><th>Where it stands</th><th></th></tr></thead>
-  <tbody>
-  {% for e in expenses %}
-  <tr data-expense="{{ e.id }}" data-state="{{ e.state }}">
-    <td data-label="Date">{{ e.occurred_at|day }}</td>
-    <td data-label="Car">{{ e.car_name }}</td>
-    <td data-label="Expense">{{ e.category }}{% if e.vendor %} · {{ e.vendor }}{% endif %}</td>
-    <td class="num" data-label="Amount">{{ e.amount|money }}</td>
-    <td data-label="Where it stands">
-      {% if e.state == 'claimed' %}Claimed{% if e.claim_reference %} · {{ e.claim_reference }}{% endif %} · {{ e.claim_status or 'Submitted' }}{% if e.claim_approved is not none %} · approved {{ e.claim_approved|money }}{% endif %}{% if e.claim_paid_date %} · paid {{ e.claim_paid_date.strftime('%d %b %Y') }}{% endif %}
-      {% elif e.state == 'matched' %}Paid by the provider (matched to its history)
-      {% elif e.state == 'ready' %}Ready to claim
-      {% else %}<span class="muted">{{ e.reason }}</span>{% endif %}
-    </td>
-    <td class="actions">{% if e.state == 'ready' %}<a class="claim-link" href="{{ url_for('claim_page', expense_id=e.id) }}">Claim</a>
-      {% else %}<a href="{{ url_for('edit', expense_id=e.id) }}">Open</a>{% endif %}</td>
-  </tr>
-  {% endfor %}
-  </tbody>
-</table></div></div>
-{% else %}
-<p class="empty">No expenses match.</p>
-{% endif %}
+<p class="total"><small>{{ totals.n }} expense{{ '' if totals.n == 1 else 's' }}</small> <strong>{{ totals.total|money }}</strong></p>
+{% include "_expense_list.html" %}
 
 <h2 class="card-title">Provider history</h2>
+<p class="tx-filter">
+  {% for key, label in ((None, 'All'), ('unmatched', 'No matching expense'), ('matched', 'Matched to an expense'), ('per_km', 'Per-km charging')) %}
+  {% if key == tx %}<strong>{{ label }}</strong>{% else %}<a href="{{ tx_link(key) }}">{{ label }}</a>{% endif %}{{ ' · ' if not loop.last }}
+  {% endfor %}
+</p>
 {% if transactions %}
 <div class="card list"><div class="table-wrap">
 <table>

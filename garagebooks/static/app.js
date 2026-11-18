@@ -162,7 +162,9 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!live) return;
     live.querySelectorAll("[data-autosubmit]").forEach((el) =>
       el.addEventListener("change", (ev) => {
-        showList(location.pathname + "?" + new URLSearchParams(new FormData(live)), el.name);
+        // Blank fields (no car, no dates) stay out of the address, so plain views keep plain links.
+        const params = new URLSearchParams([...new FormData(live)].filter(([, value]) => value !== ""));
+        showList(location.pathname + "?" + params, el.name);
       }));
     document.querySelectorAll("a.sort").forEach((a) =>
       a.addEventListener("click", (ev) => {

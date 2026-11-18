@@ -1626,15 +1626,21 @@ def test_claims(page):
 
         # The ledger: the provider's status, its history synced into the database and lined up with the expenses.
         fake_connector(page, {"signed_in": True, "transactions": [
-            {"provider_id": "T1", "date": today.isoformat(), "amount": 1100.0, "gst": 100.0, "type": "Reimbursement",
+            {"provider_id": "T1", "date": today.isoformat(), "amount": 600.0, "gst": 0, "type": "Reimbursement",
              "status": "Paid", "description": "Tyres", "payee": "Example Tyres Pty Ltd", "kind": "claim_payment",
+             "car_id": None, "claim_provider_id": "P0001", "reference": "REF0001"},
+            {"provider_id": "T2", "date": today.isoformat(), "amount": 500.0, "gst": 0, "type": "Reimbursement",
+             "status": "Paid", "description": "Tyres", "payee": None, "kind": "claim_payment",
              "car_id": None, "claim_provider_id": "P0001", "reference": "REF0001"},
             {"provider_id": "K1", "date": today.isoformat(), "amount": 42.0, "gst": 0, "type": "Reimbursement",
              "status": "Paid", "description": "Home charging per km", "payee": None, "kind": "per_km_charging",
              "car_id": None, "claim_provider_id": None, "reference": None},
             {"provider_id": "T9", "date": today.isoformat(), "amount": 7.0, "gst": 0, "type": "Reimbursement",
              "status": "Paid", "description": "Example parking", "payee": None, "kind": "claim_payment",
-             "car_id": None, "claim_provider_id": None, "reference": None}]})
+             "car_id": None, "claim_provider_id": None, "reference": None}],
+            "claims": [{"provider_id": "P0001", "reference": "REF0001", "line_id": "L1", "date": today.isoformat(),
+                        "amount": 1200.0, "approved_amount": 1100.0, "status": "Approved",
+                        "paid_date": today.isoformat(), "description": "Tyres", "car_id": None}]})
         page.goto(UI + "claims")
         expect(page.locator("#provider-status")).to_contain_text("Signed in")
         page.get_by_role("button", name="Sync provider history").click()
@@ -1642,6 +1648,8 @@ def test_claims(page):
         expect(page.locator("tr[data-tx=K1]")).to_contain_text("no expense needed")
         expect(page.locator("tr[data-tx=T9]")).to_contain_text("No matching expense")
         expect(page.locator("tr[data-tx=T1] a")).to_have_count(1)             # matched through its claim
+        expect(page.locator("tr[data-tx=T2] a")).to_have_count(1)             # a part payment of the same claim
+        expect(page.locator("tr[data-expense]", has_text="REF0001")).to_contain_text("Reimbursed in full")   # $600 + $500 of $1,100
         page.goto(UI + "claims?tx=unmatched")
         expect(page.locator("tr[data-tx]")).to_have_count(1)
         shot(page, "claims-page")
@@ -1652,6 +1660,14 @@ def test_claims(page):
         page.once("dialog", lambda d: d.accept())
         page.get_by_role("button", name="Remove claim record").click()
         page.wait_for_url(re.compile(r"msg=claim_forgotten"))
+        # The provider's own history still has that claim, which matches the expense: not offered again.
+        expect(page.locator("tbody tr", has_text=MARKER).locator("a.claim-link")).to_have_count(0)
+        # Once the provider's history no longer has it (the stand-in is reset), a sync frees the expense.
+        fake_connector(page)
+        page.goto(UI + "claims")
+        page.get_by_role("button", name="Sync provider history").click()
+        page.wait_for_url(re.compile(r"msg=claims_synced"))
+        page.goto(UI)
         expect(page.locator("tbody tr", has_text=MARKER).locator("a.claim-link")).to_have_count(1)
     finally:
         try:

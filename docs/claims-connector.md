@@ -155,31 +155,44 @@ knew.
 
 ### `POST /v1/transactions`
 
-Body: `{"cars": [{"id": 1, "name": "Family car", "make": "Example", "model": "Model A"}], "since": "2026-01-01", "to": "2026-11-18"}`.
-`cars` is every car GarageBooks has, so the connector can say which one a transaction belongs to; `since` and
-`to` are optional (`YYYY-MM-DD`), and a connector picks its own period, such as three years, when they are
-missing. 200:
+The provider's history: what it paid or deducted, and the claims it holds. Body:
+`{"cars": [{"id": 1, "name": "Family car", "make": "Example", "model": "Model A"}], "since": "2026-01-01", "to": "2026-11-18"}`.
+`cars` is every car GarageBooks has, so the connector can say which one a row belongs to; `since` and `to` are
+optional (`YYYY-MM-DD`), and a connector picks its own period, such as three years, when they are missing. 200:
 
 ```json
-{"ok": true, "provider": "Example Salary Packaging", "transactions": [
-  {"provider_id": "a1b2#1", "date": "2026-11-14", "amount": 1100.00, "gst": 100.00, "type": "Reimbursement",
-   "status": "Paid", "description": "Tyres", "payee": "Example Tyres Pty Ltd", "kind": "claim_payment",
-   "car_id": 1, "claim_provider_id": "98765", "reference": "REF0001"}
-]}
+{"ok": true, "provider": "Example Salary Packaging",
+ "claims": [
+  {"provider_id": "98765", "reference": "REF0001", "line_id": "4401", "date": "2026-11-07", "amount": 1200.00,
+   "approved_amount": 1100.00, "status": "Approved", "paid_date": "2026-11-14", "description": "Tyres", "car_id": 1}
+ ],
+ "transactions": [
+  {"provider_id": "a1b2#1", "date": "2026-11-14", "amount": 600.00, "gst": 0.00, "type": "Reimbursement",
+   "status": "Paid", "description": "Tyres", "payee": null, "kind": "claim_payment", "car_id": 1,
+   "claim_provider_id": "98765", "reference": "REF0001"},
+  {"provider_id": "a1b2#2", "date": "2026-11-20", "amount": 500.00, "gst": 0.00, "type": "Reimbursement",
+   "status": "Paid", "description": "Tyres", "payee": null, "kind": "claim_payment", "car_id": 1,
+   "claim_provider_id": "98765", "reference": "REF0001"}
+ ]}
 ```
 
-- `provider_id` is the connector's stable key for the transaction: the same transaction always has the same
-  one, so a repeat sync updates it instead of adding it twice.
-- `kind` is `claim_payment` (the provider paid a claim out), `per_km_charging` (an electric car's
-  cents-per-kilometre home charging reimbursement, which is paid with no expense behind it) or `other`
-  (anything else the provider shows, such as a salary deduction).
-- `car_id` is one of the `cars` ids, or `null` when the connector can't tell. `claim_provider_id` and
-  `reference` name the claim a payment belongs to, or are `null`.
-- `provider` is optional, and names the provider on the cached rows.
+- `provider` is the provider's name, kept on the cached rows.
+- `claims` has one row per claim line (a claim of several expenses gives several rows with the same
+  `provider_id`). `amount` is what was claimed, including GST; `approved_amount` is what the provider will pay for
+  the line, or `null` if it hasn't said.
+- `transactions[].provider_id` is the connector's stable key for the transaction: the same transaction always has
+  the same one, so a repeat sync updates it instead of adding it twice.
+- `kind` is `claim_payment` (the provider paid something towards a claim), `per_km_charging` (an electric car's
+  cents-per-kilometre home charging reimbursement, which is paid with no expense behind it) or `other` (anything
+  else the provider shows, such as a salary deduction).
+- A claim is often paid in **parts**, so a payment names its claim in `claim_provider_id` (the connector works
+  that out from the provider's own data) rather than being matched to an expense by amount. A payment it can't
+  tie to one claim has `null`.
+- `car_id` is one of the `cars` ids, or `null` when the connector can't tell.
 
-Errors are as for preview (409 `needs: signin` offers the sign-in below). GarageBooks keeps what it is told
-in its own database (`garagebooks.provider_transaction`), so its page can be filtered and still opens when the
-connector is down.
+Errors are as for preview (409 `needs: signin` offers the sign-in below). Each sync replaces GarageBooks's copy with the answer (a transaction or claim the connector no longer reports is dropped). GarageBooks keeps what it is told in its
+own database (`garagebooks.provider_claim` and `garagebooks.provider_transaction`), so its page can be filtered and
+still opens when the connector is down.
 
 ### Signing in
 
@@ -212,13 +225,23 @@ shows `REF0001` beside it. A week later, **Refresh claim statuses** calls `POST 
 
 ## How the history lines up with expenses
 
-After each sync the app matches every `claim_payment` to an expense: first by `claim_provider_id`, when the
-payment belongs to a claim made from GarageBooks, then by the same car, day (in `APP_TZ`) and amount when exactly
-one payment and exactly one unclaimed expense fit. A payment that fits two expenses stays unmatched rather
-than guessed at. An expense matched this way is treated as already claimed and isn't offered for claiming
-again. A `per_km_charging` payment is the one kind that needs no expense, and is never flagged. Every other
-payment without an expense is shown as **No matching expense**, so a claim made on the provider's own site, or an
-expense not yet entered, stands out.
+After each sync the app ties everything together in the same order every time:
+
+1. **Claims to expenses.** A claim made from GarageBooks belongs to the expense it was made for (its
+   `provider_id`). Any other claim line, such as one made on the provider's own site, belongs to the one expense with
+   the same car, day (in `APP_TZ`) and amount, when exactly one line and exactly one unclaimed expense fit. Anything
+   ambiguous stays unmatched rather than guessed at. An expense with a claim is treated as claimed, and isn't offered
+   again.
+2. **Payments to expenses, through their claim.** A payment goes to its claim's expense. Several part payments on
+   one claim all go to the same expense.
+3. **Is the claim reimbursed in full?** The payments found for a claim are added up and compared with what the claim
+   should pay (the approved amounts, or the amounts claimed if none is approved yet). The expense shows
+   **Reimbursed in full**, **Part paid** with the amount still to come, **Awaiting payment**, or **Overpaid**; the
+   **Claims** filter on the list finds the ones that aren't in full.
+
+A `per_km_charging` payment is the one kind that needs no expense, and is never flagged. Every other payment that
+doesn't reach an expense is shown as **No matching expense**, so a claim made outside GarageBooks that matches no
+expense, or an expense not yet entered, stands out.
 
 ## What the app stores
 

@@ -237,14 +237,26 @@ def block_reason(pool, amount, has_lease):
 
 
 def expense_state(pool, amount, has_lease, claimed, provider_matched):
-    """-> (state, reason): 'claimed' (claimed from here), 'matched' (the provider's history has a payment for
-    it), 'ready' (can be claimed now) or 'blocked' (with the reason)."""
-    if claimed:
+    """-> (state, reason): 'claimed' (claimed from here, or the provider's claim history has it), 'ready' (can be
+    claimed now) or 'blocked' (with the reason)."""
+    if claimed or provider_matched:
         return "claimed", None
-    if provider_matched:
-        return "matched", None
     reason = block_reason(pool, amount, has_lease)
     return ("blocked", reason) if reason else ("ready", None)
+
+
+def reimbursement(expected, received):
+    """Has the provider paid a claim in full? -> (state, difference): 'paid', 'part' (received something, less than
+    expected), 'unpaid' (nothing yet) or 'over' (more than expected). A cent either way is rounding."""
+    expected, received = Decimal(expected or 0), Decimal(received or 0)
+    gap = (expected - received).quantize(Decimal("0.01"))
+    if received <= 0:
+        return "unpaid", expected
+    if gap > Decimal("0.01"):
+        return "part", gap
+    if gap < Decimal("-0.01"):
+        return "over", -gap
+    return "paid", Decimal(0)
 
 
 def clean_transaction(item, car_ids):
@@ -269,16 +281,16 @@ def clean_transaction(item, car_ids):
             "claim_provider_id": text(item.get("claim_provider_id"), 200), "reference": text(item.get("reference"), 200)}
 
 
-def match_by_figures(transactions, expenses):
-    """Pair each claim payment with the one expense it must be: the same car (or, if the connector couldn't say,
-    any car), local day and amount, when exactly one payment and exactly one expense fit. Anything ambiguous is
-    left alone. `transactions`: [(id, car_id, day, amount)], `expenses`: [(id, car_id, day, amount)] -> {tx id: expense id}."""
+def match_by_figures(lines, expenses):
+    """Pair each claim line with the one expense it must be: the same car (or, if the connector couldn't say,
+    any car), local day and amount, when exactly one line and exactly one expense fit. Anything ambiguous is
+    left alone. `lines`, `expenses`: [(id, car_id, day, amount)] -> {line id: expense id}."""
     by_expense = defaultdict(list)
     for eid, car, day, amount in expenses:
         by_expense[(car, day, abs(amount))].append(eid)
         by_expense[(None, day, abs(amount))].append(eid)
     by_payment = defaultdict(list)
-    for tid, car, day, amount in transactions:
+    for tid, car, day, amount in lines:
         by_payment[(car, day, abs(amount))].append(tid)
     out = {}
     for (car, day, amount), tids in by_payment.items():
@@ -286,3 +298,26 @@ def match_by_figures(transactions, expenses):
         if len(tids) == 1 and len(eids) == 1:
             out[tids[0]] = eids[0]
     return out
+
+
+def clean_claim_line(item, car_ids):
+    """One claim line of the connector's claim history as the cache keeps it, or None if it is unusable."""
+    if not isinstance(item, dict):
+        return None
+    provider_id = text(item.get("provider_id"), 200)
+    amount = number(item.get("amount"))
+    try:
+        day = date.fromisoformat(str(item.get("date"))[:10])
+    except ValueError:
+        return None
+    if not provider_id or amount is None:
+        return None
+    try:
+        paid = date.fromisoformat(str(item.get("paid_date"))[:10]) if item.get("paid_date") else None
+    except ValueError:
+        paid = None
+    car_id = item.get("car_id")
+    return {"provider_id": provider_id, "line_id": text(item.get("line_id"), 200) or "", "reference": text(item.get("reference"), 200),
+            "occurred_on": day, "amount": amount, "approved_amount": number(item.get("approved_amount")),
+            "status": text(item.get("status"), 200), "paid_date": paid, "description": text(item.get("description"), 500),
+            "car_id": car_id if isinstance(car_id, int) and not isinstance(car_id, bool) and car_id in car_ids else None}

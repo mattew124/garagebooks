@@ -28,6 +28,7 @@ def defaults():
         "signin": {"state": "idle"},
         "statuses": {},          # provider_id -> a status entry to answer with
         "transactions": [],      # what POST /v1/transactions answers with (rows as in docs/claims-connector.md)
+        "claims": [],            # ... and its claim history (one row per claim line)
     }
 
 
@@ -75,8 +76,8 @@ class Fake:
             if not cfg["signed_in"]:
                 return 409, {"ok": False, "error": "Not signed in to the provider.", "needs": "signin"}
             since, until = body.get("since") or "0000-00-00", body.get("to") or "9999-99-99"
-            return 200, {"ok": True, "transactions": [t for t in cfg["transactions"]
-                                                                  if not isinstance(t, dict) or since <= str(t.get("date")) <= until]}
+            keep = [t for t in cfg["transactions"] if not isinstance(t, dict) or since <= str(t.get("date")) <= until]
+            return 200, {"ok": True, "provider": PROVIDER, "transactions": keep, "claims": cfg["claims"]}
         if method == "POST" and path in ("/v1/preview", "/v1/submit"):
             return self.claim(path.rsplit("/", 1)[1], body)
         return 404, {"ok": False, "error": "no such call"}

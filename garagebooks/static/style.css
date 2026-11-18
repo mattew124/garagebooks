@@ -213,6 +213,7 @@ col.c-act { width: var(--col-act, 8%); }
 [data-view=tiles] .list td.inv { grid-area: 3 / 2; margin-top: .2rem; }
 [data-view=tiles] .list td.inv.none { display: none; }
 [data-view=tiles] .list td.actions { grid-area: 3 / 3; margin-top: .2rem; }
+[data-view=tiles] .list td.claim-state { grid-area: 4 / 1 / auto / -1; text-align: left; font-size: .85rem; margin-top: .2rem; }
 @media (min-width: 60rem) {
   [data-view=tiles] tbody { display: grid; grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr)); gap: .75rem; }
   [data-view=tiles] tr { margin-bottom: 0; }
@@ -418,3 +419,6 @@ a.claim-link { font-weight: 600; }
 .provider-status[data-state=signed_out] strong, .provider-status[data-state=unreachable] { color: var(--bad, #b3261e); }
 td .muted { color: var(--muted); }
 #claims-filter { margin-bottom: 1.5rem; }
+col.c-claim { width: 22%; }
+.pay-paid { color: var(--good); }
+.pay-part, .pay-over { color: var(--bad, #b3261e); }

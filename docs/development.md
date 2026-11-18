@@ -21,6 +21,17 @@ the `empty_db` fixture for one about a database with no TeslaMate, which then ru
 never queries TeslaMate's tables itself: it asks `garagebooks/sources.py` ("which cars?", "what was the
 odometer?", "what did charging cost?") and handles "no answer".
 
+## Reuse before you build
+
+A second page that shows something an existing page already shows uses that page's code, not a copy that
+drifts. Before writing a list, a form, a filter, a table or a query, look for the one that exists, and extend
+it so both places use it. For example, the expense list (its filters, sort links, rows and tiles, and the live
+filtering in `app.js`) is the partial `templates/_expense_list.html`, built by `list_context()` in
+`garagebooks/__init__.py`: the All page and the Claims page both render it, and a new filter (a car, say) is
+added there once and appears on both. Put a new column or state behind a flag that the partial's callers set,
+the way `ledger` adds the claim column. If the existing code can't do what you need without bending it out of
+shape, change it first, in its own commit, then use it. Reviewers will ask where the duplicate came from.
+
 ## Quality gates
 
 CI fails a pull request that does not clear these, and you can run each of them yourself first:
