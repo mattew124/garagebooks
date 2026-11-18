@@ -47,8 +47,8 @@
 
 {% if expenses %}
 <div class="table-wrap">
-<table class="expense-table">
-  <colgroup><col class="c-date"><col class="c-cat"><col class="c-vendor"><col class="c-amount"><col class="c-odo"><col class="c-inv">{% if ledger %}<col class="c-claim">{% endif %}<col class="c-act"></colgroup>
+<table class="expense-table{{ " has-claim" if claims_enabled }}">
+  <colgroup><col class="c-date"><col class="c-cat"><col class="c-vendor"><col class="c-amount"><col class="c-odo"><col class="c-inv">{% if claims_enabled %}<col class="c-claim">{% endif %}<col class="c-act"></colgroup>
   <thead><tr>
     {% for key, label, cls in (('date', 'Date', ''), ('category', 'Category', ''), ('vendor', 'Vendor', ''),
                                ('amount', 'Amount', 'num'), ('odometer', 'Odometer', 'num')) %}
@@ -56,7 +56,7 @@
     <th class="{{ cls }}" {% if on %}aria-sort="{{ 'ascending' if view.get('dir', 'desc') == 'asc' else 'descending' }}"{% endif %}>
       <a class="sort" href="{{ sort_link(key) }}">{{ label }}{% if on %} <span aria-hidden="true">{{ '▲' if view.get('dir', 'desc') == 'asc' else '▼' }}</span>{% endif %}</a></th>
     {% endfor %}
-    <th>Invoice</th>{% if ledger %}<th>Claim</th>{% endif %}<th></th>
+    <th>Invoice</th>{% if claims_enabled %}<th>Claim</th>{% endif %}<th></th>
   </tr></thead>
   <tbody>
   {% for e in expenses %}
@@ -69,23 +69,26 @@
     {# A stored invoice is served by the app; anything else is the link that was pasted or uploaded. #}
     {% set inv = url_for('invoice', expense_id=e.id) if e.invoice_path else e.invoice_url %}
     <td class="inv{{ '' if inv else ' none' }}" data-label="Invoice">{% if inv %}<a href="{{ inv }}" target="_blank" rel="noopener noreferrer">PDF ↗</a>{% else %}–{% endif %}</td>
-    {% if ledger %}
-    <td class="claim-state" data-label="Claim">
+    {# Claiming has a column of its own, so a link or a badge never squeezes the other cells (on a phone, in
+       the tiles layout, it gets a line to itself). The All page keeps it short; the Claims page says it all. #}
+    {% if claims_enabled %}
+    {% set short = not ledger and not (e.id in claim_open or e.claim_provider_id) %}
+    <td class="claim-state{{ ' none' if short }}" data-label="Claim">
+      {%- if ledger -%}
       {%- if e.state == 'claimed' -%}
       {{ e.claim_reference or (e.pay.reference if e.pay) or 'Claimed' }}{% if e.claim_status %} · {{ e.claim_status }}{% endif %}
       {%- if e.claim_approved is not none %} · approved {{ e.claim_approved|money }}{% endif %}
       {%- if e.claim_paid_date %} · paid {{ e.claim_paid_date|day }}{% endif %}
       {%- if not e.claim_provider_id %} <small>(claimed at the provider)</small>{% endif %}
       {%- if e.pay %}<br><span class="pay pay-{{ e.pay.state }}">{{ {'paid': 'Reimbursed in full', 'part': 'Part paid: ' ~ (e.pay.gap|money) ~ ' to come', 'unpaid': 'Awaiting payment', 'over': 'Overpaid by ' ~ (e.pay.gap|money)}[e.pay.state] }}</span>{% endif %}
-      {%- elif e.state == 'ready' -%}Ready to claim
+      {%- elif e.state == 'ready' -%}{% if history_synced %}Ready to claim{% else %}<span class="muted">Not checked against the provider's history yet: sync it first</span>{% endif %}
       {%- else -%}<span class="muted">{{ e.reason }}</span>{% endif -%}
+      {%- endif -%}
+      {%- if e.id in claim_open %} <a class="claim-link" href="{{ url_for('claim_page', expense_id=e.id, **view) }}">Claim</a>
+      {%- elif e.claim_provider_id and not ledger %}<a class="badge claim-badge" href="{{ url_for('edit', expense_id=e.id, **view) }}" title="Claimed: see the claim">{{ e.claim_reference or 'Claimed' }}{% if e.claim_status %} · {{ e.claim_status }}{% endif %}{% if e.claim_paid_date %} · paid {{ e.claim_paid_date|day }}{% endif %}</a>{% endif %}
     </td>
     {% endif %}
-    <td class="actions"><a href="{{ url_for('edit', expense_id=e.id, **view) }}">Edit</a>
-      {%- if claims_enabled %}
-      {%- if e.id in claim_open %} <a class="claim-link" href="{{ url_for('claim_page', expense_id=e.id, **view) }}">Claim</a>
-      {%- elif e.claim_provider_id and not ledger %} <a class="badge claim-badge" href="{{ url_for('edit', expense_id=e.id, **view) }}" title="Claimed: see the claim">{{ e.claim_reference or 'Claimed' }}{% if e.claim_status %} · {{ e.claim_status }}{% endif %}{% if e.claim_paid_date %} · paid {{ e.claim_paid_date.strftime('%d %b') }}{% endif %}</a>{% endif %}
-      {%- endif %}</td>
+    <td class="actions"><a href="{{ url_for('edit', expense_id=e.id, **view) }}">Edit</a></td>
   </tr>
   {% endfor %}
   </tbody>

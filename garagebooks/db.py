@@ -883,4 +883,7 @@ def transaction_rows(conn, car_id=None, start=None, end=None, match=None):
 
 
 def last_synced(conn):
-    return conn.execute("SELECT max(synced_at) AS at FROM garagebooks.provider_transaction").fetchone()["at"]
+    """When the provider's history was last fetched, or None if it never has been (or it was empty)."""
+    return conn.execute(
+        "SELECT max(at) AS at FROM (SELECT synced_at AS at FROM garagebooks.provider_transaction"
+        " UNION ALL SELECT synced_at FROM garagebooks.provider_claim) x").fetchone()["at"]

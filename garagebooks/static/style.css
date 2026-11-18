@@ -178,6 +178,16 @@ col.c-inv { width: var(--col-inv, 10%); }
 col.c-act { width: var(--col-act, 8%); }
 col.c-claim { width: var(--col-claim, 22%); }
 [data-view=rows] .list table.history-table { min-width: 0; }
+/* With claiming on the table has one more column: the others give up the share it takes, and it is wider to match. */
+[data-view=rows] .list table.has-claim { min-width: var(--cols-total, 72rem); }
+.has-claim col.c-date { width: var(--col-date, 11%); }
+.has-claim col.c-cat { width: var(--col-cat, 15%); }
+.has-claim col.c-vendor { width: var(--col-vendor, 16%); }
+.has-claim col.c-amount { width: var(--col-amount, 10%); }
+.has-claim col.c-odo { width: var(--col-odo, 10%); }
+.has-claim col.c-inv { width: var(--col-inv, 7%); }
+.has-claim col.c-claim { width: var(--col-claim, 24%); }
+.has-claim col.c-act { width: var(--col-act, 7%); }
 .flag { color: var(--bad, #b3261e); font-weight: 600; }
 [data-view=rows] .list th { position: relative; }
 .col-resize { position: absolute; top: 0; right: -.6rem; width: 1.2rem; height: 100%; z-index: 1; cursor: col-resize; touch-action: none; }
@@ -217,6 +227,7 @@ col.c-claim { width: var(--col-claim, 22%); }
 [data-view=tiles] .list td.inv.none { display: none; }
 [data-view=tiles] .list td.actions { grid-area: 3 / 3; margin-top: .2rem; }
 [data-view=tiles] .list td.claim-state { grid-area: 4 / 1 / auto / -1; text-align: left; font-size: .85rem; margin-top: .2rem; }
+[data-view=tiles] .list td.claim-state.none { display: none; }
 @media (min-width: 60rem) {
   [data-view=tiles] tbody { display: grid; grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr)); gap: .75rem; }
   [data-view=tiles] tr { margin-bottom: 0; }

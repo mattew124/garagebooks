@@ -236,6 +236,16 @@ def test_the_claims_filter_finds_what_isnt_reimbursed_in_full(client, admin, fak
 
 # ---- every expense is on the page, listed as on the All page ----------------------------------------------
 
+def test_before_the_history_is_synced_an_expense_is_not_called_ready(client, admin, fake, tyres):
+    """It may well have been claimed at the provider already: the page says it hasn't checked, not that it is ready."""
+    page = said(client.get("/claims"))
+    assert "Not checked against the provider" in row_of(page, "expense", str(tyres)) and "Ready to claim" not in row_of(page, "expense", str(tyres))
+    assert f"/{tyres}/claim" in page                              # the connector's preview still warns of a repeat
+    sync(client, fake)                                            # an answer with nothing in it: nothing is claimed there
+    sync(client, fake, tx("T9", amount=5.0))
+    assert "Ready to claim" in row_of(said(client.get("/claims")), "expense", str(tyres))
+
+
 def test_every_expense_is_listed_with_its_state_or_the_reason_it_cant_be_claimed(client, admin, tyres):
     claimed = expense(admin, category="Insurance", amount="900.00", at="2026-10-01 04:00+00")
     submit(client, claimed)
@@ -255,7 +265,8 @@ def test_the_claims_page_uses_the_all_pages_list(client, admin, tyres):
     claims_page, all_page = said(client.get("/claims")), said(client.get("/"))
     for marker in ('class="card list"', 'class="filter"', 'name="sort"', 'a class="sort"', "data-view-choice", 'data-live'):
         assert marker in claims_page and marker in all_page, marker
-    assert 'name="state"' in claims_page and "Claim</th>" in claims_page and "Claim</th>" not in all_page
+    assert 'name="state"' in claims_page and 'name="state"' in all_page          # the Claims filter is on both
+    assert "Where it stands" not in all_page and "Not checked against" not in all_page   # the long text is the Claims page's
 
 
 # ---- per car and other filters, on both pages -------------------------------------------------------------

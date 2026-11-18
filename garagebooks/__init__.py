@@ -652,7 +652,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             totals = {"n": len(rows), "total": sum((e["amount"] for e in rows), Decimal(0))}
         else:
             totals = db.totals(conn, category_id, car_id, start, end, tz)
-        return {"view": view, "sort_link": sort_link, "expenses": rows, "totals": totals, "claim_open": claim_open,
+        return {"view": view, "sort_link": sort_link, "expenses": rows,
+                "history_synced": connector is not None and db.last_synced(conn) is not None, "totals": totals, "claim_open": claim_open,
                 "sorts": {"date": "Date", "category": "Category", "vendor": "Vendor", "amount": "Amount",
                           "odometer": "Odometer"},
                 "categories": db.categories(conn), "cars": db.cars(conn), "category_id": category_id}

@@ -712,7 +712,8 @@ def test_list_toggle_sort_and_return(page):
     page.wait_for_url(re.compile(r"dir=asc"))
     assert amounts() == ["$10.00", "$20.00", "$30.00"], amounts()
     # on a phone the table scrolls sideways: sorting from a far column must not snap it back to the left
-    page.evaluate("document.querySelector('.table-wrap').scrollLeft = 10000")
+    # (the Odometer heading is no longer the last column, so bring it into view rather than scrolling to the end)
+    page.evaluate("document.querySelector('th a.sort[href*=odometer]').scrollIntoView({inline: 'end', block: 'nearest'})")
     far = page.evaluate("document.querySelector('.table-wrap').scrollLeft")
     assert far > 0, "rows view should scroll sideways on a phone"
     page.click("th a.sort:has-text('Odometer')")
@@ -1539,6 +1540,58 @@ def fake_connector(page, config=None):
         raise Skip(f"no stand-in claims connector on this stack ({str(exc)[:80]})") from exc
 
 
+def add_claimable_expense(page, today, amount="1200.00"):
+    """A marked car with a lease covering today, and a tyres expense on it: one the Claim link is offered for."""
+    from datetime import timedelta
+    car = add_marked_car(page)
+    car.get_by_role("link", name="Lease").click()
+    page.click("#add-lease-top")
+    page.locator("#f-financier").fill("Example Finance")
+    page.get_by_label("Lease start").fill((today - timedelta(days=30)).isoformat())
+    page.locator("#f-end_date").fill((today + timedelta(days=1065)).isoformat())
+    page.get_by_label("Term (months)").fill("36")
+    page.get_by_label("Paid").select_option("fortnightly")
+    page.get_by_label("Pre-tax part, per pay").fill("300")
+    page.get_by_role("button", name="Add lease").click()
+    page.wait_for_url(re.compile(r"msg=lease_added"))
+    page.goto(UI + "new")
+    page.select_option("select[name=car_id]", label=MARKER)
+    page.select_option("select[name=category_id]", label="Tyres")
+    page.fill("input[name=amount]", amount)
+    page.fill("input[name=vendor]", MARKER)
+    page.click("button[type=submit].button")
+    page.wait_for_url(re.compile(r"msg=saved"))
+
+
+def test_list_with_a_claim_link_fits_a_phone(page):
+    """Claiming is on and a lease covers the expense, so the row has a Claim link: it must not push the amount or
+    the Edit link off a phone's screen, in tiles or in rows (the link has a cell of its own)."""
+    from datetime import date
+    fake_connector(page)
+    try:
+        add_claimable_expense(page, date.today(), "1234.56")
+        page.goto(UI)
+        row = page.locator(f"tr:has-text('{MARKER}')")
+        expect(row.locator("a.claim-link")).to_have_count(1)
+        width = page.viewport_size["width"]
+        for choice in ("tiles", "rows"):
+            page.click(f"[data-view-choice={choice}]")
+            if choice == "tiles":
+                for text in ("$1,234.56", "Edit", "Claim"):
+                    box = row.get_by_text(text, exact=False).first.bounding_box()
+                    assert box and box["x"] >= 0 and box["x"] + box["width"] <= width, f"{text} is off-screen in tiles: {box}"
+                assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+                shot(page, "list-phone-claim")
+            else:
+                cut = page.evaluate("""marker => [...document.querySelectorAll('tbody tr')].filter(r => r.textContent.includes(marker))
+                    .flatMap(r => [...r.querySelectorAll('td.date, td.cat .chip, td.amount, td.actions, td.claim-state')])
+                    .filter(e => e.scrollWidth > e.clientWidth + 1).map(e => e.className + ': ' + e.textContent.trim())""", MARKER)
+                assert cut == [], f"cut short in rows: {cut}"
+        page.evaluate("localStorage.clear()")
+    finally:
+        remove_marked(page)
+
+
 def test_claims(page):
     """Claim an expense through the stand-in connector: preview, a field it asks for, the sign-in with its
     code, submit, the badge and the reference, refusing to delete a claimed expense, refreshing the status,
@@ -1547,24 +1600,7 @@ def test_claims(page):
     fake_connector(page)
     today = date.today()
     try:
-        car = add_marked_car(page)
-        car.get_by_role("link", name="Lease").click()
-        page.click("#add-lease-top")
-        page.locator("#f-financier").fill("Example Finance")
-        page.get_by_label("Lease start").fill((today - timedelta(days=30)).isoformat())
-        page.locator("#f-end_date").fill((today + timedelta(days=1065)).isoformat())
-        page.get_by_label("Term (months)").fill("36")
-        page.get_by_label("Paid").select_option("fortnightly")
-        page.get_by_label("Pre-tax part, per pay").fill("300")
-        page.get_by_role("button", name="Add lease").click()
-        page.wait_for_url(re.compile(r"msg=lease_added"))
-        page.goto(UI + "new")
-        page.select_option("select[name=car_id]", label=MARKER)
-        page.select_option("select[name=category_id]", label="Tyres")
-        page.fill("input[name=amount]", "1200.00")
-        page.fill("input[name=vendor]", MARKER)
-        page.click("button[type=submit].button")
-        page.wait_for_url(re.compile(r"msg=saved"))
+        add_claimable_expense(page, today)
 
         row = page.locator("tbody tr", has_text=MARKER)
         expect(row.locator("a.claim-link")).to_have_count(1)
@@ -1709,6 +1745,7 @@ def main():
         step("FBT year report: taxable value, costs by pool, year links", test_fbt_report, page)
         step("header stays tidy on a phone", test_header_stays_tidy_on_a_phone, page)
         step("phone list shows amount, invoice and edit", test_list_shows_key_fields_on_a_phone, page)
+        step("a Claim link in the list still fits a phone", test_list_with_a_claim_link_fits_a_phone, page)
         step("claims: preview, needed field, sign-in code, submit, status refresh, remove record", test_claims, page)
         step("history page lists an add, an edit and a delete", test_history_page, page)
         step("a likely duplicate is asked about, then saved anyway", test_duplicate_is_asked_about_before_saving, page)
