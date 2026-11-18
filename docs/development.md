@@ -157,6 +157,12 @@ OneDrive is on in the dev stack with a throwaway token key in `.dev/env`. To sig
 add the dev stack's callback address (shown in the OneDrive card of its Invoice storage page) as a second redirect URI on
 your app registration. A sign-in writes to your real OneDrive, so give each car a test folder.
 
+The claims feature is on in the dev stack against a stand-in connector (`tests/fake_connector.py`, invented
+answers, on the stack's private network). To try a real connector instead, set `DEV_CLAIMS_CONNECTOR_URL` and
+`DEV_CLAIMS_CONNECTOR_TOKEN` when you run `scripts/dev.sh up` (see `dev.env.example`). Give it a token of its own
+that you can revoke, not your live one, and remember that submitting there sends a real claim: preview only,
+unless you mean it. The address must be reachable from the stack's containers.
+
 The seed only reads from TeslaMate. It copies all of `cars` and `charging_processes`, and one
 `positions` row per hour with latitude, longitude and elevation blanked. `up` warns if
 TeslaMate's tables no longer match the committed schema. Grafana also lists TeslaMate's bundled
