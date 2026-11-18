@@ -254,3 +254,31 @@ def test_the_stand_in_claims_connector_is_private_and_the_app_uses_it_by_default
     env = cfg["services"]["garagebooks-dev"]["environment"]
     assert "dev-claims-connector:8765" in env["CLAIMS_CONNECTOR_URL"]
     assert "DEV_CLAIMS_CONNECTOR_URL" in env["CLAIMS_CONNECTOR_URL"]
+
+
+# ---- a real claims connector in dev.env ----------------------------------------------------------------------
+
+def run_dev(tmp_path, dev_env, *args, env=None):
+    """dev.sh from a scratch copy of the checkout, with this dev.env: never touches docker or the real one."""
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "dev.sh").write_text(SCRIPT)
+    (tmp_path / "dev.env").write_text(dev_env)
+    return subprocess.run(["bash", str(tmp_path / "scripts" / "dev.sh"), *args], cwd=tmp_path, capture_output=True,
+                          text=True, env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), **(env or {})})
+
+
+def test_a_real_connector_without_its_token_stops_the_stack_starting(tmp_path):
+    done = run_dev(tmp_path, 'DEV_CLAIMS_CONNECTOR_URL=http://connector.invalid:8765\n'
+                             'DEV_CLAIMS_CONNECTOR_TOKEN="$(cat /nonexistent/token 2>/dev/null || true)"\n', "up")
+    assert done.returncode == 2 and "DEV_CLAIMS_CONNECTOR_TOKEN is empty" in done.stderr
+
+
+def test_the_browser_tests_refuse_to_run_against_a_real_connector(tmp_path):
+    done = run_dev(tmp_path, 'DEV_CLAIMS_CONNECTOR_URL=http://connector.invalid:8765\nDEV_CLAIMS_CONNECTOR_TOKEN=x\n',
+                   "test-browser")
+    assert done.returncode == 2 and "stand-in" in done.stderr and "STAND_IN=1" in done.stderr
+
+
+def test_stand_in_wins_over_dev_env():
+    assert 'if [ "${STAND_IN:-}" = 1 ]; then unset DEV_CLAIMS_CONNECTOR_URL DEV_CLAIMS_CONNECTOR_TOKEN; fi' in SCRIPT
+    assert SCRIPT.index("STAND_IN:-") > SCRIPT.index(". ./dev.env")           # applied after dev.env is read
