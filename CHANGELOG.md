@@ -7,6 +7,15 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+**Signed requests to the claims connector.** Set `CLAIMS_CONNECTOR_KEY_FILE` to an Ed25519 private key (PEM) and
+every request to the claims connector carries a fresh, short-lived signed token instead of a shared secret, so only
+GarageBooks holds a secret and the connector keeps public keys. Nothing to do on upgrade: `CLAIMS_CONNECTOR_TOKEN`
+and `CLAIMS_CONNECTOR_TOKEN_FILE` still work while no key file is set, but are deprecated, and the app logs a
+warning at start while one is used. To switch, make a key pair, give the connector the public key, set the key file
+and remove the token settings. The token format is in [Claims connector](docs/claims-connector.md#authorising-requests)
+for anyone writing a connector. In the dev stack, `DEV_CLAIMS_CONNECTOR_KEY_FILE` replaces
+`DEV_CLAIMS_CONNECTOR_TOKEN`.
+
 **Claims page as a ledger.** Nothing to do on upgrade. The Claims page now reuses the All page's expense list,
 which gains car and date filters, and shows where each expense stands on claiming (or why it can't be claimed),
 with whether the provider has reimbursed a claim in full, including part payments. It also shows whether the
