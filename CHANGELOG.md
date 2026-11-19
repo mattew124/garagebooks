@@ -7,6 +7,10 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+## 0.4.0-rc3 - 2026-11-19
+
+**TeslaMate 4.5.0.** Tested with TeslaMate 4.5.0 (it was 4.4.0). Nothing to do on upgrade: pull the new image. A TeslaMate database up to that release no longer has its figures held back.
+
 - **A notice when TeslaMate is newer than tested.** An optional box under Notifications on the Settings page
   (off by default) sends one notice for each new TeslaMate migration the app holds its figures back on. The log
   line for the same event is a `WARNING` (`ERROR` with `ALLOW_UNTESTED_TESLAMATE=1`), so a log alert can use it too.
