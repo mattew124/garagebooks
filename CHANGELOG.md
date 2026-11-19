@@ -5,7 +5,16 @@ steps are in [RELEASING.md](RELEASING.md). Newest first.
 
 Each entry says what an installer must do to upgrade. Where nothing is said, pull the new image.
 
-## Unreleased
+## 0.5.0-rc1 - 2026-11-19
+
+**Claiming expenses from your salary packaging provider.** GarageBooks can now send an expense to a separate
+claims connector service, which claims it from the provider, and track it through to payment on a new Claims page:
+what was claimed, what the provider approved and paid, and what is still to claim. The feature is off until you
+set `CLAIMS_CONNECTOR_URL`, and requests to the connector are signed with a short-lived token from a key only
+GarageBooks holds. It also brings everything in 0.4.0-rc3.
+
+**To upgrade:** pull the new image; the app adds its new tables itself. Installers on the restricted database role
+(`SKIP_MIGRATE=1`) re-run `scripts/provision-db.sh` first. The web server timeout moves from 120 s to 180 s.
 
 **Signed requests to the claims connector.** Set `CLAIMS_CONNECTOR_KEY_FILE` to an Ed25519 private key (PEM) and
 every request to the claims connector carries a fresh, short-lived signed token instead of a shared secret, so only
