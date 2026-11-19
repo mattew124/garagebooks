@@ -72,7 +72,7 @@ sed -i -E "s/^TESTED_TESLAMATE = .*/TESTED_TESLAMATE = \"$version\"/; s/^TESTED_
     garagebooks/compat.py
 
 echo "compat: running the test suite against TeslaMate $version's own schema..."
-TEST_TESLAMATE_IMAGE="$image" .venv/bin/python -m pytest -q -p no:cacheprovider || status=1
+TEST_TESLAMATE_IMAGE="$image" .venv/bin/python -m pytest -q -n auto -p no:cacheprovider || status=1
 
 if [ "$status" = 0 ] && [ "$newest" -gt "$recorded" ]; then
     echo "compat: tests pass, but TeslaMate $version is newer than the recorded $tested."

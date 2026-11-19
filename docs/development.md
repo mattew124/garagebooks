@@ -3,7 +3,11 @@
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 .venv/bin/python -m pytest -q     # starts a throwaway postgres:18 container
+.venv/bin/python -m pytest -q -n auto   # the same, in parallel: about three times faster on four cores
 ```
+
+With `-n auto` (pytest-xdist) each worker starts its own Postgres container, so tests never share tables. CI and
+`scripts/teslamate-compat.sh` use it. A single test is quicker without it, as each worker pays the container's start-up.
 
 The tests let the real TeslaMate image (the release in `garagebooks/compat.py`) create its tables in a
 throwaway database, so docker pulls `teslamate/teslamate` the first time. They then start the app so
@@ -36,7 +40,7 @@ CI fails a pull request that does not clear these, and you can run each of them 
   unchanged, no route answers with a server error, and nothing invalid reaches the database. Add a new input
   to the matching file when you add a field or a route. When Hypothesis finds a failing example, keep it as an
   ordinary test too (as `test_amount_rejected` does), then fix the code. A local run uses 50 examples
-  per property; CI sets `HYPOTHESIS_PROFILE=ci` for 200 (the route tests use 40 either way, as each is a real
+  per property; CI sets `HYPOTHESIS_PROFILE=ci` for 200 (the route tests use 15 locally and 40 in CI, as each is a real
   request on a real database). The `.hypothesis/` folder is a cache of what it has found: leave it out of commits.
 - **Vulnerability scans.** Ruff and Bandit lint the code, CodeQL analyses it, and Trivy scans the
   dependencies and the image (`.github/workflows/security.yml`, weekly as well as on each change).

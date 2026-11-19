@@ -7,6 +7,11 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+- **Faster tests.** The suite runs in parallel (`pytest -n auto`, one throwaway Postgres per worker), about three times
+  faster on four cores, and the route property tests use 15 examples locally (40 in CI, as before). The `admin`
+  fixture makes one round trip instead of a dozen. CI and the TeslaMate compatibility check use `-n auto`. Nothing
+  changes for installers.
+
 ## 0.4.0-rc3 - 2026-11-19
 
 **TeslaMate 4.5.0.** Tested with TeslaMate 4.5.0 (it was 4.4.0). Nothing to do on upgrade: pull the new image. A TeslaMate database up to that release no longer has its figures held back.
