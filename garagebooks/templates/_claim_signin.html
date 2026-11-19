@@ -1,0 +1,16 @@
+<section class="card stack" id="claim-signin" data-status-url="{{ url_for('claims_signin_status') }}"
+         data-start-url="{{ url_for('claims_signin') }}" data-code-url="{{ url_for('claims_signin_code') }}"
+         data-retry-url="{{ retry_url }}">
+  <h2 class="card-title">Sign in to the provider</h2>
+  <p>The provider needs you to sign in before it can take a claim. This is done once, and the connector keeps the sign-in.</p>
+  <p class="notice" role="status" data-signin-message hidden></p>
+  <p class="notice bad" role="alert" data-signin-error hidden></p>
+  <div class="row"><button type="button" class="button" data-signin-start>Sign in</button></div>
+  <form class="stack" data-signin-code hidden>
+    <label>Code from the provider
+      <input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="20" required>
+    </label>
+    <button type="submit" class="button">Send code</button>
+  </form>
+  <noscript><p class="notice bad">Signing in needs JavaScript. Without it, sign in to the connector yourself, then reload this page.</p></noscript>
+</section>

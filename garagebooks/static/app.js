@@ -162,7 +162,9 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!live) return;
     live.querySelectorAll("[data-autosubmit]").forEach((el) =>
       el.addEventListener("change", (ev) => {
-        showList(location.pathname + "?" + new URLSearchParams(new FormData(live)), el.name);
+        // Blank fields (no car, no dates) stay out of the address, so plain views keep plain links.
+        const params = new URLSearchParams([...new FormData(live)].filter(([, value]) => value !== ""));
+        showList(location.pathname + "?" + params, el.name);
       }));
     document.querySelectorAll("a.sort").forEach((a) =>
       a.addEventListener("click", (ev) => {
@@ -176,14 +178,18 @@ document.addEventListener("DOMContentLoaded", () => {
   // column makes the table wider. The widths are remembered in the browser, like the layout.
   function bindColumns() {
     const cols = window.expenseColumns;
-    const heads = [...document.querySelectorAll(".list thead th")];
-    if (!cols || heads.length !== cols.names.length) return;
-    const measured = () => Object.fromEntries(heads.map((th, i) => [cols.names[i], Math.round(th.getBoundingClientRect().width)]));
+    const table = document.querySelector("table.expense-table");
+    if (!cols || !table) return;
+    const heads = [...table.querySelectorAll("thead th")];
+    // The columns this list has, by the class of each <col> (the Claims page's has one more than the All page's).
+    const names = [...table.querySelectorAll("colgroup col")].map((c) => c.className.replace(/^c-/, ""));
+    if (heads.length !== names.length || names.some((n) => !cols.names.includes(n))) return;
+    const measured = () => Object.fromEntries(heads.map((th, i) => [names[i], Math.round(th.getBoundingClientRect().width)]));
     const keep = (widths) => {
       try { localStorage.setItem("expenses-columns", JSON.stringify(widths)); } catch (e) { /* not remembered */ }
     };
     heads.slice(0, -1).forEach((th, i) => {
-      const name = cols.names[i];
+      const name = names[i];
       const handle = document.createElement("span");
       handle.className = "col-resize";
       handle.tabIndex = 0;

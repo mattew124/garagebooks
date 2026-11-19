@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import time
+from datetime import timedelta
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
@@ -286,7 +287,9 @@ _SELECT = """
            e.invoice_url, e.invoice_path,
            c.make AS car_make, c.model AS car_model, cat.budget_pool,
            cl.provider AS claim_provider, cl.provider_id AS claim_provider_id, cl.reference AS claim_reference,
-           cl.status AS claim_status, cl.paid_date AS claim_paid_date, cl.approved_amount AS claim_approved
+           cl.status AS claim_status, cl.paid_date AS claim_paid_date, cl.approved_amount AS claim_approved,
+           (EXISTS (SELECT 1 FROM garagebooks.provider_claim pc WHERE pc.expense_id = e.id)
+            OR EXISTS (SELECT 1 FROM garagebooks.provider_transaction pt WHERE pt.expense_id = e.id AND pt.kind = 'direct_payment')) AS provider_matched
     FROM garagebooks.expense e
     JOIN garagebooks.car c ON c.id = e.car_id
     JOIN garagebooks.category cat ON cat.id = e.category_id
@@ -299,28 +302,40 @@ SORTS = {"date": "e.occurred_at", "category": "cat.name", "vendor": "NULLIF(lowe
          "amount": "e.amount", "odometer": "e.odometer_km"}
 
 
-def list_expenses(conn, category_id=None, limit=1000, sort="date", direction="desc"):
-    """Sorted either way. Blank vendors and odometers always come last, whichever way round."""
+def _filters(category_id, car_id, start, end, tz):
+    where, params = [], []
+    if category_id:
+        where.append("e.category_id = %s")
+        params.append(category_id)
+    if car_id:
+        where.append("e.car_id = %s")
+        params.append(car_id)
+    if start:
+        where.append("(e.occurred_at AT TIME ZONE %s)::date >= %s")
+        params += [tz, start]
+    if end:
+        where.append("(e.occurred_at AT TIME ZONE %s)::date <= %s")
+        params += [tz, end]
+    return ("WHERE " + " AND ".join(where)) if where else "", params
+
+
+def list_expenses(conn, category_id=None, limit=1000, sort="date", direction="desc", car_id=None, start=None, end=None,
+                  tz="UTC"):
+    """Sorted either way, optionally one category's or one car's and between two local dates. Blank vendors and
+    odometers always come last, whichever way round."""
     order = SORTS.get(sort, SORTS["date"])
     way = "ASC" if direction == "asc" else "DESC"
-    where, params = "", []
-    if category_id:
-        where = "WHERE e.category_id = %s"
-        params.append(category_id)
+    where, params = _filters(category_id, car_id, start, end, tz)
     params.append(limit)
     return conn.execute(
         f"{_SELECT} {where} ORDER BY {order} {way} NULLS LAST, e.occurred_at {way}, e.id {way} LIMIT %s", params
     ).fetchall()
 
 
-def totals(conn, category_id=None):
-    where, params = "", []
-    if category_id:
-        where = "WHERE category_id = %s"
-        params.append(category_id)
+def totals(conn, category_id=None, car_id=None, start=None, end=None, tz="UTC"):
+    where, params = _filters(category_id, car_id, start, end, tz)
     return conn.execute(
-        f"SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS n FROM garagebooks.expense {where}",
-        params,
+        f"SELECT COALESCE(SUM(e.amount), 0) AS total, COUNT(*) AS n FROM garagebooks.expense e {where}", params,
     ).fetchone()
 
 
@@ -761,3 +776,183 @@ def touch_claim_check(conn, provider_id):
 
 def delete_claim(conn, expense_id):
     return conn.execute("DELETE FROM garagebooks.expense_claim WHERE expense_id = %s", (expense_id,)).rowcount == 1
+
+
+# ---- the provider's transaction history (a cache of what the claims connector says) ---------------------------
+
+TRANSACTION_COLUMNS = ("provider_id", "occurred_on", "amount", "gst", "type", "status", "description", "payee",
+                       "kind", "car_id", "claim_provider_id", "reference")
+
+
+def save_transactions(conn, provider, rows, since=None):
+    """Make the cache the connector's current answer for the period asked about (from `since`, or all of it): add
+    or refresh these rows (its key is what makes a row the same one) and drop any in that period it no longer
+    reports, or reported under another name. -> how many."""
+    conn.execute("DELETE FROM garagebooks.provider_transaction WHERE provider <> %s"
+                 " OR (occurred_on >= COALESCE(%s::date, '-infinity') AND NOT (provider_id = ANY(%s)))",
+                 (provider, since, [r["provider_id"] for r in rows]))
+    for row in rows:
+        conn.execute(
+            f"INSERT INTO garagebooks.provider_transaction (provider, {', '.join(TRANSACTION_COLUMNS)}) "
+            f"VALUES (%(provider)s, {', '.join('%(' + c + ')s' for c in TRANSACTION_COLUMNS)}) "
+            "ON CONFLICT (provider, provider_id) DO UPDATE SET "
+            + ", ".join(f"{c} = EXCLUDED.{c}" for c in TRANSACTION_COLUMNS[1:]) + ", synced_at = now()",
+            {**row, "provider": provider})
+    return len(rows)
+
+
+CLAIM_LINE_COLUMNS = ("reference", "occurred_on", "amount", "approved_amount", "status", "paid_date", "description", "car_id")
+
+
+def save_claim_lines(conn, provider, rows, since=None):
+    """Make the cached claim lines the connector's current answer for the period (like save_transactions)."""
+    conn.execute("DELETE FROM garagebooks.provider_claim WHERE provider <> %s"
+                 " OR (occurred_on >= COALESCE(%s::date, '-infinity')"
+                 "     AND NOT ((provider_id, line_id) IN (SELECT * FROM unnest(%s::text[], %s::text[]))))",
+                 (provider, since, [r["provider_id"] for r in rows], [r["line_id"] for r in rows]))
+    for row in rows:
+        conn.execute(
+            f"INSERT INTO garagebooks.provider_claim (provider, provider_id, line_id, {', '.join(CLAIM_LINE_COLUMNS)}) "
+            f"VALUES (%(provider)s, %(provider_id)s, %(line_id)s, {', '.join('%(' + c + ')s' for c in CLAIM_LINE_COLUMNS)}) "
+            "ON CONFLICT (provider, provider_id, line_id) DO UPDATE SET "
+            + ", ".join(f"{c} = EXCLUDED.{c}" for c in CLAIM_LINE_COLUMNS) + ", synced_at = now()",
+            {**row, "provider": provider})
+    return len(rows)
+
+
+# How closely a provider's claim line, or a payment it made itself, must agree with an expense to be taken as the same
+# thing, tried in this order (each only pairs what is unambiguous): the same day and amount; the same amount within a
+# month (the provider dates a claim from its own form, not from the invoice); a direct payment within two weeks and
+# 15% (its amount carries the provider's own fees).
+CLAIM_TIERS = ((0, "0"), (30, "0"))
+DIRECT_TIER = (14, "0.15")
+
+
+def rematch(conn, tz, match_by_figures):
+    """Line the provider's history up with the expenses again. A claim line belongs to the expense claimed from
+    here with its claim id, else to the one expense that fits its car, day and amount (see CLAIM_TIERS). A payment
+    follows its claim to that expense, so a part payment is no problem. A payment the provider made itself with no
+    claim belongs to the one expense that fits it (DIRECT_TIER). Per-km charging and other rows never match: they
+    have no expense."""
+    conn.execute("UPDATE garagebooks.provider_claim SET expense_id = NULL WHERE expense_id IS NOT NULL")
+    conn.execute("UPDATE garagebooks.provider_transaction SET expense_id = NULL WHERE expense_id IS NOT NULL")
+    conn.execute(
+        "UPDATE garagebooks.provider_claim pc SET expense_id = cl.expense_id FROM garagebooks.expense_claim cl"
+        " WHERE pc.provider_id = cl.provider_id")
+
+    def free_expenses():
+        return [(r["id"], r["car_id"], r["day"], r["amount"]) for r in conn.execute(
+            "SELECT e.id, e.car_id, (e.occurred_at AT TIME ZONE %s)::date AS day, e.amount FROM garagebooks.expense e"
+            " WHERE NOT EXISTS (SELECT 1 FROM garagebooks.expense_claim cl WHERE cl.expense_id = e.id)"
+            " AND NOT EXISTS (SELECT 1 FROM garagebooks.provider_claim pc WHERE pc.expense_id = e.id)"
+            " AND NOT EXISTS (SELECT 1 FROM garagebooks.provider_transaction pt WHERE pt.expense_id = e.id)", (tz,))]
+
+    from decimal import Decimal
+    for days, tolerance in CLAIM_TIERS:
+        lines = [(r["id"], r["car_id"], r["occurred_on"], r["amount"]) for r in conn.execute(
+            "SELECT id, car_id, occurred_on, amount FROM garagebooks.provider_claim WHERE expense_id IS NULL")]
+        for lid, eid in match_by_figures(lines, free_expenses(), days, Decimal(tolerance)).items():
+            conn.execute("UPDATE garagebooks.provider_claim SET expense_id = %s WHERE id = %s", (eid, lid))
+    payments = [(r["id"], r["car_id"], r["occurred_on"], r["amount"]) for r in conn.execute(
+        "SELECT id, car_id, occurred_on, amount FROM garagebooks.provider_transaction"
+        " WHERE kind = 'direct_payment' AND claim_provider_id IS NULL")]
+    for pid, eid in match_by_figures(payments, free_expenses(), DIRECT_TIER[0], Decimal(DIRECT_TIER[1])).items():
+        conn.execute("UPDATE garagebooks.provider_transaction SET expense_id = %s WHERE id = %s", (eid, pid))
+    conn.execute(
+        "UPDATE garagebooks.provider_transaction pt SET expense_id = x.expense_id FROM"
+        " (SELECT provider_id, min(expense_id) AS expense_id FROM garagebooks.provider_claim"
+        "  WHERE expense_id IS NOT NULL GROUP BY provider_id) x"
+        " WHERE x.provider_id = pt.claim_provider_id AND pt.kind = 'claim_payment'")
+    conn.execute(
+        "UPDATE garagebooks.provider_transaction pt SET expense_id = cl.expense_id FROM garagebooks.expense_claim cl"
+        " WHERE pt.expense_id IS NULL AND cl.provider_id = pt.claim_provider_id AND pt.kind = 'claim_payment'")
+
+
+def direct_payments(conn):
+    """-> {expense_id: row}: the payments the provider made itself that were matched to an expense."""
+    return {r["expense_id"]: r for r in conn.execute(
+        "SELECT expense_id, occurred_on, amount, description FROM garagebooks.provider_transaction"
+        " WHERE kind = 'direct_payment' AND expense_id IS NOT NULL ORDER BY occurred_on").fetchall()}
+
+
+def reimbursements(conn):
+    """-> {expense_id: {claim, reference, expected, received}}: for each expense with a claim in the provider's
+    history, what the whole claim should pay (the approved amounts, else the amounts claimed) and what the
+    payments in the history say was paid for it."""
+    rows = conn.execute(
+        "SELECT l.expense_id, c.provider_id AS claim, c.reference, c.expected, COALESCE(p.received, 0) AS received"
+        " FROM (SELECT DISTINCT expense_id, provider_id FROM garagebooks.provider_claim WHERE expense_id IS NOT NULL) l"
+        " JOIN (SELECT provider_id, min(reference) AS reference, sum(COALESCE(approved_amount, amount)) AS expected"
+        "       FROM garagebooks.provider_claim GROUP BY provider_id) c ON c.provider_id = l.provider_id"
+        " LEFT JOIN (SELECT claim_provider_id, sum(abs(amount)) AS received FROM garagebooks.provider_transaction"
+        "            WHERE kind = 'claim_payment' AND claim_provider_id IS NOT NULL GROUP BY claim_provider_id) p"
+        "   ON p.claim_provider_id = l.provider_id").fetchall()
+    return {r["expense_id"]: r for r in rows}
+
+
+def transaction_rows(conn, car_id=None, start=None, end=None, match=None):
+    """The cached transactions, newest first, with the expense each belongs to. `match`: 'matched', 'unmatched'
+    (a claim payment or direct payment with no expense), 'per_km' or 'other' (deductions and the like, which belong to
+    no expense). With none of them the list leaves out 'other'."""
+    where, params = [], []
+    if car_id:
+        where.append("pt.car_id = %s")
+        params.append(car_id)
+    if start:
+        where.append("pt.occurred_on >= %s")
+        params.append(start)
+    if end:
+        where.append("pt.occurred_on <= %s")
+        params.append(end)
+    where.append({"matched": "pt.expense_id IS NOT NULL",
+                  "unmatched": "pt.expense_id IS NULL AND pt.kind IN ('claim_payment', 'direct_payment')",
+                  "per_km": "pt.kind = 'per_km_charging'",
+                  "other": "pt.kind = 'other'"}.get(match, "pt.kind <> 'other'"))
+    return conn.execute(
+        "SELECT pt.*, c.name AS car_name, cat.name AS expense_category, e.vendor AS expense_vendor"
+        " FROM garagebooks.provider_transaction pt LEFT JOIN garagebooks.car c ON c.id = pt.car_id"
+        " LEFT JOIN garagebooks.expense e ON e.id = pt.expense_id"
+        " LEFT JOIN garagebooks.category cat ON cat.id = e.category_id"
+        f" WHERE {' AND '.join(where)} ORDER BY pt.occurred_on DESC, pt.id DESC", params).fetchall()
+
+
+def last_synced(conn):
+    """When the provider's history was last fetched, or None if it never has been (or it was empty)."""
+    return conn.execute(
+        "SELECT max(at) AS at FROM (SELECT synced_at AS at FROM garagebooks.provider_transaction"
+        " UNION ALL SELECT synced_at FROM garagebooks.provider_claim) x").fetchone()["at"]
+
+
+def history_since(conn, tz, today, margin_days=90, full=False):
+    """The date to fetch the provider's history from. The first time, back to the earliest expense (a month
+    before it); after that only the last few months, which is what a sync needs to catch up and is quick."""
+    latest = conn.execute(
+        "SELECT max(d) AS d FROM (SELECT max(occurred_on) AS d FROM garagebooks.provider_transaction"
+        " UNION ALL SELECT max(occurred_on) FROM garagebooks.provider_claim) x").fetchone()["d"]
+    if latest and not full:
+        return latest - timedelta(days=margin_days)
+    first = conn.execute("SELECT (min(occurred_at) AT TIME ZONE %s)::date AS d FROM garagebooks.expense", (tz,)).fetchone()["d"]
+    return (first - timedelta(days=30)) if first else today - timedelta(days=365)
+
+
+def sync_state(conn):
+    """-> the one provider_sync row (state, started_at, finished_at, outcome, message, since). 'running' for more
+    than half an hour counts as dead."""
+    row = conn.execute(
+        "SELECT state, started_at, finished_at, outcome, message, since,"
+        " (state = 'running' AND started_at > now() - interval '30 minutes') AS running"
+        " FROM garagebooks.provider_sync WHERE id = 1").fetchone()
+    return row
+
+
+def begin_sync(conn, since):
+    """Claim the right to run a sync. False if one is already running."""
+    return conn.execute(
+        "UPDATE garagebooks.provider_sync SET state = 'running', started_at = now(), finished_at = NULL,"
+        " outcome = NULL, message = NULL, since = %s"
+        " WHERE state <> 'running' OR started_at < now() - interval '30 minutes'", (since,)).rowcount == 1
+
+
+def end_sync(conn, outcome, message=None):
+    conn.execute("UPDATE garagebooks.provider_sync SET state = 'idle', finished_at = now(), outcome = %s, message = %s"
+                 " WHERE id = 1", (outcome, message))
