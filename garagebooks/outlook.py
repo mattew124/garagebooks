@@ -171,9 +171,18 @@ class Mailbox:
         """One email with its text: {subject, sender, received, text, web_url}."""
         m = self._get(access_token, f"{GRAPH}/me/messages/{_id(message_id)}?$select={MESSAGE_FIELDS},body",
                       prefer=f'{IMMUTABLE}, outlook.body-content-type="text"')
-        body = (m.get("body") or {}).get("content") or ""
+        body = ((m.get("body") or {}).get("content") or "").replace("\r\n", "\n")   # Outlook's text has Windows line ends
         return {"subject": (m.get("subject") or "").strip(), "sender": sender(m), "received": received(m),
                 "text": body[:MAX_BODY_CHARS], "web_url": m.get("webLink")}
+
+    def attachment_name(self, access_token, item_id):
+        """An attachment's file name, as the email gives it."""
+        message_id, attachment_id = split_id(item_id)
+        if attachment_id is None:
+            raise MailError("That email has no PDF attached.")
+        a = self._get(access_token, f"{GRAPH}/me/messages/{_id(message_id)}/attachments/{_id(attachment_id)}"
+                                    "?$select=id,name,contentType,size")
+        return str(a.get("name") or "attachment.pdf")
 
     def download(self, access_token, item_id):
         """An attachment's bytes."""

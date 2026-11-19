@@ -42,12 +42,14 @@ secret disconnects both.
 ## Importing
 
 Press **Import emails** beside the car. Each row shows the attachment's name (or, for an email with no PDF, its
-subject), with the day it arrived, the sender and the subject below it. The guesses come from the PDF, or the
+subject), with the day it arrived, the sender and the subject below it. An attachment's name opens the PDF in the
+browser, and the **email** link beside it opens the email in Outlook on the web; an email with no PDF opens the email. The guesses come from the PDF, or the
 email's text, as described in [How it guesses](importing.md#how-it-guesses), and then:
 
 - **Refunds.** A subject that says *refund*, *credit note*, *reversal* or *reimbursement*, or text such as
   *we have refunded*, *your refund* or *refund amount*, makes the amount negative. The figure beside those words
-  (*We have refunded $45.00*) is used first, then the email's total. Small print such as "see our refund policy"
+  (*We have refunded $45.00*), or on the line just above *Refunded* (as some insurers lay it out), is used first,
+  then the email's total. Small print such as "see our refund policy"
   doesn't count.
 - **Date.** A date the text labels as its own (`Invoice date`) comes first; otherwise the day the email arrived,
   in the app's time zone.

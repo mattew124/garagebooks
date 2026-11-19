@@ -103,6 +103,11 @@ class FakeOutlook(FakeMicrosoft):
             assert raw
             msg = next(x for x in self.messages if x["id"] == m.group(1))
             return 200, next(a for a in msg["attachments"] if a["id"] == m.group(2))["_content"]
+        m = re.search(r"/messages/([^/]+)/attachments/([^/]+)$", path)
+        if m:
+            msg = next(x for x in self.messages if x["id"] == m.group(1))
+            a = next(a for a in msg["attachments"] if a["id"] == m.group(2))
+            return 200, {k: v for k, v in a.items() if not k.startswith("_")}
         m = re.search(r"/messages/([^/]+)$", path)
         if m:
             assert 'outlook.body-content-type="text"' in headers.get("Prefer", "")
@@ -413,6 +418,10 @@ def test_is_refund(subject, text, expected):
     ("Refund amount:  $1,200.00", "1200.00"),
     ("Your refund of $12.50 has been processed.", "12.50"),
     ("Total refunded  $8.00", "8.00"),
+    # The figure on its own line, with the word under it (an insurer's refund email, Windows line ends).
+    ("Refund for your policy has been sent\r\n\r\nReceipt number:12345678\r\n\r\n$1,234.50\r\nRefunded 12 Feb 2026\r\n",
+     "1234.50"),
+    ("Your refund\n\n$20.00\n\nRefund amount\n", "20.00"),
 ])
 def test_refund_amount(text, amount):
     from decimal import Decimal
@@ -466,3 +475,28 @@ def test_the_marks_are_served_with_a_bundled_stand_in(client):
 def test_the_marks_need_the_onedrive_set_up(app_for, ms, admin):
     c = app_for(ms, key=None)
     assert c.get("/provider-icon/microsoft").status_code == 404
+
+
+# ---- opening the email and its PDF from the import page ---------------------------
+
+def test_attachment_row_opens_both_the_pdf_and_its_email(mailbox):
+    f = scan(mailbox)["files"][0]
+    row = read_row(mailbox, 0, f)
+    assert "/mail/file/1?id=M1+A1" in row or "/mail/file/1?id=M1%20A1" in row
+    assert f'href="{WEBLINK.format("M1")}"' in row.replace("&amp;", "&"), "the email itself, without the attachment part"
+    resp = mailbox.get("/mail/file/1", query_string={"id": "M1 A1"})
+    assert resp.status_code == 200 and resp.mimetype == "application/pdf" and resp.data == TYRES_PDF
+    assert "inline" in resp.headers["Content-Disposition"] and "INV12345.pdf" in resp.headers["Content-Disposition"]
+
+
+def test_email_row_opens_the_email_only(mailbox):
+    f = scan(mailbox)["files"][1]
+    row = read_row(mailbox, 1, f)
+    assert "/mail/file/" not in row and f'href="{WEBLINK.format("M2")}"' in row.replace("&amp;", "&")
+
+
+def test_mail_file_serves_only_pdf_attachments(mailbox, ms):
+    assert mailbox.get("/mail/file/1", query_string={"id": "M2"}).status_code == 404       # an email, no attachment
+    ms.messages[0]["attachments"][0]["_content"] = b"<html>not a pdf</html>"
+    assert mailbox.get("/mail/file/1", query_string={"id": "M1 A1"}).status_code == 404
+    assert mailbox.get("/mail/file/2", query_string={"id": "M1 A1"}).status_code == 404     # no such car

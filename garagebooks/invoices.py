@@ -439,9 +439,17 @@ def is_refund(subject, text):
     return bool(_REFUND_SUBJECT.search(subject or "") or _REFUND_TEXT.search(text or ""))
 
 
+# The figure on a line of its own with the word on the next ("$1,234.50" then "Refunded 12 Feb 2026"), as an
+# insurer's refund email lays it out. A blank line may come between them.
+REFUND_FIGURE_ABOVE = re.compile(r"\$\s*([\d,]+\.\d{2})[ \t]*\n(?:[ \t]*\n)?[ \t]*(?:refunded|refund\s+amount)\b", re.I)
+
+
 def refund_amount(text):
-    """The figure beside "refunded", "refund amount", "credited" and the like. -> Decimal or None."""
-    for m in REFUND_AMOUNT.finditer(text or ""):
+    """The figure beside "refunded", "refund amount", "credited" and the like, or on the line above
+    "Refunded". -> Decimal or None."""
+    text = (text or "").replace("\r\n", "\n")
+    found = [m for pattern in (REFUND_AMOUNT, REFUND_FIGURE_ABOVE) for m in pattern.finditer(text)]
+    for m in sorted(found, key=lambda m: m.start()):
         try:
             return Decimal(m.group(1).replace(",", ""))
         except InvalidOperation:

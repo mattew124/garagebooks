@@ -2,7 +2,11 @@
       <td data-label="Import"><input type="checkbox" name="include_{{ n }}" {{ 'checked' if r.include and not r.skip }}></td>
       <td data-label="Skip"><input type="checkbox" name="skip_{{ n }}" {{ 'checked' if r.skip }} title="Never offer this file for import"></td>
       <td data-label="File"><div class="file">
-        <a href="{{ link(r.url) }}" target="_blank" rel="noopener noreferrer">{{ r.name }} ↗</a>
+        {% if kind == 'mail' %}{% set email = r.url.split('#')[0] %}
+        {% if ' ' in r.id %}<a href="{{ url_for('mail_file', car_id=car.id, id=r.id) }}" target="_blank" rel="noopener noreferrer">{{ r.name }} ↗</a>
+        <small>· <a href="{{ email }}" target="_blank" rel="noopener noreferrer">email ↗</a></small>
+        {% else %}<a href="{{ email }}" target="_blank" rel="noopener noreferrer">{{ r.name }} ↗</a>{% endif %}
+        {% else %}<a href="{{ link(r.url) }}" target="_blank" rel="noopener noreferrer">{{ r.name }} ↗</a>{% endif %}
         {% if r.folder %}<br><small>{{ r.folder }}</small>{% endif %}
 {% if kind != 'mail' %}
 <br><label class="inline"><input type="checkbox" name="rename_{{ n }}" {{ 'checked' if r.rename }}>

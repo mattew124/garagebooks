@@ -5,6 +5,7 @@ the Grafana dashboard in grafana/ turns it (plus TeslaMate's own charging costs,
 them) into total cost of ownership. TeslaMate is optional: see sources.py.
 """
 
+import io
 import hashlib
 import hmac
 import json
@@ -2434,6 +2435,28 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         if kind != "mail":      # the mailbox is only read (Mail.Read can't make a folder)
             app.post(f"/{kind}/browse/<int:car_id>/new-folder", endpoint=f"{kind}_new_folder")(new_folder)
 
+        def mail_file(car_id):
+            """A PDF attached to an email in the car's mailbox folder, shown in the browser's own viewer: the
+            import page links to it beside the email, which Outlook on the web opens. Only a PDF is served."""
+            store = need_store()
+            car_or_404(car_id)
+            item_id = request.args.get("id", "")
+            try:
+                if outlook.split_id(item_id)[1] is None:
+                    abort(404)
+                name = store.attachment_name(item_id)
+                pdf = validation.parse_invoice_pdf("attachment.pdf", store.download(item_id))
+            except (ValueError, storage.StorageError) as exc:
+                log.warning("emailed PDF not served: %s", exc)
+                abort(404)
+            name = name if name.lower().endswith(".pdf") and validation.safe_folder_name(name) == name else "attachment.pdf"
+            resp = send_file(io.BytesIO(pdf), mimetype="application/pdf", download_name=name, as_attachment=False)
+            resp.headers["Cache-Control"] = "private, no-cache"
+            return resp
+
+        if kind == "mail":
+            app.get("/mail/file/<int:car_id>", endpoint="mail_file")(mail_file)
+
         @app.post(f"/{kind}/folders/<int:car_id>", endpoint=f"{kind}_choose_folder")
         def choose_folder(car_id):
             store = need_store()
@@ -2541,7 +2564,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             except storage.StorageError as exc:
                 row = import_row(n, name=f["name"], folder=f["folder"], url=f["url"], note=exc.user_message)
             return render_template("_import_row.html", r=row, n=n, categories=ctx["categories"], errors={},
-                                   kind=kind, link=store.link)
+                                   kind=kind, link=store.link, car=car)
 
         @app.post(f"/{kind}/import/<int:car_id>/unskip", endpoint=f"{kind}_import_unskip")
         def import_unskip(car_id):

@@ -90,7 +90,7 @@ class MailStore:
     kind = "mail"
     name = "the mailbox"
     ref_field = "invoice_url"
-    _CALLS = ("folder", "subfolders", "pdfs", "download", "message")
+    _CALLS = ("folder", "subfolders", "pdfs", "download", "message", "attachment_name")
 
     def __init__(self, mailbox, access_token):
         self.mailbox, self._access_token, self._token = mailbox, access_token, None
