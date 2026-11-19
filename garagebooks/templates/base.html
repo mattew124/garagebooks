@@ -32,7 +32,7 @@
     </div>
   </header>
   <main{% block main_attrs %}{% endblock %}>
-    {% if message %}<p class="notice">{{ message }}</p>{% endif %}
+    {% if message %}<p class="notice" role="status">{{ message }}</p>{% endif %}
     {% block content %}{% endblock %}
   </main>
   <footer>

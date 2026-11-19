@@ -472,3 +472,11 @@ def test_a_cached_row_is_unique_per_provider_and_key(admin):
         with pytest.raises(psycopg.errors.UniqueViolation):
             admin.execute(q)
         admin.execute(f"DELETE FROM garagebooks.{table}")
+
+
+def test_a_started_sync_says_so_once(client, admin, fake):
+    admin.execute("UPDATE garagebooks.provider_sync SET state = 'running', started_at = now(), since = '2026-01-01'")
+    page = said(client.get("/claims?msg=claims_sync_started"))
+    assert page.count("Syncing the provider's history") == 1             # the running notice, with its date
+    page = said(client.get("/claims?msg=claims_refreshed"))
+    assert page.count("Claim statuses refreshed.") == 1                 # the layout shows a message; the page doesn't again
