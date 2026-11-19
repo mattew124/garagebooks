@@ -1849,7 +1849,7 @@ def test_claims(page):
 
         page.get_by_role("button", name="Submit claim").click()
         page.wait_for_url(re.compile(r"msg=claimed"))
-        expect(page.locator(".notice")).to_contain_text("REF0001")
+        expect(page.locator(".notice:not(#no-tax-rate)")).to_contain_text("REF0001")
         row = page.locator("tbody tr", has_text=MARKER)
         expect(row.locator("a.claim-badge")).to_contain_text("REF0001")
         expect(row.locator("a.claim-link")).to_have_count(0)
