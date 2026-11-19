@@ -54,6 +54,13 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "no_teslamate: only for a database with no TeslaMate (TEST_TESLAMATE=0)")
 
 
+@pytest.fixture(autouse=True)
+def no_background_jobs(monkeypatch):
+    """A test that starts the app for real must not leave the scheduler's thread running behind it.
+    test_jobs.py covers when that thread is started."""
+    monkeypatch.setenv("SCHEDULER", "off")
+
+
 def pytest_collection_modifyitems(config, items):
     for item in items:
         if item.get_closest_marker("teslamate") and not TESLAMATE:
@@ -155,7 +162,10 @@ def admin(pg):
         conn.execute("ALTER TABLE garagebooks.change_log DISABLE TRIGGER USER;"
                      " TRUNCATE garagebooks.change_log RESTART IDENTITY;"
                      " ALTER TABLE garagebooks.change_log ENABLE TRIGGER USER")
-        conn.execute("UPDATE garagebooks.setting SET invoice_date_format = NULL, invoice_name_format = NULL, multi_amount = NULL, lease_budgets = false")
+        conn.execute("UPDATE garagebooks.setting SET invoice_date_format = NULL, invoice_name_format = NULL, multi_amount = NULL, lease_budgets = false,"
+                     " marginal_tax_rate = NULL,"
+                     " notify_url = NULL, notify_format = NULL")
+        conn.execute("TRUNCATE garagebooks.notification")
         yield conn
 
 

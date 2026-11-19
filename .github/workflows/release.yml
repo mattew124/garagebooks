@@ -5,6 +5,7 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:   # run on the tag's ref; the TeslaMate compatibility workflow tags candidates and starts it this way
 
 permissions:
   contents: read

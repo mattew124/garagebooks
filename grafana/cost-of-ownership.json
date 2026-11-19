@@ -1880,6 +1880,295 @@
           "refId": "A"
         }
       ]
+    },
+    {
+      "id": 21,
+      "type": "table",
+      "title": "Kilometre pace",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "TeslaMate"
+      },
+      "description": "This FBT year's distance against the lease's estimated km per year, pro rata for the days held. Empty when this car has no current lease with an estimate. The odometer is TeslaMate's or your latest reading; a figure that needs one that isn't known is blank, not 0. Same figures as the FBT year page in GarageBooks.",
+      "gridPos": {
+        "h": 4,
+        "w": 24,
+        "x": 0,
+        "y": 60
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": false
+          },
+          "noValue": "—"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Expected km"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currency:financial: km:suffix"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Odometer at start"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currency:financial: km:suffix"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Odometer needed at end"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currency:financial: km:suffix"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Km per day needed"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currency:financial: km:suffix"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Driven so far"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currency:financial: km:suffix"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Km per day driven"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currency:financial: km:suffix"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Ahead (+) or behind (-)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currency:financial: km:suffix"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Km per day needed from today"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currency:financial: km:suffix"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "TeslaMate"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH t AS (SELECT (now() AT TIME ZONE '$tz')::date AS today),\nl AS (\n  SELECT ls.start_date, ls.end_date, ls.estimated_km_per_year::numeric AS est, t.today, garagebooks.fbt_year(t.today) AS yr\n  FROM garagebooks.lease ls CROSS JOIN t\n  WHERE ls.car_id = $car_id AND ls.estimated_km_per_year IS NOT NULL AND ls.start_date <= t.today AND ls.end_date >= t.today\n  ORDER BY ls.start_date DESC LIMIT 1\n), p AS (\n  SELECT l.*, GREATEST(l.start_date, make_date(l.yr, 4, 1)) AS d0, LEAST(l.end_date, make_date(l.yr + 1, 3, 31)) AS d1,\n         (make_date(l.yr + 1, 4, 1) - make_date(l.yr, 4, 1)) AS in_year\n  FROM l\n), q AS (\n  SELECT p.*, p.d1 - p.d0 + 1 AS held, GREATEST(LEAST(p.today, p.d1 + 1) - p.d0, 0) AS elapsed\n  FROM p\n), o AS (\n  SELECT q.*, garagebooks.odometer_at($car_id, q.d0::timestamp AT TIME ZONE '$tz')::numeric AS s,\n         garagebooks.odometer_at($car_id, LEAST(now(), (q.d1 + 1)::timestamp AT TIME ZONE '$tz'))::numeric AS c\n  FROM q\n), f AS (\n  SELECT o.*, o.est * o.held / o.in_year AS expected, o.est * o.elapsed / o.in_year AS so_far, o.held - o.elapsed AS remaining,\n         CASE WHEN o.s IS NULL OR o.c IS NULL THEN NULL ELSE GREATEST(o.c - o.s, 0) END AS driven\n  FROM o\n)\nSELECT 'FBT ' || yr || '–' || to_char((yr + 1) % 100, 'FM00') AS \"FBT year\",\n       round(expected, 1) AS \"Expected km\", round(s, 1) AS \"Odometer at start\", round(s + expected, 1) AS \"Odometer needed at end\",\n       round(est / in_year, 1) AS \"Km per day needed\", round(driven, 1) AS \"Driven so far\",\n       round(driven / NULLIF(elapsed, 0), 1) AS \"Km per day driven\", round(driven - so_far, 1) AS \"Ahead (+) or behind (-)\",\n       round(CASE WHEN driven IS NULL THEN NULL ELSE GREATEST(expected - driven, 0) END / NULLIF(remaining, 0), 1) AS \"Km per day needed from today\"\nFROM f",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 23,
+      "type": "stat",
+      "title": "Running costs after tax",
+      "description": "What the running costs entered for this car (and TeslaMate's charging) come to on the invoices, and what they cost after tax: an expense paid from the package has its GST claimed back and the rest comes from pre-tax salary. All-time (ignores the dashboard time range). Follows the Category filter. A dash while a packaged expense can't be worked out. Cost after tax is worked out from the marginal tax rate saved in GarageBooks' Settings and each lease's pre-tax and post-tax payments (see the documentation); it is not tax advice. The home charging reimbursement needs the odometer, so it is shown in GarageBooks (the FBT year report), not here.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "TeslaMate"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 64
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "noValue": "–",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "currency:financial:$",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "textMode": "value_and_name",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "TeslaMate"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH x AS (\n  SELECT t.amount, t.packaged, t.effective_cost\n  FROM garagebooks.expense_after_tax('$tz') t\n  JOIN garagebooks.expense e ON e.id = t.expense_id JOIN garagebooks.category c ON c.id = e.category_id\n  WHERE t.car_id = $car_id AND c.kind IN ('running', 'energy') AND c.name IN ($category)\n), tm AS (\n  SELECT CASE WHEN 'Charging' IN ($category) THEN COALESCE((SELECT teslamate_charging_total FROM garagebooks.ownership WHERE car_id = $car_id), 0) ELSE 0 END AS v\n)\nSELECT COALESCE(SUM(x.amount), 0) + (SELECT v FROM tm) AS \"Invoices\",\n       CASE WHEN bool_or(x.packaged AND x.effective_cost IS NULL) THEN NULL\n            ELSE COALESCE(SUM(x.effective_cost), 0) + (SELECT v FROM tm) END AS \"After tax\"\nFROM x",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 24,
+      "type": "table",
+      "title": "After tax by FBT year",
+      "description": "Each FBT year (1 April to 31 March, from each expense's date in the dashboard's time zone): the running costs on the invoices (TeslaMate's charging included), what they cost after tax, and the difference. Ignores the dashboard time range. A dash where a packaged expense can't be worked out. Cost after tax is worked out from the marginal tax rate saved in GarageBooks' Settings and each lease's pre-tax and post-tax payments (see the documentation); it is not tax advice. The home charging reimbursement needs the odometer, so it is shown in GarageBooks (the FBT year report), not here.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "TeslaMate"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 16,
+        "x": 8,
+        "y": 64
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Invoices|After tax|Saved"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currency:financial:$"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "TeslaMate"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT 'FBT ' || y || '–' || lpad(((y + 1) % 100)::text, 2, '0') AS \"FBT year\",\n       SUM(invoice) AS \"Invoices\",\n       CASE WHEN bool_or(missing) THEN NULL ELSE SUM(effective) END AS \"After tax\",\n       CASE WHEN bool_or(missing) THEN NULL ELSE SUM(invoice) - SUM(effective) END AS \"Saved\"\nFROM (\n  SELECT garagebooks.fbt_year((t.occurred_at AT TIME ZONE '$tz')::date) AS y, t.amount AS invoice,\n         COALESCE(t.effective_cost, 0) AS effective, (t.packaged AND t.effective_cost IS NULL) AS missing\n  FROM garagebooks.expense_after_tax('$tz') t\n  JOIN garagebooks.expense e ON e.id = t.expense_id JOIN garagebooks.category c ON c.id = e.category_id\n  WHERE t.car_id = $car_id AND c.kind IN ('running', 'energy')\n  /*teslamate*/ UNION ALL\n  SELECT garagebooks.fbt_year(((cp.start_date AT TIME ZONE 'UTC') AT TIME ZONE '$tz')::date), cp.cost, cp.cost, false\n  FROM charging_processes cp\n  WHERE cp.car_id = (SELECT teslamate_car_id FROM garagebooks.car WHERE id = $car_id) AND cp.cost IS NOT NULL /*end*/\n) x GROUP BY y ORDER BY y",
+          "refId": "A"
+        }
+      ]
     }
   ]
 }

@@ -35,6 +35,7 @@ class TeslaMate:
     state: str = ABSENT
     reason: str = ""          # why its figures are held back, for the log and the page
     charging: bool = False    # whether charging_processes can be read too (an older least-privilege role can't)
+    migration: int | None = None   # TeslaMate's newest migration, when it is newer than the tested one
 
     @property
     def usable(self):
@@ -79,9 +80,10 @@ def detect(conn, allow_untested=False):
         reason = f"TeslaMate's tables can't be read ({type(positions).__name__}: {str(positions).splitlines()[0]})"
         return TeslaMate(UNAVAILABLE, reason)
     charging = _probe(conn, "SELECT car_id, start_date, cost FROM public.charging_processes LIMIT 0") is None
-    held = compat.untested(compat.newest_migration(conn))
+    newest = compat.newest_migration(conn)
+    held = compat.untested(newest)
     if held and not allow_untested:
-        return TeslaMate(UNTESTED, held, charging)
+        return TeslaMate(UNTESTED, held, charging, newest)
     return TeslaMate(OK, held or "", charging)
 
 

@@ -40,7 +40,7 @@
   <label>Car
     <select name="car_id" required>
       {% if cars|length != 1 %}<option value="">Choose…</option>{% endif %}
-      {% for c in cars %}<option value="{{ c.id }}" data-storage="{{ car_storage.get(c.id, '') }}" {{ 'selected' if values.car_id|string == c.id|string }}>{{ c.name or ('Car ' ~ c.id) }}{{ ' (sold)' if c.sold_at }}</option>{% endfor %}
+      {% for c in cars %}<option value="{{ c.id }}" data-storage="{{ car_storage.get(c.id, '') }}"{{ ' data-leased="1"' if c.id in leased_cars }} {{ 'selected' if values.car_id|string == c.id|string }}>{{ c.name or ('Car ' ~ c.id) }}{{ ' (sold)' if c.sold_at }}</option>{% endfor %}
     </select>{{ err('car_id') }}
   </label>
 {% endmacro %}
@@ -146,6 +146,20 @@
       </fieldset>
     </template>
   </details>
+
+  {# Where an expense was paid from matters only for a car with a lease: the choice is shown for those (and a saved choice, so it can be undone). #}
+  {% set paid = values.get('packaged') or 'auto' %}
+  {% if leased_cars or paid != 'auto' or errors.get('packaged') %}
+  <label id="paid-from-field"{{ '' if (values.get('car_id', 0)|int(0) in leased_cars or paid != 'auto' or errors.get('packaged')) else ' hidden' }}>Paid from
+    <select name="packaged">
+      <option value="auto" {{ 'selected' if paid == 'auto' }}>Automatic</option>
+      <option value="package" {{ 'selected' if paid == 'package' }}>The package (pre-tax salary)</option>
+      <option value="personal" {{ 'selected' if paid == 'personal' }}>Personally</option>
+    </select>{{ err('packaged') }}
+    <small>Automatic treats an expense in a category with a lease budget pool as paid from the package while a lease covers its date. Choose
+      the other two when that is wrong. This only changes what it is shown to cost after tax.</small>
+  </label>
+  {% endif %}
 
   <label>Odometer
     <span class="affix">

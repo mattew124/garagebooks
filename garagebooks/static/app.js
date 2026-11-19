@@ -258,6 +258,18 @@ document.addEventListener("DOMContentLoaded", () => {
   window.addEventListener("popstate", () => { if (document.querySelector("form[data-live]")) showList(location.href, null, false); });
   if (document.querySelector("form[data-live]")) bindList();
 
+  // Add or edit an expense: "Paid from" matters only for a car with a lease, so it follows the chosen car
+  // (the server draws it the same way; a choice already made stays visible so it can be undone).
+  const paidFrom = document.getElementById("paid-from-field");
+  if (paidFrom && paidFrom.closest("form").elements.car_id) {
+    const f = paidFrom.closest("form");
+    const showPaidFrom = () => {
+      const option = f.elements.car_id.selectedOptions && f.elements.car_id.selectedOptions[0];
+      paidFrom.hidden = !(option && option.dataset.leased) && f.elements.packaged.value === "auto";
+    };
+    f.elements.car_id.addEventListener("change", showPaidFrom);
+  }
+
   // Add a reminder: a standard reminder fills in the title and how often it repeats, and the first due date
   // and odometer reading from today and the car's odometer. A car's type decides which are offered: a battery
   // electric car has no engine oil or air filter to change.

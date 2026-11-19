@@ -5,64 +5,75 @@
 # scripts/dev.sh sets the project name, path and ports per checkout (worktree).
 name: garagebooks-dev
 
+# What the app and the optional worker share: the same image, hardening, settings and folders.
+x-dev-app: &dev-app
+  build: .
+  # GARAGEBOOKS_IMAGE: test a released image rather than this working tree.
+  image: ${GARAGEBOOKS_IMAGE:-garagebooks:${DEV_TAG:-dev}}
+  restart: unless-stopped
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  tmpfs: ["/dev/shm"]
+  # As you (scripts/dev.sh sets these), so what the app writes into the invoice folder below is yours
+  # to look at and delete.
+  user: "${DEV_UID:-10001}:${DEV_GID:-10001}"
+  volumes:
+    - dev-dashboards:/dashboards
+    - type: bind
+      source: ${DEV_INVOICES_DIR:-./.dev/invoices}
+      target: /invoices
+      bind:
+        create_host_path: false   # as in production: scripts/dev.sh makes it, Docker never does
+    - type: bind
+      source: ${DEV_CLAIMS_KEY_SOURCE:-./.dev/claims/stand-in.key}
+      target: /run/claims/connector.key
+      read_only: true
+      bind:
+        create_host_path: false
+  depends_on:
+    dev-db:
+      condition: service_healthy
+    dev-dashboards-owner:
+      condition: service_completed_successfully
+  networks: [dev]
+
+x-dev-environment: &dev-environment
+  DATABASE_HOST: dev-db
+  DATABASE_NAME: teslamate
+  # Same as the live setup: the TeslaMate database user. The app creates its own schema.
+  DATABASE_USER: teslamate
+  DATABASE_PASS: ${DEV_ADMIN_DB_PASS:-}
+  BASE_PATH: ${DEV_BASE_PATH:-/garagebooks-dev}
+  # OneDrive is on in dev, with a throwaway key from .dev/env; the app
+  # registration is entered on its OneDrive page.
+  GARAGEBOOKS_ENCRYPTION_KEY: ${DEV_ENCRYPTION_KEY:-}
+  APP_TZ: ${APP_TZ:-UTC}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  TZ: ${APP_TZ:-UTC}
+  # The app writes its Grafana dashboard here, exactly as in production.
+  DASHBOARD_DIR: /dashboards
+  # The invoice folder is on in dev too: .dev/invoices in this checkout stands in for a mounted
+  # share, so test PDFs can be dropped straight into it. INVOICES_HOST_DIR is only shown on the page.
+  INVOICES_DIR: /invoices
+  INVOICES_HOST_DIR: ${DEV_INVOICES_SHOWN:-}
+  # As docker-compose.invoices.yml: stop rather than run without the invoice folder.
+  INVOICES_REQUIRED: "1"
+  # Claiming is on in dev, against a stand-in connector with invented answers (tests/fake_connector.py,
+  # below); DEV_CLAIMS_CONNECTOR_URL in dev.env points it at a connector of your own instead.
+  CLAIMS_CONNECTOR_URL: ${DEV_CLAIMS_CONNECTOR_URL:-http://dev-claims-connector:8765}
+  # Every request is signed with this private key (scripts/dev.sh makes a new pair for the stand-in at each
+  # start; DEV_CLAIMS_CONNECTOR_KEY_FILE in dev.env supplies your own for a real connector).
+  CLAIMS_CONNECTOR_KEY_FILE: /run/claims/connector.key
+
 services:
   garagebooks-dev:
-    build: .
-    # GARAGEBOOKS_IMAGE: test a released image rather than this working tree.
-    image: ${GARAGEBOOKS_IMAGE:-garagebooks:${DEV_TAG:-dev}}
-    restart: unless-stopped
-    read_only: true
-    cap_drop: [ALL]
-    security_opt: ["no-new-privileges:true"]
-    tmpfs: ["/dev/shm"]
-    # As you (scripts/dev.sh sets these), so what the app writes into the invoice folder below is yours
-    # to look at and delete.
-    user: "${DEV_UID:-10001}:${DEV_GID:-10001}"
+    <<: *dev-app
     environment:
-      DATABASE_HOST: dev-db
-      DATABASE_NAME: teslamate
-      # Same as the live setup: the TeslaMate database user. The app creates its own schema.
-      DATABASE_USER: teslamate
-      DATABASE_PASS: ${DEV_ADMIN_DB_PASS:-}
-      BASE_PATH: ${DEV_BASE_PATH:-/garagebooks-dev}
-      # OneDrive is on in dev, with a throwaway key from .dev/env; the app
-      # registration is entered on its OneDrive page.
-      GARAGEBOOKS_ENCRYPTION_KEY: ${DEV_ENCRYPTION_KEY:-}
-      APP_TZ: ${APP_TZ:-UTC}
-      LOG_LEVEL: ${LOG_LEVEL:-info}
-      TZ: ${APP_TZ:-UTC}
-      # The app writes its Grafana dashboard here, exactly as in production.
-      DASHBOARD_DIR: /dashboards
-      # The invoice folder is on in dev too: .dev/invoices in this checkout stands in for a mounted
-      # share, so test PDFs can be dropped straight into it. INVOICES_HOST_DIR is only shown on the page.
-      INVOICES_DIR: /invoices
-      INVOICES_HOST_DIR: ${DEV_INVOICES_SHOWN:-}
-      # As docker-compose.invoices.yml: stop rather than run without the invoice folder.
-      INVOICES_REQUIRED: "1"
-      # Claiming is on in dev, against a stand-in connector with invented answers (tests/fake_connector.py,
-      # below); DEV_CLAIMS_CONNECTOR_URL in dev.env points it at a connector of your own instead.
-      CLAIMS_CONNECTOR_URL: ${DEV_CLAIMS_CONNECTOR_URL:-http://dev-claims-connector:8765}
-      # Every request is signed with this private key (scripts/dev.sh makes a new pair for the stand-in at each
-      # start; DEV_CLAIMS_CONNECTOR_KEY_FILE in dev.env supplies your own for a real connector).
-      CLAIMS_CONNECTOR_KEY_FILE: /run/claims/connector.key
-    volumes:
-      - dev-dashboards:/dashboards
-      - type: bind
-        source: ${DEV_INVOICES_DIR:-./.dev/invoices}
-        target: /invoices
-        bind:
-          create_host_path: false   # as in production: scripts/dev.sh makes it, Docker never does
-      - type: bind
-        source: ${DEV_CLAIMS_KEY_SOURCE:-./.dev/claims/stand-in.key}
-        target: /run/claims/connector.key
-        read_only: true
-        bind:
-          create_host_path: false
-    depends_on:
-      dev-db:
-        condition: service_healthy
-      dev-dashboards-owner:
-        condition: service_completed_successfully
+      <<: *dev-environment
+      # app (the default), worker or off. scripts/dev.sh starts the worker below when dev.env says
+      # SCHEDULER=worker.
+      SCHEDULER: ${SCHEDULER:-app}
     healthcheck:
       # A failing check prints the app's reason (the invoice folder isn't mounted, say), for docker inspect.
       test: ["CMD", "python3", "-c", "import sys, urllib.request as u, urllib.error as e\ntry: u.urlopen('http://127.0.0.1:8080/healthz')\nexcept e.HTTPError as x: sys.exit(x.read().decode())"]
@@ -71,7 +82,18 @@ services:
       retries: 3
     ports:
       - "127.0.0.1:${DEV_UI_PORT:-8089}:8080"
-    networks: [dev]
+
+  # The scheduled jobs in a container of their own, as the worker service in docker-compose.yml. Only
+  # with the profile, which scripts/dev.sh turns on for SCHEDULER=worker.
+  dev-worker:
+    <<: *dev-app
+    profiles: ["worker"]
+    command: ["python3", "-m", "garagebooks", "worker"]
+    environment:
+      <<: *dev-environment
+      SCHEDULER: worker
+    healthcheck:
+      disable: true
 
   # A stand-in claims connector: answers the protocol in docs/claims-connector.md from memory, with invented
   # values, and never talks to a provider. It reuses the app's image (Python is all it needs), and the

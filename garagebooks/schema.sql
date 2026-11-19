@@ -731,3 +731,163 @@ INSERT INTO garagebooks.provider_sync (id) VALUES (1) ON CONFLICT DO NOTHING;
 ALTER TABLE garagebooks.provider_transaction DROP CONSTRAINT IF EXISTS provider_transaction_kind_check;
 ALTER TABLE garagebooks.provider_transaction ADD CONSTRAINT provider_transaction_kind_check
     CHECK (kind IN ('claim_payment', 'per_km_charging', 'direct_payment', 'other'));
+
+-- Kilometre pace (roadmap L4): the odometer at a moment, for the dashboard's panel, with the same answer
+-- as sources.odometer_at in the app. A car TeslaMate tracks gets TeslaMate's last position at or before
+-- the moment, else (and for any other car) the latest reading entered by hand or on an expense at or
+-- before it; NULL when nothing is known, never 0. Built in two forms by build_odometer_at(), as
+-- build_ownership() is: with TeslaMate's positions, or without them (there is no TeslaMate, or the app
+-- is holding its figures back), when only what was entered by hand answers. Same arguments and result
+-- either way. Both are SECURITY DEFINER, so the dashboard's reader needs no access to TeslaMate's tables
+-- and the app's least-privilege role can switch forms; their only inputs are a car, a moment and a boolean.
+CREATE OR REPLACE FUNCTION garagebooks.build_odometer_at(use_teslamate boolean DEFAULT true) RETURNS boolean
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $fn$
+DECLARE
+    tm      boolean := COALESCE(use_teslamate, false) AND to_regclass('public.positions') IS NOT NULL;
+    teslamate text;
+BEGIN
+  LOOP
+    teslamate := 'NULL::double precision';
+    IF tm THEN
+        teslamate := '(SELECT round(p.odometer::numeric, 1)::double precision FROM public.positions p
+                       WHERE p.car_id = (SELECT c.teslamate_car_id FROM garagebooks.car c WHERE c.id = p_car)
+                         AND p.odometer IS NOT NULL AND p.date <= (p_at AT TIME ZONE ''UTC'')
+                       ORDER BY p.date DESC LIMIT 1)';
+    END IF;
+    BEGIN
+        EXECUTE format($def$
+CREATE OR REPLACE FUNCTION garagebooks.odometer_at(p_car integer, p_at timestamptz) RETURNS double precision
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $body$
+    SELECT COALESCE(
+        %s,
+        (SELECT r.km::double precision FROM (
+            SELECT o.km, o.read_at AS taken FROM garagebooks.odometer_reading o WHERE o.car_id = p_car AND o.read_at <= p_at
+            UNION ALL
+            SELECT e.odometer_km, e.occurred_at FROM garagebooks.expense e
+            WHERE e.car_id = p_car AND e.odometer_km IS NOT NULL AND e.occurred_at <= p_at
+        ) r ORDER BY r.taken DESC, r.km DESC LIMIT 1))
+$body$$def$, teslamate);
+        RETURN tm;
+    EXCEPTION WHEN OTHERS THEN
+        -- TeslaMate's tables are not as expected: build the form without them, so a TeslaMate that
+        -- changed never stops GarageBooks starting.
+        IF NOT tm THEN
+            RAISE;
+        END IF;
+        RAISE WARNING 'garagebooks.odometer_at is built without TeslaMate: %', SQLERRM;
+        tm := false;
+    END;
+  END LOOP;
+END
+$fn$;
+REVOKE ALL ON FUNCTION garagebooks.build_odometer_at(boolean) FROM PUBLIC;
+SELECT garagebooks.build_odometer_at(true);
+
+-- Cost after tax (roadmap L5): what an expense paid from pre-tax salary through a novated lease's package
+-- costs once the GST is claimed back and the rest comes from pre-tax salary. All of it is read-only
+-- arithmetic on what is entered; nothing here is tax advice, and no salary is ever stored.
+--   setting.marginal_tax_rate  the owner's marginal rate as a percentage, Medicare levy included (34 for
+--                              32 + 2); NULL = not entered, and no after-tax figure is shown anywhere
+--   expense.packaged           true = paid from the package, false = paid personally, NULL = automatic:
+--                              packaged when a lease of the car covers the date, the category has a budget
+--                              pool and is not a purchase
+--   category.gst_free          the category's invoices carry no GST (registration and CTP, say). Added
+--                              once, with its defaults; the owner's later edits are never overwritten
+--   lease.charging_reimbursed  the provider reimburses home charging at the ATO's cents-per-km rate
+ALTER TABLE garagebooks.setting ADD COLUMN IF NOT EXISTS marginal_tax_rate numeric(5, 2)
+    CHECK (marginal_tax_rate IS NULL OR marginal_tax_rate BETWEEN 0 AND 100);
+ALTER TABLE garagebooks.expense ADD COLUMN IF NOT EXISTS packaged boolean;
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_schema = 'garagebooks' AND table_name = 'category' AND column_name = 'gst_free') THEN
+        ALTER TABLE garagebooks.category ADD COLUMN gst_free boolean NOT NULL DEFAULT false;
+        -- The defaults are not an edit by anyone: keep them out of the change history.
+        ALTER TABLE garagebooks.category DISABLE TRIGGER log_change;
+        UPDATE garagebooks.category SET gst_free = true WHERE name = 'Registration';
+        ALTER TABLE garagebooks.category ENABLE TRIGGER log_change;
+    END IF;
+END $$;
+ALTER TABLE garagebooks.lease ADD COLUMN IF NOT EXISTS charging_reimbursed boolean NOT NULL DEFAULT false;
+
+-- The ATO's rate for reimbursing an electric car's home charging, in cents per km, by FBT year (the year
+-- it starts in, as fbt_year() numbers them). Data, not code: add or change a year on the Settings page.
+-- A year with no row uses the latest earlier year's rate; a year before the first has none.
+CREATE TABLE IF NOT EXISTS garagebooks.ev_charging_rate (
+    fbt_year      integer PRIMARY KEY,
+    cents_per_km  numeric(6, 2) NOT NULL CHECK (cents_per_km >= 0)
+);
+INSERT INTO garagebooks.ev_charging_rate (fbt_year, cents_per_km) VALUES
+    (2022, 4.20), (2023, 4.20), (2024, 4.20), (2025, 4.20), (2026, 5.47)
+ON CONFLICT (fbt_year) DO NOTHING;
+
+-- Every expense with whether it is packaged and what it costs after tax, in the time zone `tz` (the date
+-- an expense is on decides the lease that covers it, as for the FBT year). The one definition the app
+-- and the dashboard share; tests/test_after_tax.py holds it to lease.effective_cost(). With no rate
+-- entered effective_cost is NULL for a packaged expense: never the invoice standing in for it.
+--   ex_gst    = amount, or amount x 10 / 11 when the category is not GST-free
+--   post      = the lease's post-tax payment / (pre-tax + post-tax payment), 0 with no lease or no payments
+--   effective = ex_gst x ((1 - post) x (1 - rate) + post), rounded half away from zero to the cent
+-- Written as one division so nothing is rounded before the end. It reads no TeslaMate table.
+CREATE OR REPLACE FUNCTION garagebooks.expense_after_tax(tz text)
+RETURNS TABLE (expense_id bigint, car_id smallint, occurred_at timestamptz, amount numeric,
+               packaged boolean, effective_cost numeric)
+LANGUAGE sql STABLE
+AS $fn$
+    SELECT e.id, e.car_id, e.occurred_at, e.amount, p.packaged,
+           CASE WHEN NOT p.packaged THEN e.amount
+                WHEN r.rate IS NULL THEN NULL
+                ELSE round(e.amount * CASE WHEN k.gst_free THEN 1 ELSE 10 END
+                               * (q.pre * (100 - r.rate) + 100 * q.post)
+                               / ((CASE WHEN k.gst_free THEN 1 ELSE 11 END) * 100 * (q.pre + q.post)), 2) END
+    FROM garagebooks.expense e
+    JOIN garagebooks.category k ON k.id = e.category_id
+    LEFT JOIN LATERAL (SELECT l.pretax_payment, l.posttax_payment FROM garagebooks.lease l
+                       WHERE l.car_id = e.car_id
+                         AND (e.occurred_at AT TIME ZONE tz)::date BETWEEN l.start_date AND l.end_date
+                       ORDER BY l.start_date LIMIT 1) l ON true
+    CROSS JOIN LATERAL (SELECT COALESCE(e.packaged, l.pretax_payment IS NOT NULL AND k.budget_pool IS NOT NULL
+                                                    AND k.kind <> 'purchase') AS packaged) p
+    CROSS JOIN LATERAL (SELECT CASE WHEN COALESCE(l.pretax_payment, 0) + COALESCE(l.posttax_payment, 0) > 0
+                                    THEN l.pretax_payment ELSE 1 END AS pre,
+                                   CASE WHEN COALESCE(l.pretax_payment, 0) + COALESCE(l.posttax_payment, 0) > 0
+                                    THEN l.posttax_payment ELSE 0 END AS post) q
+    CROSS JOIN (SELECT (SELECT marginal_tax_rate FROM garagebooks.setting WHERE id = 1) AS rate) r
+$fn$;
+
+-- Scheduled jobs (roadmap item 7): one row per job the app knows, written by the scheduler (jobs.py).
+-- last_started_at is also the claim: a job that is due is taken with one UPDATE of this row, so two
+-- web workers, or the app and a worker container, never both run it.
+--   last_finished_at  NULL while it runs (or when the process stopped part-way)
+--   last_ok           how the last run went; last_message is a few words for the Settings page
+CREATE TABLE IF NOT EXISTS garagebooks.job (
+    name             text PRIMARY KEY CHECK (name ~ '^[a-z][a-z0-9_]{0,39}$'),
+    last_started_at  timestamptz,
+    last_finished_at timestamptz,
+    last_ok          boolean,
+    last_message     text CHECK (last_message IS NULL OR length(last_message) <= 500)
+);
+
+-- Notifications (roadmap item 8): the Settings page's address for push notices, and what has been sent.
+--   notify_url     where a notice is POSTed (an ntfy topic, an Apprise API, a Home Assistant webhook): a
+--                  secret for most of them, so it is never shown back, logged or put in an error. NULL = off.
+--   notify_format  'ntfy' (the message as text, the title in a header) or 'json' (for Apprise and
+--                  Home Assistant). NULL = ntfy.
+--   notification   one row per notice sent, so each thing is told once. The key names the event and
+--                  what it was about (for a reminder, the date and odometer it was due on), so a
+--                  reminder that is edited is a new event. Rows are pruned after a year.
+--   onedrive_account.signin_lost_at / signin_checked_at: set when a refresh finds the saved sign-in no
+--                  longer works, and when it was last tried, so the job needn't ask Microsoft every run.
+ALTER TABLE garagebooks.setting ADD COLUMN IF NOT EXISTS notify_url text
+    CHECK (notify_url IS NULL OR (notify_url ~* '^https?://[^[:space:]]+$' AND length(notify_url) <= 500));
+ALTER TABLE garagebooks.setting ADD COLUMN IF NOT EXISTS notify_format text
+    CHECK (notify_format IS NULL OR notify_format IN ('ntfy', 'json'));
+CREATE TABLE IF NOT EXISTS garagebooks.notification (
+    key     text PRIMARY KEY CHECK (length(key) <= 200),
+    sent_at timestamptz NOT NULL DEFAULT now(),
+    title   text NOT NULL CHECK (length(title) <= 300)
+);
+--   notify_teslamate  whether to tell the owner when TeslaMate is newer than this release was tested with.
+ALTER TABLE garagebooks.setting ADD COLUMN IF NOT EXISTS notify_teslamate boolean NOT NULL DEFAULT false;
+ALTER TABLE garagebooks.onedrive_account ADD COLUMN IF NOT EXISTS signin_lost_at timestamptz;
+ALTER TABLE garagebooks.onedrive_account ADD COLUMN IF NOT EXISTS signin_checked_at timestamptz;

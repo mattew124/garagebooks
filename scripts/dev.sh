@@ -23,6 +23,11 @@
 #   scripts/dev.sh destroy           remove this checkout's stack, test DB, image and .dev folder
 #   scripts/dev.sh list              every dev stack on this machine
 #   STAND_IN=1 scripts/dev.sh ...    use the stand-in claims connector even when dev.env names a real one
+#   scripts/dev.sh prune [--dry-run] destroy every dev stack whose branch has merged into main, or whose
+#                                    checkout is gone (any checkout's stacks, not only this one's)
+#   scripts/dev.sh auto-prune [on|off]
+#                                    run `prune` hourly from cron (the main checkout's copy), or stop it;
+#                                    with neither, says whether it is on
 #   scripts/dev.sh test-browser [--onedrive]
 #                                    run the browser tests against the dev stack;
 #                                    --onedrive fails if the real OneDrive checks can't run
@@ -31,7 +36,7 @@
 #   scripts/dev.sh onedrive-link     load that sign-in into this stack, pointed at the
 #                                    /Expenses test folder
 #   scripts/dev.sh psql [args]       psql on the test database
-#   scripts/dev.sh logs              follow the app's logs
+#   scripts/dev.sh logs              follow the app's logs (and the worker's, with SCHEDULER=worker)
 #
 # Settings come from ./dev.env (gitignored; see dev.env.example). That includes where the stack's invoice
 # folder is: .dev/invoices here, a folder of its own on a mounted share (DEV_INVOICES_SHARE) or one folder
@@ -134,7 +139,11 @@ compose() {
     local files=(-f docker-compose.dev.yml)
     # PUBLIC_HOST set: publish through the reverse proxy instead of on loopback.
     [ -z "${PUBLIC_HOST:-}" ] || files+=(-f docker-compose.dev.traefik.yml)
-    docker compose -p "$PROJECT" "${files[@]}" --env-file "$ENVF" "$@"
+    # SCHEDULER=worker (dev.env): the scheduled jobs run in the dev-worker container, not in the app. `down`
+    # always names the profile, so a worker started earlier is stopped too.
+    local profile=""
+    { [ "${SCHEDULER:-}" != worker ] && [ "${1:-}" != down ]; } || profile=worker
+    COMPOSE_PROFILES="$profile" docker compose -p "$PROJECT" "${files[@]}" --env-file "$ENVF" "$@"
 }
 dev_psql() { compose exec -T dev-db psql -X -q -v ON_ERROR_STOP=1 -U teslamate -d teslamate "$@"; }
 
@@ -534,6 +543,131 @@ claims_check() {
     echo "dev: claims connector: the REAL one (preview and sync only: submitting sends a real claim)"
 }
 
+# ---- prune: the stacks of branches that have merged ---------------------------------
+
+# Every stack on this machine, as "<project>\t<folder its compose files are in>". Older stacks
+# from before the project was renamed (teslamate-expenses-dev-*) are included.
+all_stacks() {
+    docker compose ls -a --format json | python3 -c '
+import json, re, sys
+for s in json.load(sys.stdin) or []:
+    if re.match(r"(garagebooks|teslamate-expenses)-dev(-|$)", s["Name"]):
+        print(s["Name"], s["ConfigFiles"].split(",")[0].rsplit("/", 1)[0], sep="\t")'
+}
+
+# The branch to compare with, per repository: origin/main, fetched once (a failed fetch, offline say,
+# uses the last one), or main where there is no origin.
+declare -A PRUNE_BASE=()
+base_ref() {
+    local dir="$1" common
+    common="$(git -C "$dir" rev-parse --path-format=absolute --git-common-dir)"
+    if [ -z "${PRUNE_BASE[$common]:-}" ]; then
+        if git -C "$dir" remote get-url origin >/dev/null 2>&1; then
+            git -C "$dir" fetch -q origin main </dev/null \
+                || echo "dev: couldn't fetch origin main; comparing with the last one fetched" >&2
+            PRUNE_BASE[$common]=origin/main
+        else
+            PRUNE_BASE[$common]=main
+        fi
+    fi
+    printf '%s' "${PRUNE_BASE[$common]}"
+}
+
+# Merged: the checkout's last commit is in main, and isn't one of main's own (first-parent) commits.
+# A branch just made from main, with nothing on it yet, is not merged. Pull requests here are
+# merged with a merge commit; a squash or rebase merge isn't recognised, so that stack is kept.
+branch_merged() {
+    local dir="$1" base tip
+    base="$(base_ref "$dir")"
+    tip="$(git -C "$dir" rev-parse HEAD)" || return 1
+    git -C "$dir" merge-base --is-ancestor "$tip" "$base" 2>/dev/null || return 1
+    ! git -C "$dir" rev-list --first-parent "$base" | grep -qx "$tip"
+}
+
+# A checkout of its own (not a folder docker left behind inside another one) with this script in it.
+is_checkout() {
+    [ -f "$1/scripts/dev.sh" ] && [ "$(git -C "$1" rev-parse --show-toplevel 2>/dev/null)" = "$(cd "$1" && pwd -P)" ]
+}
+
+# A stack nothing can manage any more (its checkout is gone, or names its stack differently now):
+# by project name alone, plus the image built for it.
+remove_stack_by_name() {
+    local project="$1" images image
+    images="$(docker ps -a --filter "label=com.docker.compose.project=$project" --format '{{.Image}}' | sort -u)"
+    docker compose -p "$project" down -v --remove-orphans </dev/null
+    for image in $images; do
+        case "$image" in
+            garagebooks:dev*|teslamate-expenses:dev*) docker image rm "$image" >/dev/null 2>&1 || true ;;
+        esac
+    done
+}
+
+prune() {
+    local dry=0 project dir action reason
+    [ "${1:-}" != --dry-run ] || dry=1
+    while IFS=$'\t' read -r project dir; do
+        action=""
+        if ! is_checkout "$dir"; then
+            action=name; reason="its checkout $dir is gone"
+        elif [ "$(git -C "$dir" rev-parse --git-dir)" = "$(git -C "$dir" rev-parse --git-common-dir)" ]; then
+            continue   # the main checkout's own stacks are never pruned
+        elif [ "$("$dir/scripts/dev.sh" info </dev/null 2>/dev/null | sed -n 's/^project=//p')" = "$project" ]; then
+            action=destroy
+        elif [ "$("$dir/scripts/dev.sh" demo info </dev/null 2>/dev/null | sed -n 's/^project=//p')" = "$project" ]; then
+            action="demo destroy"
+        else
+            action=name; reason="$dir no longer names its stack $project"
+        fi
+        if [ "$action" != name ]; then
+            branch_merged "$dir" || continue
+            reason="$(git -C "$dir" rev-parse --abbrev-ref HEAD) has merged"
+            if [ -n "$(git -C "$dir" status --porcelain)" ]; then
+                echo "dev: kept $project: $reason, but $dir has uncommitted changes"
+                continue
+            fi
+        fi
+        if [ "$dry" = 1 ]; then echo "dev: would remove $project ($reason)"; continue; fi
+        echo "dev: removing $project ($reason)"
+        if [ "$action" = name ]; then
+            remove_stack_by_name "$project"
+        else
+            # shellcheck disable=SC2086 # action is one or two words
+            "$dir/scripts/dev.sh" $action </dev/null
+        fi
+    done < <(all_stacks)
+}
+
+# ---- auto-prune: prune from cron ------------------------------------------------
+
+CRON_BEGIN='# BEGIN garagebooks dev-prune'
+CRON_END='# END garagebooks dev-prune'
+
+auto_prune() {
+    local main_root log others
+    main_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+    log="$HOME/.cache/garagebooks/dev-prune.log"
+    others="$(crontab -l 2>/dev/null | sed "/^${CRON_BEGIN}\$/,/^${CRON_END}\$/d")" || true
+    case "${1:-}" in
+        on)
+            mkdir -p "$(dirname "$log")"
+            # The main checkout's copy: a worktree's folder goes away when the worktree is removed.
+            { [ -z "$others" ] || printf '%s\n' "$others"
+              printf '%s\n' "$CRON_BEGIN" \
+                  '# Written by scripts/dev.sh auto-prune; "scripts/dev.sh auto-prune off" removes it.' \
+                  "23 * * * * \"$main_root/scripts/dev.sh\" prune >> \"$log\" 2>&1" "$CRON_END"
+            } | crontab -
+            crontab -l 2>/dev/null | grep -qxF "$CRON_BEGIN" || { echo "dev: the cron entry didn't take; see crontab -l" >&2; exit 1; }
+            echo "dev: auto-prune on: hourly, log in $log" ;;
+        off)
+            if [ -n "$others" ]; then printf '%s\n' "$others" | crontab -; else crontab -r 2>/dev/null || true; fi
+            echo "dev: auto-prune off" ;;
+        "")
+            if crontab -l 2>/dev/null | grep -qxF "$CRON_BEGIN"; then echo "dev: auto-prune on (log in $log)"
+            else echo "dev: auto-prune off"; fi ;;
+        *) echo "dev: auto-prune takes on, off or nothing" >&2; exit 2 ;;
+    esac
+}
+
 case "${1:-}" in
     up)
         claims_check
@@ -555,6 +689,8 @@ case "${1:-}" in
         # Test PDFs on a share are left for you to delete: nothing here removes files from a NAS.
         [ -z "$INVOICES_SHARE" ] || echo "dev: left $DEV_INVOICES_DIR on the share (this stack's test PDFs); delete it when you no longer need them" ;;
     list) docker compose ls -a --filter name=garagebooks-dev ;;
+    prune) prune "${2:-}" ;;
+    auto-prune) auto_prune "${2:-}" ;;
     setup) setup ;;
     info) info ;;
     screenshots) demo_screenshots ;;
@@ -577,6 +713,8 @@ case "${1:-}" in
         fi ;;
     sample-invoices) ensure_env; require_invoices; python3 scripts/dev-sample-invoices.py "$DEV_INVOICES_DIR" ;;
     psql) ensure_env; shift; dev_psql "$@" ;;
-    logs) ensure_env; compose logs -f garagebooks-dev ;;
-    *) sed -n '3,34p' "$0" >&2; exit 2 ;;
+    logs) ensure_env
+        if [ "${SCHEDULER:-}" = worker ]; then compose logs -f garagebooks-dev dev-worker
+        else compose logs -f garagebooks-dev; fi ;;
+    *) sed -n '3,39p' "$0" >&2; exit 2 ;;
 esac

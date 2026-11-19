@@ -26,7 +26,7 @@ from psycopg import errors as pg_errors
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from . import claims as claim_lib, dashboard, db, docinfo, icons, invoices, lease, leaseform, logs, onedrive, reminders, sources, storage, updates, validation
+from . import claims as claim_lib, dashboard, db, docinfo, icons, invoices, jobs, jobtext, lease, leaseform, logs, notices, notify, onedrive, reminders, sources, storage, updates, validation
 
 log = logging.getLogger("garagebooks.app")
 
@@ -34,6 +34,7 @@ MESSAGES = {
     "saved": "Expense saved.",
     "updated": "Expense updated.",
     "deleted": "Expense deleted.",
+    "notify_saved": "Notification settings saved.",
     "saved_uploaded": "Expense saved. The invoice was saved in the car's folder and linked.",
     "updated_uploaded": "Expense updated. The invoice was saved in the car's folder and linked.",
     "updated_replaced": "Expense updated. It now points to the new invoice; the previous file is still "
@@ -67,6 +68,7 @@ MESSAGES = {
     "reminder_reopened": "Reminder reopened. The next one it had added was removed.",
     "reminder_reopened_kept": "Reminder reopened. The next one had been edited or resolved, so it was left as it is.",
     "category_pool": "Budget pool saved.",
+    "category_gst_free": "GST-free setting saved.",
     "settings": "Settings saved.",
     "folders": "Folders saved.",
     "connected": "OneDrive connected.",
@@ -127,13 +129,17 @@ class PrefixMiddleware:
         return [b"Not found\n"]
 
 
-def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_fetch=None):
+def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_fetch=None, background_jobs=True,
+               notify_send=None):
     """`connect` is injectable so tests can hand in a connection to a scratch DB,
-    `onedrive_transport` so they can stand in for Microsoft, `release_fetch` for GitHub and `icon_fetch` for the provider icon's source."""
+    `onedrive_transport` so they can stand in for Microsoft, `release_fetch` for GitHub, `icon_fetch` for the provider icon's source and `notify_send` for the notification
+    service (notify.send's signature).
+    `background_jobs=False` is for the worker (`python -m garagebooks worker`), which runs the scheduled jobs itself."""
     app = Flask(__name__)
     logs.configure(app.logger, os.environ.get("LOG_LEVEL"))
     log = app.logger
     tz = os.environ.get("APP_TZ", "UTC")
+    real_start = connect is None      # not a test handing in its own database
     if connect is None:
         connect = db.connect
         if os.environ.get("SKIP_MIGRATE") != "1":
@@ -187,6 +193,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         sources.sync_cars(conn, found)
         if known["view"] != found.usable and db.build_ownership(conn, found.usable) is not None:
             known["view"] = found.usable
+            db.build_odometer_at(conn, found.usable)
         return found
 
     def refresh_dashboard():
@@ -206,8 +213,19 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                     sold = any(car["sold_at"] is not None for car in db.cars(conn))
             except Exception:           # noqa: BLE001 - no database yet: the panel is left out until a sale is known
                 sold = False
+            try:
+                with connect() as conn:
+                    # The cost-after-tax panels have nothing to show without a marginal rate and a lease.
+                    after_tax = db.get_settings(conn)["marginal_tax_rate"] is not None and bool(db.lease_car_ids(conn))
+            except Exception:           # noqa: BLE001 - no database yet: left out until there is something to show
+                after_tax = False
+            try:
+                with connect() as conn:
+                    pace = db.any_estimated_km(conn)
+            except Exception:           # noqa: BLE001 - no database yet: the panel is left out until a lease has an estimate
+                pace = False
             wrote = dashboard.export(dashboard_dir, tz, os.environ.get("BASE_PATH", "").rstrip("/"), start=start,
-                                     teslamate=known["teslamate"], sold=sold)
+                                     teslamate=known["teslamate"], sold=sold, pace=pace, after_tax=after_tax)
             log.info("Grafana dashboard %s in %s", "written" if wrote else "already up to date", dashboard_dir)
         except OSError as exc:
             log.warning("Could not write the Grafana dashboard to %s: %s", dashboard_dir, exc)
@@ -278,6 +296,34 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
              "on" if update_check.active else "off", "on" if connector else "off")
     update_check.status()    # starts the first check now, so the footer knows by the first page
 
+    # Scheduled jobs (jobs.py). Add a job here, beside the things it needs. Where they run is SCHEDULER:
+    # in this process (the default), in a worker container, or nowhere.
+    scheduler = jobs.Scheduler(connect, log)
+    scheduler.add("teslamate", timedelta(hours=1), lambda conn: f"TeslaMate: {teslamate(conn, fresh=True).state}",
+                  "Looks at TeslaMate again: adds its new cars, and holds its figures back or lets them through.")
+    scheduler.add("dashboard", timedelta(hours=6), lambda _conn: refresh_dashboard(),
+                  "Rewrites the Grafana dashboard, so its time range and panels follow the data.")
+    send_notice = notify_send or notify.send
+
+    def notifications(conn):
+        return notices.run(conn, send_notice, teslamate(conn), datetime.now(ZoneInfo(tz)),
+                           onedrive=drive is not None, signin_check=check_signin)
+    scheduler.add("notifications", timedelta(minutes=15), notifications,
+                  "Sends the notices you have asked for (Settings, Notifications): a reminder coming due, the OneDrive "
+                  "client secret nearing its expiry, the OneDrive sign-in lost. Each is sent once.")
+    app.extensions["scheduler"] = scheduler
+    try:
+        jobs_mode = jobs.mode(os.environ)
+    except ValueError as exc:
+        log.error("%s Running the scheduled jobs in the app, as if it were unset.", exc)
+        jobs_mode = "app"
+    app.extensions["scheduler_mode"] = jobs_mode
+    if real_start and background_jobs and jobs_mode == "app":
+        scheduler.start_thread()
+    log.info("scheduled jobs: %s", {"app": "run by this process", "off": "switched off (SCHEDULER=off)",
+                                    "worker": "left to a worker (SCHEDULER=worker)"}[jobs_mode]
+             if background_jobs else "this is the worker")
+
     # ---- helpers --------------------------------------------------------------
 
     @app.template_filter("money")
@@ -295,6 +341,9 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
     @app.template_filter("when")
     def when(value):
         return value.astimezone(ZoneInfo(tz)).strftime("%d %b %Y %H:%M")
+
+    app.jinja_env.filters["every"] = jobtext.every_in_words
+    app.jinja_env.filters["job_state"] = jobtext.state
 
     @app.template_filter("isodate")
     def isodate(value):
@@ -406,11 +455,27 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         except Exception:
             return {"grafana_url": None}
 
+    def after_tax_view(rows, rate):
+        """What the list shows of the cost after tax, from db.after_tax_facts rows: each packaged expense's cost
+        ({id: cost}), how many are packaged, and the total of every expense after tax (None while a packaged one
+        can't be worked out, which is whenever no rate is entered)."""
+        costs, packaged, total = {}, 0, Decimal(0)
+        for row in rows:
+            paid_from_package = lease.is_packaged(row["packaged"], row["lease_id"] is not None, row["budget_pool"], row["kind"])
+            cost = lease.effective_cost(row["amount"], paid_from_package, row["gst_free"], row["pretax_payment"],
+                                        row["posttax_payment"], rate)
+            if paid_from_package:
+                packaged += 1
+                costs[row["id"]] = cost
+            total = None if cost is None or total is None else total + cost
+        return {"costs": costs, "packaged": packaged, "total": total, "rate_set": rate is not None}
+
     def form_context(values=None, errors=None, expense_id=None):
         with connect() as conn:
             account = db.onedrive_account(conn) if drive else None
             folders = db.car_folders(conn)
             return {
+                "leased_cars": db.lease_car_ids(conn),
                 # Which storage each car's invoices go to, for the file picker: only where it can be used.
                 "car_storage": {car_id: f["backend"] for car_id, f in folders.items() if store_for(f["backend"])},
                 "default_storage": "onedrive" if drive else "local",
@@ -500,7 +565,9 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         shortly before it expires (a refresh costs most of a second). It is only reused while the stored
         refresh token is the one it came with: disconnecting, signing in again or new credentials all
         change that, so none of them leaves a kept token in use. Otherwise: spend the stored refresh token
-        and store the one Microsoft hands back."""
+        and store the one Microsoft hands back. A sign-in Microsoft refuses is noted (signin_lost_at), so
+        the notifications job can say so; a refresh that works clears it."""
+        lost = None
         with connect() as conn:
             account = db.onedrive_account(conn, lock=True)
             if not account or not account["refresh_token"]:
@@ -508,17 +575,34 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 raise onedrive.NotConnected()
             if kept.get("key") == account["refresh_token"] and kept["until"] > time.monotonic():
                 return kept["token"]
-            tokens = drive.refresh(account["client_id"], drive.decrypt(account["client_secret"]),
-                                   drive.decrypt(account["refresh_token"]))
-            key = account["refresh_token"]
-            if tokens.get("refresh_token"):
-                key = drive.encrypt(tokens["refresh_token"])
-                db.save_onedrive_account(conn, refresh_token=key)
+            try:
+                tokens = drive.refresh(account["client_id"], drive.decrypt(account["client_secret"]),
+                                       drive.decrypt(account["refresh_token"]))
+            except onedrive.SignInExpired as exc:
+                lost = exc
+            else:
+                key = account["refresh_token"]
+                if tokens.get("refresh_token"):
+                    key = drive.encrypt(tokens["refresh_token"])
+                db.save_onedrive_account(conn, refresh_token=key, signin_lost_at=None, signin_checked_at=datetime.now(timezone.utc))
+        if lost is not None:        # after the transaction above, which holds the row
+            kept.clear()
+            with connect() as conn:
+                db.note_signin_lost(conn)
+            raise lost
         lifetime = tokens.get("expires_in", 0) - TOKEN_MARGIN_SECONDS
         kept.clear()
         if lifetime > 0:
             kept.update(key=key, token=tokens["access_token"], until=time.monotonic() + lifetime)
         return tokens["access_token"]
+
+    def check_signin():
+        """Does Microsoft still accept the saved sign-in? Asked by the notifications job at most once a day
+        (a refresh is the only way to know). The answer is recorded by access_token; this just asks."""
+        try:
+            access_token()
+        except onedrive.OneDriveError as exc:      # lost (recorded), not connected, or Microsoft out of reach: tried again later
+            log.info("OneDrive sign-in check: %s", exc)
 
     def upload_ready(car_id):
         """Has this car a folder, in a storage this installation has and can use right now?"""
@@ -561,7 +645,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         """Echo the raw submission back into the form after a validation error."""
         return {k: form.get(k, "") for k in (
             "car_id", "category_id", "date", "time", "amount", "odometer_km",
-            "vendor", "notes", "invoice_url", "invoice_path")}
+            "vendor", "notes", "invoice_url", "invoice_path", "packaged")}
 
     # ---- routes ---------------------------------------------------------------
 
@@ -655,7 +739,9 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             totals = {"n": len(rows), "total": sum((e["amount"] for e in rows), Decimal(0))}
         else:
             totals = db.totals(conn, category_id, car_id, start, end, tz)
-        return {"view": view, "sort_link": sort_link, "expenses": rows,
+        after = after_tax_view(db.after_tax_facts(conn, tz, expense_ids=[e["id"] for e in rows]),
+                               db.get_settings(conn)["marginal_tax_rate"])
+        return {"view": view, "sort_link": sort_link, "expenses": rows, "after": after,
                 "history_synced": connector is not None and db.last_synced(conn) is not None, "totals": totals, "claim_open": claim_open,
                 "sorts": {"date": "Date", "category": "Category", "vendor": "Vendor", "amount": "Amount",
                           "odometer": "Odometer"},
@@ -740,6 +826,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             "odometer_km": "" if row["odometer_km"] is None else f"{row['odometer_km']:.1f}",
             "vendor": row["vendor"] or "", "notes": row["notes"] or "",
             "invoice_url": row["invoice_url"] or "", "invoice_path": row["invoice_path"] or "",
+            "packaged": {None: "auto", True: "package", False: "personal"}[row["packaged"]],
         }
         with connect() as conn:
             offer = bool(db.stored_open_reminders(conn, row["car_id"]))
@@ -926,14 +1013,42 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 "later_budgets": [b for b in budgets if b["effective_from"] != row["start_date"]],
                 "figures": lease.derived(row, budgets, today)}
 
+    def km_pace_for(conn, car, row, year, today):
+        """The kilometre pace of one lease in one FBT year (lease.km_pace) with the odometers it needs, read
+        through sources.odometer_at: at the start of the days held, and now, or at their end once that is
+        past. Moments are in APP_TZ. `reasons` says why an odometer isn't known; the readings say where
+        each came from."""
+        zone = ZoneInfo(tz)
+        found = lease.km_pace(row, year, today, None, None)
+        found.update(start_reading=None, current_reading=None, reasons=[])
+        if found["state"] not in ("current", "past") or found["estimate"] is None:
+            return found
+        state = teslamate(conn)
+        first, last = found["first"], found["last"]
+        start = sources.odometer_at(conn, state, car["id"], datetime.combine(first, dtime.min, zone))
+        end = min(datetime.now(zone), datetime.combine(last + timedelta(days=1), dtime.min, zone))
+        now = sources.odometer_at(conn, state, car["id"], end)
+        found = lease.km_pace(row, year, today, start and start.km, now and now.km)
+        held_back = car["teslamate_car_id"] is not None and state.state in (sources.UNAVAILABLE, sources.UNTESTED)
+        reasons = []
+        for reading, day in ((start, first), (now, min(today, last))):
+            if reading is None:
+                reasons.append(f"TeslaMate's figures are held back ({state.reason}), so only readings entered by hand count, "
+                               f"and none is on or before {day.day} {day:%b %Y}." if held_back else
+                               f"No odometer reading is on or before {day.day} {day:%b %Y}.")
+        found.update(start_reading=start, current_reading=now, reasons=list(dict.fromkeys(reasons)))
+        return found
+
     def render_lease(car, status=200):
         today = today_here()
         with connect() as conn:
             current = db.current_lease(conn, car["id"], today)
             views = [lease_view(conn, row, today) for row in db.car_leases(conn, car["id"])]
-        shown = next((v for v in views if current and v["id"] == current["id"]), None)
+            shown = next((v for v in views if current and v["id"] == current["id"]), None)
+            if shown and shown["figures"]["status"] == "current":
+                shown["pace"] = km_pace_for(conn, car, shown, lease.fbt_year(today), today)
         others = [v for v in views if v is not shown]
-        return render_template("lease.html", **lease_context(car, shown=shown, others=others, today=today)), status
+        return render_template("lease.html", **lease_context(car, shown=shown, others=others, today=today, fbt_label=lease.fbt_label)), status
 
     def render_lease_form(car, lease_id, values, errors, status=200):
         return render_template("lease_form.html", **lease_context(car, lease_id=lease_id, values=values, errors=errors)), status
@@ -942,6 +1057,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         """A saved lease as the form's text fields."""
         values = {k: ("" if v is None else v) for k, v in row.items()}
         values["associate_lease"] = "on" if row["associate_lease"] else ""
+        values["charging_reimbursed"] = "on" if row["charging_reimbursed"] else ""
         for pool, amount in budgets.items():
             values[f"budget_{pool}"] = amount
         return values
@@ -953,7 +1069,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         with connect() as conn:
             budgets_on = db.lease_budgets_on(conn)
         values, errors = validation.parse_lease_form(request.form, lease.POOLS, lease.FREQUENCIES,
-                                                     lease.FBT_METHODS, lease.TAX_TREATMENTS, budgets_on)
+                                                     lease.FBT_METHODS, lease.TAX_TREATMENTS, budgets_on,
+                                                     electric=car["kind"] == "BEV")
         if not errors:
             with connect() as conn:
                 clash = db.overlapping_lease(conn, car_id, values["start_date"], values["end_date"], lease_id)
@@ -1030,6 +1147,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         if lease_id is None:      # another lease was added between the check and the save
             return render_lease_form(car, None, request.form, {"start_date": "These dates overlap another lease of this car."}, 400)
         log.info("lease %s added to car %s", lease_id, car_id)
+        refresh_dashboard()
         return redirect(url_for("car_lease", car_id=car_id, msg=lease_msg("lease_added")), 303)
 
     def lease_or_404(car_id, lease_id):
@@ -1061,6 +1179,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         if outcome == "overlap":
             return render_lease_form(car, lease_id, request.form, {"start_date": "These dates overlap another lease of this car."}, 400)
         log.info("lease %s of car %s updated", lease_id, car_id)
+        refresh_dashboard()
         return redirect(url_for("car_lease", car_id=car_id, msg=lease_msg("lease_saved")), 303)
 
     @app.post("/cars/<int:car_id>/lease/<int:lease_id>/delete")
@@ -1070,6 +1189,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             if not db.delete_lease(conn, car_id, lease_id):
                 abort(404)
         log.info("lease %s of car %s deleted", lease_id, car_id)
+        refresh_dashboard()
         return redirect(url_for("car_lease", car_id=car_id, msg="lease_deleted"), 303)
 
     @app.post("/api/lease-prefill")
@@ -1103,6 +1223,64 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
 
     # ---- the FBT year report (roadmap L2) -------------------------------------------
 
+    def home_charging(conn, car, leases, year, today, rate):
+        """The home charging reimbursement of an FBT year, for an electric car on a lease that has it ticked:
+        None when there is nothing to work out, else {"km", "rate", "result"}. The distance is the odometer at the
+        end of the days the car was held in the year (or now, if earlier) less the odometer at their start,
+        from sources.odometer_at() only: km is None when either reading isn't known, and then there is no result.
+        `rate` is (the FBT year whose cents per km it is, cents per km), or None before the first year with one."""
+        if car["kind"] != "BEV":
+            return None
+        spans = lease.reimbursed_spans([row for row, _ in leases], year, today)
+        if not spans:
+            return None
+        zone, state, now = ZoneInfo(tz), teslamate(conn), datetime.now(ZoneInfo(tz))
+        km = Decimal(0)
+        for first, last in spans:
+            begin = datetime.combine(first, dtime.min, zone)
+            end = min(datetime.combine(last + timedelta(days=1), dtime.min, zone), now)
+            at_start, at_end = (sources.odometer_at(conn, state, car["id"], when) for when in (begin, end))
+            if at_start is None or at_end is None:
+                km = None
+                break
+            km += (Decimal(str(at_end.km)) - Decimal(str(at_start.km))).quantize(Decimal("0.1"))
+        ev = lease.ev_rate(db.ev_charging_rates(conn), year)
+        return {"km": km, "rate": ev, "result": lease.charging_reimbursement(km, ev and ev[1], rate)}
+
+    def fbt_after_tax(conn, car, leases, report, year, today, budgets_on):
+        """The report's "After tax" part: each line the report has with its invoice total and what it costs after
+        tax, TeslaMate's charging (paid personally), the reimbursement, and the year's after-tax cost. With no
+        marginal rate there are no figures. A total that depends on something unknown is None, never a number
+        standing in for it. Purchases are left out, as in the running costs."""
+        rate = db.get_settings(conn)["marginal_tax_rate"]
+        if rate is None:
+            return {"rate_set": False}
+        rows = [r for r in db.after_tax_facts(conn, tz, car_id=car["id"], year=year) if r["kind"] != "purchase"]
+        if budgets_on:
+            names = {**lease.POOLS, lease.NO_POOL: "Not in a pool"}
+            found = lease.after_tax_lines(rows, lambda r: r["budget_pool"] or lease.NO_POOL, rate)
+            order = [k for k in names if k in found]
+        else:
+            names = {}
+            found = lease.after_tax_lines(rows, lambda r: r["category"], rate)
+            order = sorted(found)
+        lines = [{"key": k, "label": names.get(k, k), **found[k]} for k in order]
+        invoice = sum((line["invoice"] for line in lines), Decimal(0))
+        effective = None if any(line["effective"] is None for line in lines) else sum((line["effective"] for line in lines), Decimal(0))
+        charging = report["teslamate_charging"]
+        if charging:
+            if charging["value"] is None:
+                invoice = effective = None
+            else:
+                invoice = None if invoice is None else invoice + Decimal(charging["value"])
+                effective = None if effective is None else effective + Decimal(charging["value"])
+        reimbursement = home_charging(conn, car, leases, year, today, rate)
+        total = effective
+        if reimbursement is not None:
+            total = None if reimbursement["result"] is None or effective is None else effective - reimbursement["result"]["tax_saved"]
+        return {"rate_set": True, "lines": lines, "charging": charging, "invoice": invoice, "effective": effective,
+                "reimbursement": reimbursement, "total": total}
+
     @app.get("/cars/<int:car_id>/fbt")
     def car_fbt(car_id):
         car = car_or_404(car_id)
@@ -1125,11 +1303,13 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             # TeslaMate's charging for the year (only its part: what was entered by hand is already in the costs)
             charging = sources.charging_cost(conn, teslamate(conn), car_id, datetime(year, 4, 1, tzinfo=zone),
                                              datetime(year + 1, 4, 1, tzinfo=zone), include_manual=False)
-        report = lease.fbt_report(leases, costs, charging, year, today)
+            report = lease.fbt_report(leases, costs, charging, year, today)
+            after = fbt_after_tax(conn, car, leases, report, year, today, budgets_on)
+            paces = [km_pace_for(conn, car, row, year, today) for row, _budgets, _figures in report["leases"]]
         earlier, later = [y for y in years if y < year], [y for y in years if y > year]
-        return render_template("fbt.html", car=car, report=report, today=today, budgets_on=budgets_on, frequencies={k: v[0] for k, v in lease.FREQUENCIES.items()},
+        return render_template("fbt.html", car=car, report=report, paces=paces, today=today, budgets_on=budgets_on, frequencies={k: v[0] for k, v in lease.FREQUENCIES.items()},
                                previous=earlier[-1] if earlier else None, following=later[0] if later else None,
-                               label=lease.fbt_label)
+                               label=lease.fbt_label, after=after)
     # ---- reminders (roadmap item 4) ------------------------------------------------
 
     def open_items(conn, car_id=None):
@@ -1651,16 +1831,22 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             return failed
         return jsonify(ok=True, state=signin_view({"signin": {"state": reply.body.get("state")}})["state"])
 
-
+    @app.post("/categories/<int:category_id>/gst_free")
+    def category_gst_free(category_id):
+        """An unticked box sends nothing, so the form saying it is ticked is exactly "1"."""
+        with connect() as conn:
+            if not db.set_gst_free(conn, category_id, request.form.get("gst_free") == "1"):
+                abort(404)
+        return redirect(url_for("categories", msg="category_gst_free"), 303)
     # ---- change history ---------------------------------------------------------
 
     # Field -> label, in the order they are shown. id and the created/updated stamps are never shown.
     history_fields = {
         "expense": (("car_id", "Car"), ("category_id", "Category"), ("occurred_at", "Date and time"),
                     ("amount", "Amount"), ("odometer_km", "Odometer"), ("vendor", "Vendor"), ("notes", "Notes"),
-                    ("invoice_url", "Invoice link"), ("invoice_path", "Invoice file")),
+                    ("invoice_url", "Invoice link"), ("invoice_path", "Invoice file"), ("packaged", "Paid from")),
         "category": (("name", "Name"), ("kind", "Kind"), ("sort_order", "Sort order"),
-                     ("upload_folder", "Invoice subfolder")),
+                     ("upload_folder", "Invoice subfolder"), ("gst_free", "GST-free")),
         "expense_claim": (("provider", "Provider"), ("reference", "Reference"), ("status", "Status"),
                           ("amount", "Amount"), ("gst", "GST"), ("approved_amount", "Approved amount"),
                           ("paid_date", "Paid on")),
@@ -1668,6 +1854,10 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
 
     def history_entries(entries, car_names, category_names):
         def show(field, value):
+            if field == "packaged":
+                return {None: "Automatic", True: "The package", False: "Personally"}.get(value, str(value))
+            if field == "gst_free":
+                return "Yes" if value else "No"
             if value is None or value == "":
                 return "—"
             if field == "car_id":
@@ -1694,7 +1884,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 changed = [(label, show(f, before.get(f)), show(f, after.get(f)))
                            for f, label in fields if before.get(f) != after.get(f)]
             else:
-                changed = [(label, None, show(f, row.get(f))) for f, label in fields if row.get(f) not in (None, "")]
+                changed = [(label, None, show(f, row.get(f))) for f, label in fields
+                           if row.get(f) not in (None, "") and not (f == "gst_free" and row.get(f) is False)]
             if e["table_name"] == "expense":
                 title = "Expense: " + " · ".join(
                     x for x in (category_names.get(row.get("category_id")), car_names.get(row.get("car_id")),
@@ -1832,7 +2023,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         with connect() as conn:
             # A new registration can't use the old one's sign-in.
             db.save_onedrive_account(conn, client_secret=drive.encrypt(secret), refresh_token=None,
-                                     account=None, auth_state=None, auth_expires_at=None, **fields)
+                                     account=None, auth_state=None, auth_expires_at=None,
+                                     signin_lost_at=None, signin_checked_at=None, **fields)
         return redirect(url_for("storage_page", msg="credentials"), 303)
 
     @app.post("/onedrive/connect")
@@ -1887,7 +2079,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             return render_storage(status=400, notice=exc.user_message)
         name = drive.account_name(tokens["access_token"]) or "your Microsoft account"
         with connect() as conn:
-            db.save_onedrive_account(conn, refresh_token=drive.encrypt(tokens["refresh_token"]), account=name)
+            db.save_onedrive_account(conn, refresh_token=drive.encrypt(tokens["refresh_token"]), account=name,
+                                     signin_lost_at=None, signin_checked_at=None)
         log.info("OneDrive connected")
         resp = redirect(url_for("storage_page", msg="connected"), 303)
         resp.delete_cookie(STATE_COOKIE, path=request.script_root or "/")
@@ -1897,7 +2090,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
     def onedrive_disconnect():
         need_drive()
         with connect() as conn:
-            db.save_onedrive_account(conn, refresh_token=None, account=None)
+            db.save_onedrive_account(conn, refresh_token=None, account=None, signin_lost_at=None, signin_checked_at=None)
         log.info("OneDrive disconnected")
         return redirect(url_for("storage_page", msg="disconnected"), 303)
 
@@ -2332,6 +2525,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
     @app.route("/settings", methods=["GET", "POST"])
     def settings():
         values, errors = {}, {}
+        ev_form_values, new_rate = {}, {"year": "", "cents": ""}
         if request.method == "POST":
             for field in ("app_url", "grafana_url"):
                 raw = request.form.get(field, "")
@@ -2352,6 +2546,35 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 values["invoice_name_format"] = validation.parse_name_format(raw)
             except ValueError as exc:
                 errors["invoice_name_format"] = str(exc)
+            raw = request.form.get("marginal_tax_rate", "")
+            values["marginal_tax_rate"] = raw
+            try:
+                values["marginal_tax_rate"] = validation.parse_marginal_rate(raw)
+            except ValueError as exc:
+                errors["marginal_tax_rate"] = str(exc)
+            with connect() as conn:
+                known_rates = db.ev_charging_rates(conn)
+            rate_changes = {}
+            for year in known_rates:       # the rows on the page: each is checked, so a bad one is shown where it is
+                field = f"ev_rate_{year}"
+                if field in request.form:
+                    ev_form_values[year] = request.form[field]
+                    try:
+                        rate_changes[year] = validation.parse_cents_per_km(request.form[field])
+                    except ValueError as exc:
+                        errors[field] = str(exc)
+            new_rate.update(year=request.form.get("new_rate_year", ""), cents=request.form.get("new_rate_cents", ""))
+            if new_rate["year"].strip() or new_rate["cents"].strip():
+                try:
+                    new_year = validation.parse_rate_year(new_rate["year"])
+                except ValueError as exc:
+                    errors["new_rate_year"] = str(exc)
+                try:
+                    new_cents = validation.parse_cents_per_km(new_rate["cents"])
+                except ValueError as exc:
+                    errors["new_rate_cents"] = str(exc)
+                if not errors.keys() & {"new_rate_year", "new_rate_cents"}:
+                    rate_changes[new_year] = new_cents
             values["lease_budgets"] = bool(request.form.get("lease_budgets"))
             raw = request.form.get("multi_amount", "max")
             values["multi_amount"] = raw
@@ -2368,15 +2591,82 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                                      None if date_pattern == validation.DEFAULT_DATE_PATTERN else date_pattern,
                                      None if name_format == validation.DEFAULT_NAME_FORMAT else name_format,
                                      values["multi_amount"], values["lease_budgets"])
+                    db.set_marginal_tax_rate(conn, values["marginal_tax_rate"])
+                    for year, cents in rate_changes.items():
+                        db.set_ev_charging_rate(conn, year, cents)
+                refresh_dashboard()         # the cost-after-tax panels appear and go with the rate
                 log.info("settings saved")
                 return redirect(url_for("settings", msg="settings"), 303)
         else:
             with connect() as conn:
                 values = db.get_settings(conn)
+        return render_settings(values, errors, ev_form_values=ev_form_values, new_rate=new_rate)
+
+    def render_settings(values, errors, status=None, notify_errors=None, notify_format=None, test=None,
+                        ev_form_values=None, new_rate=None):
+        """The Settings page. The notification address is a secret: the page is only told its host."""
+        with connect() as conn:
+            address, saved_format = db.get_notify(conn)
+            notify_teslamate = db.get_notify_teslamate(conn)
+            job_list = scheduler.status(conn)
+            ev_rates = db.ev_charging_rates(conn)
         return render_template("settings.html", values=values, errors=errors, aliases=validation.NAME_ALIASES,
+                               job_list=job_list, jobs_mode=jobs_mode,
+                               ev_rates=ev_rates, ev_rate_values=ev_form_values or {}, new_rate=new_rate or {"year": "", "cents": ""},
                                date_default=validation.DEFAULT_DATE_PATTERN, name_default=validation.DEFAULT_NAME_FORMAT,
                                multi_choices=validation.MULTI_AMOUNT_CHOICES, example=name_example(values),
-                               message=MESSAGES.get(request.args.get("msg", ""))), (400 if errors else 200)
+                               message=MESSAGES.get(request.args.get("msg", "")),
+                               notify={"host": notify.host_of(address) if address else None, "errors": notify_errors or {},
+                                       "format": notify_format or saved_format, "formats": notify.FORMATS, "test": test,
+                                       "teslamate": notify_teslamate},
+                               ), status or (400 if errors or notify_errors else 200)
+
+    @app.post("/settings/notifications")
+    def notifications_save():
+        """Save the notification address and format. A blank address keeps the one saved (it is never shown
+        back); the Remove box clears it."""
+        errors = {}
+        raw_format = request.form.get("notify_format", "")
+        try:
+            fmt = validation.parse_notify_format(raw_format)
+        except ValueError as exc:
+            fmt = None
+            errors["notify_format"] = str(exc)
+        try:
+            address = validation.parse_notify_url(request.form.get("notify_url", ""))
+        except ValueError as exc:
+            address = None
+            errors["notify_url"] = str(exc)
+        if errors:
+            with connect() as conn:
+                values = db.get_settings(conn)
+            return render_settings(values, {}, notify_errors=errors, notify_format=fmt or "ntfy")
+        with connect() as conn:
+            if request.form.get("notify_clear"):
+                address = None
+            elif address is None:
+                address = db.get_notify(conn)[0]
+            db.save_notify(conn, address, fmt)
+            db.save_notify_teslamate(conn, request.form.get("notify_teslamate"))
+        log.info("notification settings saved: %s", "on (" + notify.host_of(address) + ")" if address else "off")
+        return redirect(url_for("settings", msg="notify_saved"), 303)
+
+    @app.post("/settings/notifications/test")
+    def notifications_test():
+        """Send one notice now to the saved address, and say how it went, in words that never hold the address."""
+        with connect() as conn:
+            address, fmt = db.get_notify(conn)
+            values = db.get_settings(conn)
+        if not address:
+            test = {"ok": False, "text": "Save an address first: there is nowhere to send it yet."}
+        else:
+            try:
+                send_notice(address, fmt, "GarageBooks test notice",
+                            "If you can read this, notifications are working.", tags=("white_check_mark",))
+                test = {"ok": True, "text": f"A test notice was sent to {notify.host_of(address)}. Check that it arrived."}
+            except jobs.JobError as exc:
+                test = {"ok": False, "text": str(exc)}
+        return render_settings(values, {}, status=200, test=test)
 
     @app.post("/api/prefill")
     def api_prefill():

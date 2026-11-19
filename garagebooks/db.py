@@ -236,11 +236,44 @@ def build_ownership(conn, use_teslamate):
         return None
 
 
+def build_odometer_at(conn, use_teslamate):
+    """The same for the SQL odometer function the dashboard's kilometre pace panel uses. Returns whether
+    TeslaMate's positions are in it, or None when this database user may not rebuild it."""
+    try:
+        with conn.transaction():
+            return conn.execute("SELECT garagebooks.build_odometer_at(%s) AS tm", (use_teslamate,)).fetchone()["tm"]
+    except psycopg.Error as exc:
+        log.warning("the odometer function could not be rebuilt: %s", exc)
+        return None
+
+
 def get_settings(conn):
     row = conn.execute("SELECT app_url, grafana_url, invoice_date_format, invoice_name_format, multi_amount, "
-                       "lease_budgets FROM garagebooks.setting WHERE id = 1").fetchone()
+                       "lease_budgets, marginal_tax_rate FROM garagebooks.setting WHERE id = 1").fetchone()
     return row or {"app_url": None, "grafana_url": None, "invoice_date_format": None,
-                   "invoice_name_format": None, "multi_amount": None, "lease_budgets": False}
+                   "invoice_name_format": None, "multi_amount": None, "lease_budgets": False,
+                   "marginal_tax_rate": None}
+
+
+def get_notify(conn):
+    """The notification address and format (Settings), or None and 'ntfy'. Only the notifications job and
+    the test button read the address; a page shows notify.host_of(address), never the address."""
+    row = conn.execute("SELECT notify_url, notify_format FROM garagebooks.setting WHERE id = 1").fetchone()
+    return (row["notify_url"], row["notify_format"] or "ntfy") if row else (None, "ntfy")
+
+
+def save_notify(conn, url, fmt):
+    conn.execute("UPDATE garagebooks.setting SET notify_url = %s, notify_format = %s WHERE id = 1", (url, fmt))
+
+
+def get_notify_teslamate(conn):
+    """Whether to send a notice when TeslaMate is newer than the tested release (Settings). Off by default."""
+    row = conn.execute("SELECT notify_teslamate FROM garagebooks.setting WHERE id = 1").fetchone()
+    return bool(row and row["notify_teslamate"])
+
+
+def save_notify_teslamate(conn, on):
+    conn.execute("UPDATE garagebooks.setting SET notify_teslamate = %s WHERE id = 1", (bool(on),))
 
 
 def lease_budgets_on(conn):
@@ -255,10 +288,33 @@ def save_settings(conn, app_url, grafana_url, invoice_date_format, invoice_name_
                  (app_url, grafana_url, invoice_date_format, invoice_name_format, multi_amount, bool(lease_budgets)))
 
 
+def set_marginal_tax_rate(conn, rate):
+    """The owner's marginal tax rate as a percentage (None: not entered). Only ever a rate, never a salary."""
+    conn.execute("UPDATE garagebooks.setting SET marginal_tax_rate = %s WHERE id = 1", (rate,))
+
+
+def ev_charging_rates(conn):
+    """The ATO's home charging rates: {FBT year: cents per km}."""
+    return {r["fbt_year"]: r["cents_per_km"] for r in conn.execute(
+        "SELECT fbt_year, cents_per_km FROM garagebooks.ev_charging_rate ORDER BY fbt_year")}
+
+
+def set_ev_charging_rate(conn, year, cents_per_km):
+    """Add a year's rate, or change it."""
+    conn.execute("INSERT INTO garagebooks.ev_charging_rate (fbt_year, cents_per_km) VALUES (%s, %s) "
+                 "ON CONFLICT (fbt_year) DO UPDATE SET cents_per_km = excluded.cents_per_km", (year, cents_per_km))
+
+
 def categories(conn):
     return conn.execute(
-        "SELECT id, name, kind, upload_folder, budget_pool FROM garagebooks.category ORDER BY sort_order, name"
+        "SELECT id, name, kind, upload_folder, budget_pool, gst_free FROM garagebooks.category ORDER BY sort_order, name"
     ).fetchall()
+
+
+def set_gst_free(conn, category_id, gst_free):
+    """Whether a category's invoices carry no GST. False if no such category."""
+    return conn.execute("UPDATE garagebooks.category SET gst_free = %s WHERE id = %s",
+                        (bool(gst_free), category_id)).rowcount == 1
 
 
 def add_category(conn, name):
@@ -284,7 +340,7 @@ def set_upload_folder(conn, category_id, folder):
 _SELECT = """
     SELECT e.id, e.car_id, c.name AS car_name, e.category_id, cat.name AS category,
            cat.kind, e.occurred_at, e.amount, e.odometer_km, e.vendor, e.notes,
-           e.invoice_url, e.invoice_path,
+           e.invoice_url, e.invoice_path, e.packaged,
            c.make AS car_make, c.model AS car_model, cat.budget_pool,
            cl.provider AS claim_provider, cl.provider_id AS claim_provider_id, cl.reference AS claim_reference,
            cl.status AS claim_status, cl.paid_date AS claim_paid_date, cl.approved_amount AS claim_approved,
@@ -295,6 +351,36 @@ _SELECT = """
     JOIN garagebooks.category cat ON cat.id = e.category_id
     LEFT JOIN garagebooks.expense_claim cl ON cl.expense_id = e.id
 """
+
+# What the cost after tax needs of an expense (lease.effective_cost works it out): its own choice, its
+# category's pool, kind and GST status, and the payments of the lease covering its date in time zone %(tz)s.
+_AFTER_TAX_SELECT = """
+    SELECT e.id, e.car_id, e.category_id, cat.name AS category, cat.kind, cat.budget_pool, cat.gst_free, e.amount,
+           e.occurred_at, e.packaged, l.id AS lease_id, l.pretax_payment, l.posttax_payment
+    FROM garagebooks.expense e
+    JOIN garagebooks.category cat ON cat.id = e.category_id
+    LEFT JOIN LATERAL (SELECT * FROM garagebooks.lease l WHERE l.car_id = e.car_id
+                       AND (e.occurred_at AT TIME ZONE %(tz)s)::date BETWEEN l.start_date AND l.end_date
+                       ORDER BY l.start_date LIMIT 1) l ON true
+"""
+
+
+def after_tax_facts(conn, tz, car_id=None, category_id=None, year=None, expense_ids=None):
+    """Expenses with what lease.effective_cost() needs, newest first. Narrowed to a car, a category, an FBT
+    year (by each expense's date in `tz`) or some expense ids."""
+    if any(v is not None and not 0 <= v <= 32767 for v in (car_id, category_id)):
+        return []                   # ids are smallint: nothing can match one outside it
+    where = ["(%(car)s::bigint IS NULL OR e.car_id = %(car)s)", "(%(cat)s::bigint IS NULL OR e.category_id = %(cat)s)",
+             "(%(year)s::integer IS NULL OR garagebooks.fbt_year((e.occurred_at AT TIME ZONE %(tz)s)::date) = %(year)s)",
+             "(%(ids)s::bigint[] IS NULL OR e.id = ANY(%(ids)s))"]
+    return conn.execute(f"{_AFTER_TAX_SELECT} WHERE {' AND '.join(where)} ORDER BY e.occurred_at DESC, e.id DESC",
+                        {"tz": tz, "car": car_id, "cat": category_id, "year": year,
+                         "ids": None if expense_ids is None else list(expense_ids)}).fetchall()
+
+
+def lease_car_ids(conn):
+    """The cars that have at least one lease."""
+    return {r["car_id"] for r in conn.execute("SELECT DISTINCT car_id FROM garagebooks.lease")}
 
 
 # What the list can be sorted by: the name in the address -> the SQL it means. Never built from user text.
@@ -344,14 +430,14 @@ def get_expense(conn, expense_id):
 
 
 _FIELDS = ("car_id", "category_id", "occurred_at", "amount", "odometer_km",
-           "vendor", "notes", "invoice_url", "invoice_path")
+           "vendor", "notes", "invoice_url", "invoice_path", "packaged")
 
 
 def insert_expense(conn, v):
     return conn.execute(
         f"INSERT INTO garagebooks.expense ({', '.join(_FIELDS)}) "
         f"VALUES ({', '.join('%(' + f + ')s' for f in _FIELDS)}) RETURNING id",
-        {"invoice_path": None, **v},
+        {"invoice_path": None, "packaged": None, **v},
     ).fetchone()["id"]
 
 
@@ -444,7 +530,7 @@ def update_expense(conn, expense_id, v):
     sets = ", ".join(f"{f} = %({f})s" for f in _FIELDS)
     cur = conn.execute(
         f"UPDATE garagebooks.expense SET {sets}, updated_at = now() WHERE id = %(id)s",
-        {"invoice_path": None, **v, "id": expense_id},
+        {"invoice_path": None, "packaged": None, **v, "id": expense_id},
     )
     return cur.rowcount == 1
 
@@ -498,13 +584,20 @@ def save_onedrive_account(conn, **fields):
 
 
 
+def note_signin_lost(conn):
+    """Microsoft refused the saved sign-in: remember when it was first noticed (the notifications job tells
+    the owner once). Cleared by connecting again, new credentials, disconnecting or a refresh that works."""
+    conn.execute("UPDATE garagebooks.onedrive_account SET signin_lost_at = COALESCE(signin_lost_at, now()), "
+                 "signin_checked_at = now() WHERE refresh_token IS NOT NULL")
+
+
 # ---- leases (roadmap L1) -------------------------------------------------------------
 
 LEASE_FIELDS = ("package_name", "financier", "start_date", "end_date", "refinance_date", "term_months",
                 "pay_frequency", "pretax_payment", "posttax_payment", "admin_fee", "car_cost",
                 "residual_amount", "residual_percent", "fbt_base_value", "fbt_method", "statutory_percent",
                 "ev_exempt", "tax_treatment", "tax_treatment_note", "estimated_km_per_year",
-                "rego_expiry", "rego_renewed_by_provider", "associate_lease",
+                "rego_expiry", "rego_renewed_by_provider", "associate_lease", "charging_reimbursed",
                 "form_url", "form_path", "agreement_url", "agreement_path")
 
 
@@ -526,6 +619,11 @@ def current_lease(conn, car_id, on):
     return conn.execute(
         "SELECT * FROM garagebooks.lease WHERE car_id = %(car)s AND end_date >= %(on)s "
         "ORDER BY start_date LIMIT 1", {"car": car_id, "on": on}).fetchone()
+
+
+def any_estimated_km(conn):
+    """Whether any lease has an estimated km per year: only then does the dashboard have a kilometre pace to show."""
+    return conn.execute("SELECT EXISTS (SELECT 1 FROM garagebooks.lease WHERE estimated_km_per_year IS NOT NULL) AS found").fetchone()["found"]
 
 
 def lease_budgets(conn, lease_id):
@@ -627,7 +725,7 @@ def open_reminders(conn, car_id=None):
         "FROM garagebooks.reminder_due d JOIN garagebooks.car c ON c.id = d.car_id "
         "LEFT JOIN garagebooks.category cat ON cat.id = d.category_id "
         "LEFT JOIN garagebooks.reminder r ON r.id = d.reminder_id "
-        "WHERE (%(car)s::smallint IS NULL OR d.car_id = %(car)s)", {"car": car_id}).fetchall()
+        "WHERE (%(car)s::bigint IS NULL OR d.car_id = %(car)s)", {"car": car_id}).fetchall()
 
 
 def get_reminder(conn, reminder_id, lock=False):

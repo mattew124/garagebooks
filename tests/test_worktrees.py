@@ -28,6 +28,7 @@ def repo(tmp_path):
     main = tmp_path / "garagebooks"
     (main / "scripts").mkdir(parents=True)
     shutil.copy(ROOT / "scripts" / "dev.sh", main / "scripts" / "dev.sh")
+    (main / ".gitignore").write_text(".dev/\n")   # as in the repository
     git(main, "init", "-q", "-b", "main")
     git(main, "add", ".")
     git(main, "commit", "-q", "-m", "init")
@@ -170,3 +171,138 @@ def test_destroy_does_not_need_the_share_and_leaves_its_files(repo, tmp_path):
                          env={"PATH": f"{fake.parent}:/usr/bin:/bin", "HOME": str(wt), "DEV_INVOICES_SHARE": str(share)})
     assert (share / "old-branch" / "kept.pdf").read_text() == "pdf"
     assert "left" in out.stdout and str(share / "old-branch") in out.stdout
+
+
+# ---- prune: removing the stacks of branches that have merged ----------------------------
+
+def fake_tools(tmp_path, stacks, images=None):
+    """A stand-in docker (compose ls answers with `stacks`, {name: folder}) and crontab, logging each call."""
+    import json
+    bindir = tmp_path / "bin"
+    bindir.mkdir(exist_ok=True)
+    listing = tmp_path / "compose-ls.json"
+    listing.write_text(json.dumps([{"Name": n, "Status": "running(3)",
+                                    "ConfigFiles": f"{d}/docker-compose.dev.yml,{d}/docker-compose.dev.traefik.yml"}
+                                   for n, d in stacks.items()]))
+    (tmp_path / "images").write_text("\n".join(images or []))
+    docker = bindir / "docker"
+    docker.write_text(f"""#!/bin/sh
+echo "$*" >> "{tmp_path}/docker.log"
+case "$*" in
+    "compose ls"*) cat "{listing}" ;;
+    "ps -a"*) cat "{tmp_path}/images" ;;
+esac
+""")
+    crontab = bindir / "crontab"
+    crontab.write_text(f"""#!/bin/sh
+if [ "$1" = -l ]; then [ -f "{tmp_path}/crontab" ] || exit 1; cat "{tmp_path}/crontab"
+else cat > "{tmp_path}/crontab"; fi
+""")
+    docker.chmod(0o755)
+    crontab.chmod(0o755)
+    return {"PATH": f"{bindir}:/usr/bin:/bin", "HOME": str(tmp_path / "home")}
+
+
+def dev(checkout, env, *args):
+    return subprocess.run([str(checkout / "scripts" / "dev.sh"), *args], cwd=checkout, capture_output=True,
+                          text=True, env=env)
+
+
+def docker_calls(tmp_path):
+    log = tmp_path / "docker.log"
+    return log.read_text().splitlines() if log.exists() else []
+
+
+def merged_worktree(main, name):
+    """A worktree whose branch has a commit of its own, merged into main the way a pull request is."""
+    wt = worktree(main, name)
+    (wt / f"{name}.txt").write_text("work")
+    git(wt, "add", ".")
+    git(wt, "commit", "-q", "-m", "work")
+    git(main, "merge", "-q", "--no-ff", "-m", "Merge pull request", f"worktree-{name}")
+    (wt / ".dev").mkdir()
+    (wt / ".dev" / "env").write_text("DEV_ADMIN_DB_PASS=x\n")
+    return wt
+
+
+def downs(tmp_path):
+    return [c for c in docker_calls(tmp_path) if c.startswith("compose") and " down " in f"{c} "]
+
+
+def test_prune_removes_the_stack_of_a_merged_branch(repo, tmp_path):
+    wt = merged_worktree(repo, "done")
+    env = fake_tools(tmp_path, {"garagebooks-dev-done": wt})
+    r = dev(repo, env, "prune")
+    assert r.returncode == 0, r.stderr
+    assert any("-p garagebooks-dev-done" in c and "-v" in c.split() for c in downs(tmp_path))
+    assert not (wt / ".dev").exists()
+    assert (wt / "done.txt").exists(), "the checkout itself stays"
+    assert "garagebooks-dev-done" in r.stdout
+
+
+def test_prune_keeps_branches_that_have_not_merged(repo, tmp_path):
+    wip = worktree(repo, "wip")
+    (wip / "wip.txt").write_text("work")
+    git(wip, "add", ".")
+    git(wip, "commit", "-q", "-m", "not merged yet")
+    fresh = worktree(repo, "fresh")   # just made from main: its tip is main's own commit, not a merge
+    env = fake_tools(tmp_path, {"garagebooks-dev-wip": wip, "garagebooks-dev-fresh": fresh,
+                                "garagebooks-dev": repo, "garagebooks-dev-demo": repo})
+    r = dev(repo, env, "prune")
+    assert r.returncode == 0, r.stderr
+    assert downs(tmp_path) == []
+
+
+def test_prune_keeps_a_merged_checkout_with_uncommitted_changes(repo, tmp_path):
+    wt = merged_worktree(repo, "dirty")
+    (wt / "done.txt").write_text("still editing")
+    env = fake_tools(tmp_path, {"garagebooks-dev-dirty": wt})
+    r = dev(repo, env, "prune")
+    assert downs(tmp_path) == [] and (wt / ".dev").exists()
+    assert "uncommitted" in r.stdout
+
+
+def test_prune_removes_the_demo_stack_of_a_merged_branch_too(repo, tmp_path):
+    wt = merged_worktree(repo, "done")
+    env = fake_tools(tmp_path, {"garagebooks-dev-done-demo": wt})
+    dev(repo, env, "prune")
+    assert any("-p garagebooks-dev-done-demo" in c for c in downs(tmp_path))
+
+
+def test_prune_removes_a_stack_whose_checkout_is_gone(repo, tmp_path):
+    gone = tmp_path / "removed-worktree"
+    (gone / "grafana").mkdir(parents=True)      # all docker left behind: not a checkout any more
+    env = fake_tools(tmp_path, {"garagebooks-dev-gone": gone, "teslamate-expenses-dev-old": tmp_path / "nowhere"},
+                     images=["garagebooks:dev-gone", "postgres:18-trixie"])
+    r = dev(repo, env, "prune")
+    assert r.returncode == 0, r.stderr
+    calls = docker_calls(tmp_path)
+    assert any(c.startswith("compose -p garagebooks-dev-gone down -v") for c in calls)
+    assert any(c.startswith("compose -p teslamate-expenses-dev-old down -v") for c in calls)
+    assert "image rm garagebooks:dev-gone" in calls
+    assert not any("image rm postgres" in c for c in calls), "only the stack's own build is removed"
+
+
+def test_prune_dry_run_changes_nothing(repo, tmp_path):
+    wt = merged_worktree(repo, "done")
+    env = fake_tools(tmp_path, {"garagebooks-dev-done": wt, "garagebooks-dev-gone": tmp_path / "nowhere"})
+    r = dev(repo, env, "prune", "--dry-run")
+    assert r.returncode == 0, r.stderr
+    assert downs(tmp_path) == [] and (wt / ".dev").exists()
+    assert "garagebooks-dev-done" in r.stdout and "garagebooks-dev-gone" in r.stdout
+
+
+def test_auto_prune_adds_and_removes_its_own_cron_entry_only(repo, tmp_path):
+    env = fake_tools(tmp_path, {})
+    (tmp_path / "crontab").write_text("0 6 * * * /opt/other-job.sh\n")
+    wt = worktree(repo, "anywhere")
+    assert dev(wt, env, "auto-prune", "on").returncode == 0
+    assert dev(wt, env, "auto-prune", "on").returncode == 0      # twice: still one entry
+    tab = (tmp_path / "crontab").read_text()
+    assert "/opt/other-job.sh" in tab
+    jobs = [line for line in tab.splitlines() if "dev.sh" in line and not line.startswith("#")]
+    # The main checkout's script: a worktree's folder goes away when it is removed.
+    assert len(jobs) == 1 and f'"{repo}/scripts/dev.sh" prune' in jobs[0]
+    assert "on" in dev(wt, env, "auto-prune").stdout
+    assert dev(wt, env, "auto-prune", "off").returncode == 0
+    assert (tmp_path / "crontab").read_text() == "0 6 * * * /opt/other-job.sh\n"

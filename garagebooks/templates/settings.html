@@ -44,7 +44,88 @@
     <span>Track lease budgets<br><small>For a salary-packaged car whose provider sets a yearly budget for each running cost. Adds the budgets to
       a car's lease, a budget pool to each category, and the budgets to the FBT year report. Leave it off if you don't follow them:
       budgets already entered are kept.</small></span></label>
+  <section class="stack" id="after-tax-settings">
+    <h2 class="card-title">Cost after tax</h2>
+    <label>Marginal tax rate (%)
+      <input type="text" name="marginal_tax_rate" inputmode="decimal" maxlength="7" autocomplete="off" placeholder="e.g. 34"
+             value="{{ values.marginal_tax_rate if values.marginal_tax_rate is not none else '' }}">
+      {% if errors.marginal_tax_rate %}<span class="error">{{ errors.marginal_tax_rate }}</span>{% endif %}
+      <small>Your marginal income tax rate, <strong>including the 2% Medicare levy</strong> (32% plus the levy is entered as 34). Used to show what an expense paid
+        from a lease package costs after tax, beside what the invoice says. Only the rate is kept, never a salary. Leave it blank and no after-tax figure is shown.
+        This is arithmetic on what you enter, not tax advice.</small></label>
+    <fieldset class="due-fields" id="ev-rates">
+      <legend>ATO rate for home charging an electric car (cents per km)</legend>
+      <small>What a provider may reimburse for charging an electric car at home on a novated or associate lease, by FBT year (the year it starts in:
+        2026 is 1 April 2026 to 31 March 2027). A year with no rate here uses the latest earlier year's, and the FBT year report says which it used.
+        Check the ATO's current figure; add a year when it publishes one.</small>
+      {% for year, cents in ev_rates.items() %}
+      <label class="row"><span>FBT {{ year }}–{{ '%02d' % ((year + 1) % 100) }}</span>
+        <input type="text" name="ev_rate_{{ year }}" inputmode="decimal" maxlength="8" autocomplete="off" value="{{ ev_rate_values.get(year, cents) }}">
+        {% if errors.get('ev_rate_' ~ year) %}<span class="error">{{ errors['ev_rate_' ~ year] }}</span>{% endif %}</label>
+      {% endfor %}
+      <div class="row">
+        <label>Add a year <input type="text" name="new_rate_year" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="e.g. 2027" value="{{ new_rate.year }}">
+          {% if errors.new_rate_year %}<span class="error">{{ errors.new_rate_year }}</span>{% endif %}</label>
+        <label>Cents per km <input type="text" name="new_rate_cents" inputmode="decimal" maxlength="8" autocomplete="off" value="{{ new_rate.cents }}">
+          {% if errors.new_rate_cents %}<span class="error">{{ errors.new_rate_cents }}</span>{% endif %}</label>
+      </div>
+    </fieldset>
+  </section>
   <button type="submit" class="button">Save</button>
+</form>
+<section class="card stack" id="scheduled-jobs">
+  <h2 class="card-title">Scheduled jobs</h2>
+  <p id="jobs-where">{% if jobs_mode == "worker" %}These jobs run in a worker container, a second container from the same image.
+    {%- elif jobs_mode == "off" %}Scheduled jobs are switched off (<code>SCHEDULER=off</code>), so none of these run. See
+    <a href="{{ docs_url }}scheduled-jobs/" target="_blank" rel="noopener noreferrer">Scheduled jobs</a> in the documentation to turn them on.
+    {%- else %}These jobs are run by this app, in the background.{% endif %}</p>
+  <ul class="jobs">
+    {% for job in job_list %}{% set state = job | job_state %}
+    <li data-job="{{ job.name }}" data-state="{{ state }}">
+      <strong>{{ job.name }}</strong>, {{ job.every | every }}<br>
+      <small>{{ job.description }}</small><br>
+      <small>Last run:
+        {% if state == "never" %}Not run yet.
+        {%- else %}{{ job.last_started_at | when }}.
+          {% if state == "ok" %}OK{% if job.last_message %}: {{ job.last_message }}{% endif %}.
+          {%- elif state == "failed" %}Failed{% if job.last_message %}: {{ job.last_message }}{% endif %}.
+          {%- else %}Running, or interrupted.{% endif %}
+          Next due: {{ job.next_due_at | when }}.{% endif %}</small>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+<h2 id="notifications">Notifications</h2>
+<form method="post" action="{{ url_for('notifications_save') }}" class="card stack">
+  <p>Push a notice to your phone when a reminder comes due, the OneDrive client secret is nearing its expiry date, or the
+    OneDrive sign-in is lost, or (if you tick the box below) TeslaMate is upgraded past what GarageBooks was tested with. Each is sent once. Leave the address empty to keep notifications off.</p>
+  <label>Notification address
+    <input type="password" name="notify_url" maxlength="500" autocomplete="off" spellcheck="false"
+           placeholder="{{ 'Saved: ' ~ notify.host ~ ' (leave blank to keep it)' if notify.host else 'https://ntfy.example/your-topic' }}">
+    {% if notify.errors.notify_url %}<span class="error">{{ notify.errors.notify_url }}</span>{% endif %}
+    <small>Treat it as a password: for most services the address is the secret, so it is never shown here again.
+      {% if notify.host %}Sending to <strong>{{ notify.host }}</strong>.{% endif %}</small></label>
+  {% if notify.host %}<label class="check" for="notify-clear"><input id="notify-clear" type="checkbox" name="notify_clear" value="1">
+    <span>Remove the saved address (turns notifications off)</span></label>{% endif %}
+  <label>Format
+    <select name="notify_format">
+      {% for key, text in notify.formats.items() %}<option value="{{ key }}" {{ 'selected' if notify.format == key }}>{{ text }}</option>
+      {% endfor %}
+    </select>
+    {% if notify.errors.notify_format %}<span class="error">{{ notify.errors.notify_format }}</span>{% endif %}
+    <small>ntfy sends the message as plain text. JSON sends <code>title</code>, <code>message</code> and <code>body</code>.</small></label>
+  <label class="check" for="notify-teslamate"><input id="notify-teslamate" type="checkbox" name="notify_teslamate" value="1" {{ 'checked' if notify.teslamate }}>
+    <span>Tell me when TeslaMate is newer than GarageBooks has been tested with (its figures are held back until you upgrade)</span></label>
+  <small>Examples (use your own): ntfy <code>https://ntfy.example/your-topic</code>; an Apprise API
+    <code>https://apprise.example/notify/your-key</code> with JSON; a Home Assistant webhook
+    <code>https://homeassistant.example/api/webhook/your-webhook-id</code> with JSON.
+    http:// and https:// addresses on your own network work too.</small>
+  <button type="submit" class="button">Save notifications</button>
+</form>
+<form method="post" action="{{ url_for('notifications_test') }}" class="card stack">
+  <button type="submit" class="button secondary">Send a test notice</button>
+  <small>Sends one notice now to the saved address. Save first if you have just changed it.</small>
+  {% if notify.test %}<p class="{{ 'notice' if notify.test.ok else 'error' }}" role="status">{{ notify.test.text }}</p>{% endif %}
 </form>
 <p><small>Grafana logo: <a href="{{ icon_credit.url }}" target="_blank" rel="noopener noreferrer">{{ icon_credit.text }}</a>,
   <a href="{{ icon_credit.licence_url }}" target="_blank" rel="noopener noreferrer">{{ icon_credit.licence }}</a>.

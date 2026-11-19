@@ -77,7 +77,15 @@ Parallel sessions each get a git worktree under `.claude/worktrees/<name>/`, and
    the repository (`onedrive-save` writes it; `ONEDRIVE_DEV_FILE` moves it) and points this stack at the
    `/Expenses test` folder. Never commit that file, and never point a test at a folder holding real invoices.
 4. When the branch is merged or abandoned, run `scripts/dev.sh destroy` before the
-   worktree is removed. `scripts/dev.sh list` shows every dev stack still running.
+   worktree is removed. `scripts/dev.sh list` shows every dev stack still running, and
+   `scripts/dev.sh prune` destroys those of merged branches and removed worktrees
+   (`scripts/dev.sh auto-prune on` runs it hourly). Take a stack `down` while its branch waits for review:
+   a host running many stacks at once runs out of memory.
+   Each stack creates a Docker network, and Docker's default address pool runs into
+   `192.168.0.0/16` once enough exist. A leftover bridge there, even a stopped one,
+   hijacks routing to that whole range (VPN clients and other LANs use it). Never pin a
+   `subnet:` in `192.168.0.0/16`, `10.0.0.0/8` or `100.64.0.0/10`, and after `dev.sh up`
+   check `ip route | grep 192.168` prints nothing.
 
 ## Releasing
 

@@ -85,6 +85,8 @@
     {{ choose('pay_frequency', 'Paid', frequencies) }}
     <div class="row">{{ field('pretax_payment', 'Pre-tax part, per pay', 'money') }}{{ field('posttax_payment', 'Post-tax part, per pay', 'money') }}</div>
     {{ field('admin_fee', 'Provider\'s admin fee, per pay', 'money') }}
+    {% if car.kind == 'BEV' %}{{ tick('charging_reimbursed', 'Home charging is reimbursed at the ATO\'s cents-per-km rate',
+        'Tick this if the provider reimburses charging at home at the ATO\'s rate for electric cars. The FBT year report then shows the reimbursement (the km driven times the rate, set in Settings) and the tax saved on it. It does not cover a plug-in hybrid.') }}{% endif %}
   </section>
 
   <section class="card stack">

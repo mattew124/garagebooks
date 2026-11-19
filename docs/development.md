@@ -69,9 +69,16 @@ scripts/teslamate-compat.sh 4.5.0 --record   # after it passes: update compat.py
 It starts a throwaway Postgres, lets the real `teslamate/teslamate` image migrate it, runs the
 whole suite on that schema, and compares the
 newest migration with the recorded one. Exit status 0 means tested, 1 means a failure,
-2 means it passes but is newer than recorded. A weekly *TeslaMate compatibility* workflow runs it against
-the latest release and opens an issue when it doesn't exit 0. After `--record`, update the CHANGELOG
-(an upgrade note) and the README line naming the tested release.
+2 means it passes but is newer than recorded. `--if-new` exits 0 at once when the release is already the
+recorded one. A daily *TeslaMate compatibility* workflow runs it with `--if-new` against the latest release
+(so nothing runs unless there is a new one). On a failure (exit 1) it opens an issue. When the tests pass on a
+newer release (exit 2) it runs `--record`, which updates `compat.py`, the README line and the CHANGELOG, opens a
+pull request and runs CI on it. When the next tag is clear (`scripts/auto_rc.py`: the next `-rcN` of a version that
+has only had candidates, or `-rc1` of a PATCH after a stable release when the only unreleased change is the
+compatibility entry), it then merges the pull request, renames the CHANGELOG entry, tags that candidate and
+starts the Release workflow, so the image is built for you to test. It never tags a stable release. If the tag
+isn't clear, the pull request is left open. It needs *Allow GitHub Actions to create pull requests* turned on in
+the repository's Actions settings.
 
 
 ## Tax rates for the lease workbook
@@ -130,7 +137,8 @@ It needs the `gh` CLI and `zstd`. Databases and SARIF results go to `.dev/codeql
 
 `scripts/dev.sh` runs the UI and Grafana on their own test database, not on the TeslaMate
 network, so it can't touch live data. It listens on localhost unless `dev.env` says otherwise
-(see `dev.env.example`).
+(see `dev.env.example`). The scheduled jobs run in the app; set `SCHEDULER=worker` in `dev.env` to run them in a
+`dev-worker` container instead, as in production (see [Scheduled jobs](scheduled-jobs.md)).
 
 ```bash
 scripts/dev.sh up             # http://localhost:8089/garagebooks-dev/ and :8090/garagebooks-dev/grafana/
@@ -142,7 +150,7 @@ scripts/dev.sh sample-expenses  # add made-up expenses to try the app with; `cle
 scripts/dev.sh sample-invoices  # write made-up invoice PDFs into the stack's invoice folder
 scripts/dev.sh setup          # in a new worktree: create .venv
 scripts/dev.sh down           # stop the stack, keeping its data
-scripts/dev.sh logs           # follow the app's log
+scripts/dev.sh logs           # follow the app's log (and the worker's, with SCHEDULER=worker in dev.env)
 scripts/dev.sh psql           # a psql shell on the test database
 scripts/dev.sh onedrive-save  # save a OneDrive sign-in for the dev stack to reuse
 ```
@@ -151,6 +159,34 @@ Each git worktree gets its own stack and test database at `/garagebooks-dev/<wor
 parallel branches never share running code. `scripts/dev.sh info` shows a checkout's path and
 ports, `list` shows every running dev stack, and `destroy` removes one (its containers, test database, image and `.dev` folder). `.worktreeinclude`
 copies your `dev.env` into new Claude Code worktrees.
+
+Stacks add up when several branches are in flight, and each holds a database, Grafana and the app in
+memory. Two commands clear away the ones nobody needs:
+
+```bash
+scripts/dev.sh prune --dry-run   # what prune would remove, and why
+scripts/dev.sh prune             # destroy the stacks of merged branches, and of checkouts that are gone
+scripts/dev.sh auto-prune on     # run prune every hour from cron; `off` stops it, no argument says which
+```
+
+`prune` looks at every dev stack on the machine, not only this checkout's. A worktree's stack (and its
+demo stack) goes once the worktree's last commit has been merged into `origin/main` (fetched first) with a
+merge commit, as pull requests are here; a squash or rebase merge isn't recognised, and that stack is kept.
+A branch just made from `main`, with nothing on it yet, is not merged. A merged worktree that still has
+uncommitted changes is kept and named in the output. A stack whose checkout has gone (removed with
+`git worktree remove` before `destroy`) is taken down by name, with its test database and its image. The
+main checkout's own stacks are never pruned. `prune` removes stacks only: the worktree folders stay, as with
+`destroy`. `auto-prune on` adds one entry to your crontab that runs the main checkout's `dev.sh`, so it
+outlives every worktree, and logs to `~/.cache/garagebooks/dev-prune.log`.
+
+Each dev stack creates its own Docker network. Docker's default address pool starts at
+`172.17.0.0/16` and moves on to `192.168.0.0/16` after about ten networks, and a network
+there (even a stopped one) captures routing for the whole range, which VPN clients and home
+LANs commonly use. Keep to `172.16.0.0/12` by setting `default-address-pools` in
+`/etc/docker/daemon.json` (for example `{"base": "172.28.0.0/14", "size": 20}`, then restart
+Docker), never set a `subnet:` in `192.168.0.0/16`, `10.0.0.0/8` or `100.64.0.0/10`, and run
+`scripts/dev.sh destroy` (or `prune`) for stacks you no longer need. `ip route | grep 192.168` should print
+nothing.
 
 The invoice folder is on in the dev stack too: `.dev/invoices` in the checkout stands in for a mounted
 share (the app runs as you there, so its files are yours), and `destroy` removes it. Drop PDFs into it

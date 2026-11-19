@@ -42,7 +42,7 @@ The app connects as `DATABASE_USER` with `DATABASE_PASS` to `DATABASE_NAME` on `
 
 ## TeslaMate version
 
-Each release is tested against one TeslaMate release (named in the README and in `garagebooks/compat.py`). TeslaMate has no stable database schema, so on start the app compares the newest migration in TeslaMate's `schema_migrations` table with the one it was tested against. If the database is **newer**, the app still runs, and holds TeslaMate's figures back: the odometer look-up, TeslaMate's charging costs and the totals that need them say *unavailable* for the cars TeslaMate tracks, with the reason on the Cars page, at the top of the dashboard and in the log. Everything you entered is unaffected. Upgrade GarageBooks to a release that lists a newer TeslaMate and the figures return by themselves. `ALLOW_UNTESTED_TESLAMATE=1` (in `.env`, restart to apply) uses them anyway and logs an error; use it only for a short while, since a changed table can make the figures wrong. An older TeslaMate is not held back. If the role cannot read `schema_migrations`, the app warns and carries on.
+Each release is tested against one TeslaMate release (named in the README and in `garagebooks/compat.py`). TeslaMate has no stable database schema, so on start the app compares the newest migration in TeslaMate's `schema_migrations` table with the one it was tested against. If the database is **newer**, the app still runs, and holds TeslaMate's figures back: the odometer look-up, TeslaMate's charging costs and the totals that need them say *unavailable* for the cars TeslaMate tracks, with the reason on the Cars page, at the top of the dashboard and in the log. Everything you entered is unaffected. Upgrade GarageBooks to a release that lists a newer TeslaMate and the figures return by themselves. `ALLOW_UNTESTED_TESLAMATE=1` (in `.env`, restart to apply) uses them anyway and logs an error; use it only for a short while, since a changed table can make the figures wrong. The state is written to the log once each time it changes: at `WARNING` when figures are held back (the line starts `TeslaMate: untested; its figures are held back`), and at `ERROR` when `ALLOW_UNTESTED_TESLAMATE=1` uses them anyway, so a log alert can watch for it. A phone notice is optional too: tick the box under Notifications on the Settings page. An older TeslaMate is not held back. If the role cannot read `schema_migrations`, the app warns and carries on.
 
 ## Without TeslaMate
 
@@ -58,6 +58,21 @@ The app looks at the database once a minute and is in one of four states, shown 
 | Unavailable | Its tables can't be read (permissions, or a table that changed) | The same, with the error as the reason |
 
 Held-back figures are shown as *unavailable*, never as zero, and nothing else stops. When TeslaMate appears, is repaired or is upgraded past, the app notices within a minute, with no restart: it adds TeslaMate's cars, and rewrites the dashboard and the `garagebooks.ownership` view to match. GarageBooks only ever reads TeslaMate's `cars`, `positions` and `charging_processes` tables, and none of its own tables points at them, so TeslaMate can be removed, or delete a car, without touching your expenses.
+
+## Scheduled jobs
+
+`SCHEDULER` (in `.env`, restart to apply) says where the periodic work runs: `app` (the default, a background
+thread in the app), `worker` (a second container from the same image, started with `docker compose --profile
+worker up -d`) or `off`. See [Scheduled jobs](scheduled-jobs.md).
+
+## Cost after tax in the database
+
+For queries of your own: `garagebooks.expense_after_tax('Australia/Brisbane')` returns every expense with its car,
+date, amount, whether it counts as paid from the package (`packaged`) and `effective_cost`, what it costs after
+tax (the invoice amount for one paid personally, and null for a packaged one while no marginal rate is entered).
+The argument is the time zone that decides which lease covers an expense's date. It reads no TeslaMate table.
+`garagebooks.ev_charging_rate` holds the ATO's home charging rate (cents per km) by FBT year. The rules are on
+[Novated lease calculations](lease-calculations.md#cost-after-tax-l5).
 
 ## Logs
 
@@ -95,6 +110,13 @@ is sent and the protocol it speaks are on the [Claims connector](claims-connecto
 ## Timezone
 
 Date and time are entered in `APP_TZ` and stored as `timestamptz`. TeslaMate's `positions.date` is naive UTC; the odometer lookup converts before comparing.
+
+## Notifications
+
+The address notices are sent to is set on the Settings page, not in `.env`. It is a secret, so it is never
+logged, shown back or put in an error; it is stored unencrypted in the `garagebooks` schema, so a database
+backup holds it. Sending is by the `notifications` scheduled job, every 15 minutes. See
+[Notifications](notifications.md).
 
 ## CSRF protection
 
