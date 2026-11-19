@@ -101,7 +101,7 @@ def test_standard_categories_start_with_a_pool(empty_db, monkeypatch):
         assert pools(conn) == {
             "Initial purchase": None, "Insurance": "insurance", "Registration": "registration", "Tyres": "tyres",
             "Cabin air filter": "maintenance", "Air filter": "maintenance", "Wheel alignment": "tyres",
-            "Tyre rotation": "tyres", "Charging": "fuel_charging", "Fuel": "fuel_charging"}
+            "Tyre rotation": "tyres", "Charging": "fuel_charging", "Fuel": "fuel_charging", "Service": "maintenance"}
 
 
 def test_an_upgrade_adds_the_pool_column_once_and_keeps_the_owners_choice(empty_db, monkeypatch):
