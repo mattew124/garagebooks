@@ -18,7 +18,7 @@
       <td data-label="Category">
         <select name="category_id_{{ n }}">
           <option value="">Choose…</option>
-          {% for c in categories %}<option value="{{ c.id }}" data-period="{{ 1 if c.has_period else 0 }}" data-service="{{ 1 if c.name == 'Service' else 0 }}" {{ 'selected' if c.id|string == r.category_id }}>{{ c.name }}</option>{% endfor %}
+          {% for c in categories %}<option value="{{ c.id }}" data-period="{{ 1 if c.has_period else 0 }}" data-service="{{ 1 if c.name == 'Service' else 0 }}" data-gstfree="{{ 1 if c.gst_free else 0 }}" {{ 'selected' if c.id|string == r.category_id }}>{{ c.name }}</option>{% endfor %}
         </select></td>
       <td data-label="Vendor"><input name="vendor_{{ n }}" maxlength="500" value="{{ r.vendor }}"></td>
       <td class="num" data-label="Amount"><input name="amount_{{ n }}" inputmode="decimal" value="{{ r.amount }}"></td>
@@ -29,6 +29,12 @@
           <label><small>Period from</small> <input type="date" name="period_start_{{ n }}" value="{{ r.period_start }}"></label>
           <label><small>to</small> <input type="date" name="period_end_{{ n }}" value="{{ r.period_end }}"></label>
         </span>
+        {% set gst_on = (categories|selectattr('id', 'equalto', r.category_id|int(0))|selectattr('gst_free')|list) or r.gst_amount %}
+        <label class="gst" data-gst-fields {{ '' if gst_on else 'hidden' }}><small>GST in the amount</small>
+          <input name="gst_amount_{{ n }}" inputmode="decimal" value="{{ r.gst_amount }}"></label>
+        <input type="hidden" name="card_payment_ref_{{ n }}" value="{{ r.card_payment_ref }}">
+        <input type="hidden" name="bpay_biller_code_{{ n }}" value="{{ r.bpay_biller_code }}">
+        <input type="hidden" name="bpay_ref_{{ n }}" value="{{ r.bpay_ref }}">
         {% set is_service = categories|selectattr('id', 'equalto', r.category_id|int(0))|selectattr('name', 'equalto', 'Service')|list %}
         <fieldset class="service-items" data-service-fields data-n="{{ n }}" {{ '' if is_service else 'hidden' }}>
           <legend><small>Service items</small></legend>

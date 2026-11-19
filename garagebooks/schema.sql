@@ -957,3 +957,53 @@ CREATE OR REPLACE VIEW garagebooks.expense_service AS
     FROM garagebooks.expense_service_item l
     JOIN garagebooks.expense e ON e.id = l.expense_id
     JOIN garagebooks.service_item i ON i.id = l.item_id;
+
+-- Registration's GST, and the payment references on a registration notice.
+--   expense.gst_amount        the GST in the amount, as the document states it. When there is one it replaces the
+--                             category's GST rule (category.gst_free, or one eleventh of the amount) in
+--                             expense_after_tax(): GST on a registration is only on its CTP insurance part, so
+--                             neither rule fits. Between 0 and the amount (the same sign as the amount).
+--   expense.card_payment_ref, bpay_biller_code, bpay_ref
+--                             how the notice says to pay it. Never listed or charted; the edit form keeps them in a
+--                             closed "Payment references" section, and the change history doesn't show them.
+ALTER TABLE garagebooks.expense ADD COLUMN IF NOT EXISTS gst_amount numeric(12, 2);
+ALTER TABLE garagebooks.expense DROP CONSTRAINT IF EXISTS expense_gst_amount_range;
+ALTER TABLE garagebooks.expense ADD CONSTRAINT expense_gst_amount_range
+    CHECK (gst_amount IS NULL OR (amount >= 0 AND gst_amount BETWEEN 0 AND amount)
+                              OR (amount < 0 AND gst_amount BETWEEN amount AND 0));
+ALTER TABLE garagebooks.expense ADD COLUMN IF NOT EXISTS card_payment_ref text
+    CHECK (card_payment_ref IS NULL OR length(card_payment_ref) <= 60);
+ALTER TABLE garagebooks.expense ADD COLUMN IF NOT EXISTS bpay_biller_code text
+    CHECK (bpay_biller_code IS NULL OR length(bpay_biller_code) <= 60);
+ALTER TABLE garagebooks.expense ADD COLUMN IF NOT EXISTS bpay_ref text
+    CHECK (bpay_ref IS NULL OR length(bpay_ref) <= 60);
+
+-- The after-tax function again, with the stored GST: ex_gst = amount - gst_amount when there is one.
+CREATE OR REPLACE FUNCTION garagebooks.expense_after_tax(tz text)
+RETURNS TABLE (expense_id bigint, car_id smallint, occurred_at timestamptz, amount numeric,
+               packaged boolean, effective_cost numeric)
+LANGUAGE sql STABLE
+AS $fn$
+    SELECT e.id, e.car_id, e.occurred_at, e.amount, p.packaged,
+           CASE WHEN NOT p.packaged THEN e.amount
+                WHEN r.rate IS NULL THEN NULL
+                WHEN e.gst_amount IS NOT NULL
+                    THEN round((e.amount - e.gst_amount) * (q.pre * (100 - r.rate) + 100 * q.post)
+                               / (100 * (q.pre + q.post)), 2)
+                ELSE round(e.amount * CASE WHEN k.gst_free THEN 1 ELSE 10 END
+                               * (q.pre * (100 - r.rate) + 100 * q.post)
+                               / ((CASE WHEN k.gst_free THEN 1 ELSE 11 END) * 100 * (q.pre + q.post)), 2) END
+    FROM garagebooks.expense e
+    JOIN garagebooks.category k ON k.id = e.category_id
+    LEFT JOIN LATERAL (SELECT l.pretax_payment, l.posttax_payment FROM garagebooks.lease l
+                       WHERE l.car_id = e.car_id
+                         AND (e.occurred_at AT TIME ZONE tz)::date BETWEEN l.start_date AND l.end_date
+                       ORDER BY l.start_date LIMIT 1) l ON true
+    CROSS JOIN LATERAL (SELECT COALESCE(e.packaged, l.pretax_payment IS NOT NULL AND k.budget_pool IS NOT NULL
+                                                    AND k.kind <> 'purchase') AS packaged) p
+    CROSS JOIN LATERAL (SELECT CASE WHEN COALESCE(l.pretax_payment, 0) + COALESCE(l.posttax_payment, 0) > 0
+                                    THEN l.pretax_payment ELSE 1 END AS pre,
+                                   CASE WHEN COALESCE(l.pretax_payment, 0) + COALESCE(l.posttax_payment, 0) > 0
+                                    THEN l.posttax_payment ELSE 0 END AS post) q
+    CROSS JOIN (SELECT (SELECT marginal_tax_rate FROM garagebooks.setting WHERE id = 1) AS rate) r
+$fn$;

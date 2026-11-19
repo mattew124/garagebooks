@@ -90,7 +90,8 @@ Medicare levy: 32% plus the levy is 34; the rate only, never a salary) and, for 
 post-tax payments. For an expense paid from the package, on a lease that covers its date:
 
 ```text
-ex GST      = invoice amount                      if the category is GST-free
+ex GST      = invoice amount − its GST            if the expense has a GST read from the document
+            = invoice amount                      else if the category is GST-free
             = invoice amount × 10 ÷ 11            otherwise
 post share  = post-tax payment ÷ (pre-tax payment + post-tax payment)      (0 when the two add to nothing)
 after tax   = ex GST × ((1 − post share) × (1 − rate) + post share)

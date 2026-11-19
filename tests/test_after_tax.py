@@ -244,7 +244,8 @@ POOLS = ["Insurance", "Initial purchase", "Misc"]           # a pool and running
     lease_days=st.tuples(st.integers(0, 40), st.integers(1, 40)),
     gst_free=st.booleans(),
     items=st.lists(st.tuples(st.integers(-5, 90), st.integers(0, 23), st.sampled_from(POOLS),
-                             st.decimals(-5000, 5000, places=2), st.sampled_from([None, True, False])),
+                             st.decimals(-5000, 5000, places=2), st.sampled_from([None, True, False]),
+                             st.one_of(st.none(), st.decimals(0, 1, places=2))),      # a GST read from the document, as a share of it
                    min_size=1, max_size=6))
 def test_the_sql_function_and_the_python_one_agree(pg, rate, pretax, posttax, lease_days, gst_free, items):
     first = date(2026, 1, 10)
@@ -264,21 +265,22 @@ def test_the_sql_function_and_the_python_one_agree(pg, rate, pretax, posttax, le
             else:
                 has_lease = False
             ids = {}
-            for day, hour, name, amount, choice in items:
+            for day, hour, name, amount, choice, share in items:
                 when = datetime.combine(first + timedelta(days=day), datetime.min.time(), BRISBANE) + timedelta(hours=hour)
-                ids[conn.execute("INSERT INTO garagebooks.expense (car_id, category_id, occurred_at, amount, packaged) "
-                                 "VALUES (%s, (SELECT id FROM garagebooks.category WHERE name = %s), %s, %s, %s) RETURNING id",
-                                 (car, name, when, amount, choice)).fetchone()["id"]] = (when, name, amount, choice)
+                gst = None if share is None else (amount * share).quantize(D("0.01"))
+                ids[conn.execute("INSERT INTO garagebooks.expense (car_id, category_id, occurred_at, amount, packaged, gst_amount) "
+                                 "VALUES (%s, (SELECT id FROM garagebooks.category WHERE name = %s), %s, %s, %s, %s) RETURNING id",
+                                 (car, name, when, amount, choice, gst)).fetchone()["id"]] = (when, name, amount, choice, gst)
             got = {r["expense_id"]: r for r in conn.execute(
                 "SELECT * FROM garagebooks.expense_after_tax('Australia/Brisbane') WHERE car_id = %s", (car,))}
             assert set(got) == set(ids)
-            for expense_id, (when, name, amount, choice) in ids.items():
+            for expense_id, (when, name, amount, choice, gst) in ids.items():
                 day = when.astimezone(BRISBANE).date()
                 covered = has_lease and start_day <= day <= end_day
                 kind = "purchase" if name == "Initial purchase" else "running"
                 packaged = lease.is_packaged(choice, covered, None if name == "Misc" else "insurance", kind)
                 want = lease.effective_cost(amount, packaged, gst_free, pretax if covered else None,
-                                            posttax if covered else None, rate)
+                                            posttax if covered else None, rate, gst_amount=gst)
                 assert got[expense_id]["packaged"] == packaged
                 assert got[expense_id]["effective_cost"] == want, (amount, packaged, gst_free, pretax, posttax, rate)
             raise psycopg.Rollback()

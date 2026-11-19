@@ -89,9 +89,15 @@
   <label>Category
     <select name="category_id" required>
       <option value="">Choose…</option>
-      {% for c in categories %}<option value="{{ c.id }}" data-period="{{ 1 if c.has_period else 0 }}" data-service="{{ 1 if c.name == 'Service' else 0 }}" {{ 'selected' if values.category_id|string == c.id|string }}>{{ c.name }}</option>{% endfor %}
+      {% for c in categories %}<option value="{{ c.id }}" data-period="{{ 1 if c.has_period else 0 }}" data-service="{{ 1 if c.name == 'Service' else 0 }}" data-gstfree="{{ 1 if c.gst_free else 0 }}" {{ 'selected' if values.category_id|string == c.id|string }}>{{ c.name }}</option>{% endfor %}
     </select>{{ err('category_id') }}
     <small><a href="{{ url_for('categories') }}">Need another category?</a></small>
+  </label>
+
+  <label>GST in the amount <small>(optional, as the document states it)</small>
+    <span class="affix"><span>$</span>
+      <input name="gst_amount" inputmode="decimal" autocomplete="off" value="{{ values.gst_amount }}"></span>{{ err('gst_amount') }}
+    <small>Leave it empty to use the category's GST rule. A registration's GST is only on its CTP insurance part, so it is read from the notice and replaces that rule.</small>
   </label>
 
   {# What a service covered: shown by app.js while the category is Service. Items are edited on the Categories page. #}
@@ -211,6 +217,16 @@
   {% endif %}
 
   <label>Notes <textarea name="notes" rows="3" maxlength="2000">{{ values.notes }}</textarea>{{ err('notes') }}</label>
+
+  {# How a notice says to pay it: kept, never listed or charted, and closed until asked for. #}
+  <details class="payment-refs"{{ ' open' if errors.get('card_payment_ref') or errors.get('bpay_biller_code') or errors.get('bpay_ref') }}>
+    <summary>Payment references</summary>
+    <label>Card payment reference <input name="card_payment_ref" maxlength="60" autocomplete="off" value="{{ values.card_payment_ref }}">{{ err('card_payment_ref') }}</label>
+    <div class="row">
+      <label>BPAY biller code <input name="bpay_biller_code" maxlength="60" autocomplete="off" value="{{ values.bpay_biller_code }}">{{ err('bpay_biller_code') }}</label>
+      <label>BPAY reference <input name="bpay_ref" maxlength="60" autocomplete="off" value="{{ values.bpay_ref }}">{{ err('bpay_ref') }}</label>
+    </div>
+  </details>
   </section>
 
   <div class="row">

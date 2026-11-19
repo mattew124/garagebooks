@@ -467,7 +467,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         for row in rows:
             paid_from_package = lease.is_packaged(row["packaged"], row["lease_id"] is not None, row["budget_pool"], row["kind"])
             cost = lease.effective_cost(row["amount"], paid_from_package, row["gst_free"], row["pretax_payment"],
-                                        row["posttax_payment"], rate)
+                                        row["posttax_payment"], rate, gst_amount=row["gst_amount"])
             if paid_from_package:
                 packaged += 1
                 costs[row["id"]] = cost
@@ -666,7 +666,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         """Echo the raw submission back into the form after a validation error."""
         return {"service_item": form.getlist("service_item"), **{k: form.get(k, "") for k in (
             "car_id", "category_id", "date", "time", "amount", "odometer_km",
-            "vendor", "notes", "invoice_url", "invoice_path", "packaged", "period_start", "period_end")}}
+            "vendor", "notes", "invoice_url", "invoice_path", "packaged", "period_start", "period_end", "gst_amount",
+        "card_payment_ref", "bpay_biller_code", "bpay_ref")}}
 
     # ---- routes ---------------------------------------------------------------
 
@@ -852,6 +853,9 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             "packaged": {None: "auto", True: "package", False: "personal"}[row["packaged"]],
             "period_start": row["period_start"].isoformat() if row["period_start"] else "",
             "period_end": row["period_end"].isoformat() if row["period_end"] else "",
+            "gst_amount": "" if row["gst_amount"] is None else f"{row['gst_amount']:.2f}",
+            "card_payment_ref": row["card_payment_ref"] or "", "bpay_biller_code": row["bpay_biller_code"] or "",
+            "bpay_ref": row["bpay_ref"] or "",
         }
         with connect() as conn:
             offer = bool(db.stored_open_reminders(conn, row["car_id"]))
@@ -1589,10 +1593,14 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             return None, (render_template("error.html", title="Can't claim this expense", text=why), 400)
         return row, None
 
-    def preview_page(expense_id, fields, errors=()):
+    def preview_page(expense_id, fields, errors=(), first_visit=False):
         row, refused = claim_context(expense_id)
         if refused:
             return refused
+        if first_visit and "gst" not in fields and row["gst_amount"] is not None:
+            # The GST stated on the document goes in the protocol's `gst` field. Only the first time the page
+            # opens: an owner who clears it has said to leave it to the provider.
+            fields = {**fields, "gst": f"{row['gst_amount']:.2f}"}
         invoice, blocked, notice = claim_invoice(row)
         if blocked:
             return render_claim(row, fields, blocked=blocked, errors=errors)
@@ -1611,7 +1619,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
     @app.get("/<int:expense_id>/claim")
     def claim_page(expense_id):
         need_connector()
-        return preview_page(expense_id, {})
+        return preview_page(expense_id, {}, first_visit=True)
 
     @app.post("/<int:expense_id>/claim")
     def claim_preview(expense_id):
@@ -1941,7 +1949,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         "expense": (("car_id", "Car"), ("category_id", "Category"), ("occurred_at", "Date and time"),
                     ("amount", "Amount"), ("odometer_km", "Odometer"), ("vendor", "Vendor"), ("notes", "Notes"),
                     ("invoice_url", "Invoice link"), ("invoice_path", "Invoice file"), ("packaged", "Paid from"),
-                    ("period_start", "Period start"), ("period_end", "Period end")),
+                    ("period_start", "Period start"), ("period_end", "Period end"), ("gst_amount", "GST")),
         "category": (("name", "Name"), ("kind", "Kind"), ("sort_order", "Sort order"),
                      ("upload_folder", "Invoice subfolder"), ("gst_free", "GST-free"), ("has_period", "Has a period")),
         "expense_claim": (("provider", "Provider"), ("reference", "Reference"), ("status", "Status"),
@@ -1961,7 +1969,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 return car_names.get(value, f"car {value}")
             if field == "category_id":
                 return category_names.get(value, f"category {value}")
-            if field in ("amount", "gst", "approved_amount"):
+            if field in ("amount", "gst", "approved_amount", "gst_amount"):
                 return money(Decimal(str(value)))
             if field == "odometer_km":
                 return km(value)
@@ -2244,7 +2252,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
     def import_row(n, **fields):
         return {"n": n, "include": False, "skip": False, "date": "", "category_id": "", "vendor": "",
                 "amount": "", "odometer_km": "", "url": "", "name": "", "folder": "",
-                "note": "", "id": "", "services": [], "notes": "", "period_start": "", "period_end": "", "guess": {}, "new_name": "", "rename": False, "odo_note": "", "duplicates": [], **fields}
+                "note": "", "id": "", "services": [], "notes": "", "gst_amount": "", "card_payment_ref": "",
+                "bpay_biller_code": "", "bpay_ref": "", "period_start": "", "period_end": "", "guess": {}, "new_name": "", "rename": False, "odo_note": "", "duplicates": [], **fields}
 
     def import_page(store, car, **ctx):
         """The import page's template with what every version of it needs. A row's `url` is the file's
@@ -2302,6 +2311,9 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             vendor=guess["vendor"] or "", odometer_km=guess["odometer_km"] or "",
             amount=f"{guess['amount']:.2f}" if guess["amount"] is not None else "",
             include=not guess["missing"], notes=guess["notes"],
+            gst_amount=f"{guess['gst_amount']:.2f}" if guess["gst_amount"] is not None else "",
+            card_payment_ref=guess["card_payment_ref"] or "", bpay_biller_code=guess["bpay_biller_code"] or "",
+            bpay_ref=guess["bpay_ref"] or "",
             period_start=guess["period_start"].isoformat() if guess["period_start"] else "",
             period_end=guess["period_end"].isoformat() if guess["period_end"] else "",
             note=("Couldn't read the " + ", ".join(guess["missing"]) + ": fill in to import."
@@ -2534,7 +2546,9 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 row = import_row(n, include=bool(f("include")), skip=bool(f("skip")), rename=bool(f("rename")), date=f("date"), category_id=f("category_id"),
                                  vendor=f("vendor"), amount=f("amount"), odometer_km=f("odometer_km"),
                                  notes=f("notes"), period_start=f("period_start"), period_end=f("period_end"),
-                                 services=request.form.getlist(f"service_item_{n}"),
+                                 services=request.form.getlist(f"service_item_{n}"), gst_amount=f("gst_amount"),
+                                 card_payment_ref=f("card_payment_ref"), bpay_biller_code=f("bpay_biller_code"),
+                                 bpay_ref=f("bpay_ref"),
                                  url=f("url"), name=f("name"), folder=f("folder"), id=f("id"),
                                  guess={k: f(f"guess_{k}") for k in LEARN_FIELDS})
                 rows.append(row)
@@ -2547,6 +2561,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                     "car_id": car_id, "category_id": row["category_id"], "date": row["date"], "time": "12:00",
                     "amount": row["amount"], "odometer_km": row["odometer_km"], "vendor": row["vendor"],
                     "notes": row["notes"], "period_start": row["period_start"], "period_end": row["period_end"],
+                    "gst_amount": row["gst_amount"], "card_payment_ref": row["card_payment_ref"],
+                    "bpay_biller_code": row["bpay_biller_code"], "bpay_ref": row["bpay_ref"],
                     ref_field: row["url"]}, tz, car_ids, cat_ids)
                 if not row["url"]:
                     row_errors[ref_field] = "Missing link to the PDF."
@@ -2817,6 +2833,9 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             category_id=by_name.get(guess["category"]), vendor=guess["vendor"],
             amount=f"{guess['amount']:.2f}" if guess["amount"] is not None else None,
             odometer_km=guess["odometer_km"], notes=guess["notes"] or None,
+            gst_amount=f"{guess['gst_amount']:.2f}" if guess["gst_amount"] is not None else None,
+            card_payment_ref=guess["card_payment_ref"], bpay_biller_code=guess["bpay_biller_code"],
+            bpay_ref=guess["bpay_ref"],
             period_start=guess["period_start"].isoformat() if guess["period_start"] else None,
             period_end=guess["period_end"].isoformat() if guess["period_end"] else None)
 
