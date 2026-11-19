@@ -25,6 +25,17 @@ the `empty_db` fixture for one about a database with no TeslaMate, which then ru
 never queries TeslaMate's tables itself: it asks `garagebooks/sources.py` ("which cars?", "what was the
 odometer?", "what did charging cost?") and handles "no answer".
 
+## Reuse before you build
+
+A second page that shows something an existing page already shows uses that page's code, not a copy that
+drifts. Before writing a list, a form, a filter, a table or a query, look for the one that exists, and extend
+it so both places use it. For example, the expense list (its filters, sort links, rows and tiles, and the live
+filtering in `app.js`) is the partial `templates/_expense_list.html`, built by `list_context()` in
+`garagebooks/__init__.py`: the All page and the Claims page both render it, and a new filter (a car, say) is
+added there once and appears on both. Put a new column or state behind a flag that the partial's callers set,
+the way `ledger` adds the claim column. If the existing code can't do what you need without bending it out of
+shape, change it first, in its own commit, then use it. Reviewers will ask where the duplicate came from.
+
 ## Quality gates
 
 CI fails a pull request that does not clear these, and you can run each of them yourself first:
@@ -172,6 +183,15 @@ main checkout's own stacks are never pruned. `prune` removes stacks only: the wo
 `destroy`. `auto-prune on` adds one entry to your crontab that runs the main checkout's `dev.sh`, so it
 outlives every worktree, and logs to `~/.cache/garagebooks/dev-prune.log`.
 
+Each dev stack creates its own Docker network. Docker's default address pool starts at
+`172.17.0.0/16` and moves on to `192.168.0.0/16` after about ten networks, and a network
+there (even a stopped one) captures routing for the whole range, which VPN clients and home
+LANs commonly use. Keep to `172.16.0.0/12` by setting `default-address-pools` in
+`/etc/docker/daemon.json` (for example `{"base": "172.28.0.0/14", "size": 20}`, then restart
+Docker), never set a `subnet:` in `192.168.0.0/16`, `10.0.0.0/8` or `100.64.0.0/10`, and run
+`scripts/dev.sh destroy` (or `prune`) for stacks you no longer need. `ip route | grep 192.168` should print
+nothing.
+
 The invoice folder is on in the dev stack too: `.dev/invoices` in the checkout stands in for a mounted
 share (the app runs as you there, so its files are yours), and `destroy` removes it. Drop PDFs into it
 to try the import, or let `sample-invoices` write some made-up ones into `.dev/invoices/Sample invoices`;
@@ -187,6 +207,16 @@ folder instead, for every stack. The demo stack never uses either.
 OneDrive is on in the dev stack with a throwaway token key in `.dev/env`. To sign in there,
 add the dev stack's callback address (shown in the OneDrive card of its Invoice storage page) as a second redirect URI on
 your app registration. A sign-in writes to your real OneDrive, so give each car a test folder.
+
+The claims feature is on in the dev stack against a stand-in connector (`tests/fake_connector.py`, invented
+answers, on the stack's private network). The app signs each request to it with a new Ed25519 key pair that `up` makes
+at every start (the stand-in is given only the public half, so nothing there is a secret). To try a real connector
+instead, set `DEV_CLAIMS_CONNECTOR_URL` and `DEV_CLAIMS_CONNECTOR_KEY_FILE` (the path of a private key file) in
+`dev.env` (see `dev.env.example`). Give it a key pair of its own that you can revoke, not your live one, and remember
+that submitting there sends a real claim: preview and sync only, unless you mean it. The address must be reachable
+from the stack's containers. `up` says which connector it uses and refuses a real one with no key file, or one the
+user running it can't read. The browser tests submit claims, so they refuse to run while a real
+connector is set: use `STAND_IN=1 scripts/dev.sh up` and `STAND_IN=1 scripts/dev.sh test-browser` for them.
 
 The seed only reads from TeslaMate. It copies all of `cars` and `charging_processes`, and one
 `positions` row per hour with latitude, longitude and elevation blanked. `up` warns if

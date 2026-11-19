@@ -6,6 +6,20 @@
 {% block content %}
 <h1>{{ 'Edit expense' if expense_id else 'Add expense' }}</h1>
 {% if expense_id and reminder_offer %}<p><a href="{{ url_for('expense_reminders', expense_id=expense_id) }}">Resolve a reminder with this expense</a></p>{% endif %}
+{% if expense_id and claim %}
+{% if claim.claim %}
+<section class="card stack" id="claim-record">
+  <h2 class="card-title">Claim</h2>
+  <p>Claimed from {{ claim.claim.claim_provider or 'the provider' }}: reference <strong>{{ claim.claim.claim_reference or 'not known' }}</strong>{% if claim.claim.claim_status %}, status <strong>{{ claim.claim.claim_status }}</strong>{% endif %}{% if claim.claim.claim_paid_date %}, paid {{ claim.claim.claim_paid_date.strftime('%d %b %Y') }}{% endif %}{% if claim.claim.claim_approved is not none %}, approved {{ claim.claim.claim_approved|money }}{% endif %}.</p>
+  <form method="post" action="{{ url_for('claim_forget', expense_id=expense_id) }}" data-confirm="Remove the claim record? The provider keeps the claim, and this expense could be claimed again.">
+    {% for name, value in view.items() %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}
+    <button type="submit" class="secondary">Remove claim record</button>
+  </form>
+</section>
+{% elif claim.open %}
+<p><a class="claim-link" href="{{ url_for('claim_page', expense_id=expense_id, **view) }}">Claim this expense from the provider</a></p>
+{% endif %}
+{% endif %}
 {% if errors %}<p class="notice bad">Please fix the highlighted fields.</p>{% endif %}
 {% if not expense_id %}
 <div id="duplicate-warning" class="notice bad" role="alert" {{ '' if duplicates else 'hidden' }}>

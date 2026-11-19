@@ -610,6 +610,128 @@ ALTER TABLE garagebooks.lease ADD COLUMN IF NOT EXISTS agreement_path text
 -- the lease pages, the Categories page and the FBT year report leave them out while this is false.
 ALTER TABLE garagebooks.setting ADD COLUMN IF NOT EXISTS lease_budgets boolean NOT NULL DEFAULT false;
 
+-- Claims (roadmap L3, the "claimed" part): an expense sent to the salary packaging provider through a
+-- claims connector (see docs/claims-connector.md), kept so nothing is claimed twice. One row per
+-- expense. ON DELETE RESTRICT: a claimed expense can't be deleted until its claim record is removed
+-- (the app says so). `fields` is what the owner typed for the claim form, as sent. approved_amount,
+-- paid_date and status_checked_at are filled in when the provider's statuses are refreshed.
+CREATE TABLE IF NOT EXISTS garagebooks.expense_claim (
+    expense_id        bigint PRIMARY KEY REFERENCES garagebooks.expense (id) ON DELETE RESTRICT,
+    provider          text NOT NULL CHECK (btrim(provider) <> ''),
+    provider_id       text NOT NULL CHECK (btrim(provider_id) <> ''),
+    reference         text,
+    status            text,
+    amount            numeric(12, 2),
+    gst               numeric(12, 2),
+    fields            jsonb,
+    submitted_at      timestamptz NOT NULL DEFAULT now(),
+    status_checked_at timestamptz,
+    approved_amount   numeric(12, 2),
+    paid_date         date
+);
+
+-- The change history covers claims too. A claim has no id of its own: its row_id is the expense's.
+-- status_checked_at moves on every refresh, so like updated_at it doesn't count as a change.
+ALTER TABLE garagebooks.change_log DROP CONSTRAINT IF EXISTS change_log_table_name_check;
+ALTER TABLE garagebooks.change_log ADD CONSTRAINT change_log_table_name_check
+    CHECK (table_name IN ('expense', 'category', 'expense_claim'));
+
+CREATE OR REPLACE FUNCTION garagebooks.log_change() RETURNS trigger LANGUAGE plpgsql AS $fn$
+DECLARE
+    old_row jsonb := CASE WHEN TG_OP = 'INSERT' THEN NULL ELSE to_jsonb(OLD) END;
+    new_row jsonb := CASE WHEN TG_OP = 'DELETE' THEN NULL ELSE to_jsonb(NEW) END;
+BEGIN
+    -- The app stamps updated_at on every save: an edit that changes nothing else is not a change.
+    IF TG_OP = 'UPDATE' AND (old_row - 'updated_at' - 'status_checked_at') = (new_row - 'updated_at' - 'status_checked_at') THEN
+        RETURN NULL;
+    END IF;
+    INSERT INTO garagebooks.change_log (actor, table_name, row_id, operation, before_row, after_row)
+    VALUES (NULLIF(left(btrim(current_setting('garagebooks.actor', true)), 200), ''), TG_TABLE_NAME,
+            COALESCE(COALESCE(new_row, old_row) ->> 'id', COALESCE(new_row, old_row) ->> 'expense_id')::bigint,
+            lower(TG_OP), old_row, new_row);
+    RETURN NULL;
+END
+$fn$;
+
+DROP TRIGGER IF EXISTS log_change ON garagebooks.expense_claim;
+CREATE TRIGGER log_change AFTER INSERT OR UPDATE OR DELETE ON garagebooks.expense_claim
+    FOR EACH ROW EXECUTE FUNCTION garagebooks.log_change();
+
+-- ---- the provider's transaction history (a cache) ----------------------------------------------------
+-- What the claims connector says the provider paid or deducted, kept here so the Claims page can be filtered
+-- and still opens when the connector is down. Rebuilt from the connector on every sync: nothing here is the
+-- owner's own data, and it is not in the change history. (provider, provider_id) is the connector's own key.
+-- kind: 'claim_payment' (a claim paid out), 'per_km_charging' (an electric car's cents-per-km home charging
+-- reimbursement: it has no expense, and needs none) or 'other'. claim_provider_id is the claim it belongs to,
+-- when the connector knows. expense_id is the expense it was matched to by the app (never by hand); deleting
+-- the expense leaves the transaction unmatched.
+CREATE TABLE IF NOT EXISTS garagebooks.provider_transaction (
+    id                bigserial PRIMARY KEY,
+    provider          text NOT NULL CHECK (btrim(provider) <> ''),
+    provider_id       text NOT NULL CHECK (btrim(provider_id) <> ''),
+    occurred_on       date NOT NULL,
+    amount            numeric(12, 2) NOT NULL,
+    gst               numeric(12, 2),
+    type              text,
+    status            text,
+    description       text,
+    payee             text,
+    kind              text NOT NULL DEFAULT 'other' CHECK (kind IN ('claim_payment', 'per_km_charging', 'other')),
+    car_id            integer REFERENCES garagebooks.car (id) ON DELETE SET NULL,
+    claim_provider_id text,
+    reference         text,
+    expense_id        bigint REFERENCES garagebooks.expense (id) ON DELETE SET NULL,
+    synced_at         timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (provider, provider_id)
+);
+CREATE INDEX IF NOT EXISTS provider_transaction_on_idx ON garagebooks.provider_transaction (occurred_on DESC);
+CREATE INDEX IF NOT EXISTS provider_transaction_expense_idx ON garagebooks.provider_transaction (expense_id);
+
+-- The provider's claim history (also a cache): one row per claim line, so a payment, which may be only part of
+-- a claim, can be checked against what the claim should have paid. expense_id is the expense the line is for:
+-- the claim made from here (expense_claim.provider_id), else the one expense with the line's car, day and
+-- amount. Both are set by the app, and a deleted expense leaves the line unmatched.
+CREATE TABLE IF NOT EXISTS garagebooks.provider_claim (
+    id              bigserial PRIMARY KEY,
+    provider        text NOT NULL CHECK (btrim(provider) <> ''),
+    provider_id     text NOT NULL CHECK (btrim(provider_id) <> ''),
+    line_id         text NOT NULL DEFAULT '',
+    reference       text,
+    occurred_on     date NOT NULL,
+    amount          numeric(12, 2) NOT NULL,
+    approved_amount numeric(12, 2),
+    status          text,
+    paid_date       date,
+    description     text,
+    car_id          integer REFERENCES garagebooks.car (id) ON DELETE SET NULL,
+    expense_id      bigint REFERENCES garagebooks.expense (id) ON DELETE SET NULL,
+    synced_at       timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (provider, provider_id, line_id)
+);
+CREATE INDEX IF NOT EXISTS provider_claim_expense_idx ON garagebooks.provider_claim (expense_id);
+CREATE INDEX IF NOT EXISTS provider_claim_claim_idx ON garagebooks.provider_claim (provider_id);
+
+-- Fetching the provider's history can take minutes (its own site is slow), so the app does it in the background
+-- and keeps the state of the one running sync here, where every web worker can see it. One row, always id 1.
+-- outcome: 'synced', 'signin' (the provider needs signing in) or 'problem' (message says why). A 'running' sync
+-- older than half an hour is taken to have died with its worker.
+CREATE TABLE IF NOT EXISTS garagebooks.provider_sync (
+    id          integer PRIMARY KEY CHECK (id = 1),
+    state       text NOT NULL DEFAULT 'idle' CHECK (state IN ('idle', 'running')),
+    started_at  timestamptz,
+    finished_at timestamptz,
+    outcome     text CHECK (outcome IN ('synced', 'signin', 'problem')),
+    message     text,
+    since       date
+);
+INSERT INTO garagebooks.provider_sync (id) VALUES (1) ON CONFLICT DO NOTHING;
+
+-- 'direct_payment': the provider paid something itself on the owner's behalf, with no claim made (a registration
+-- renewal, say). It belongs to an expense like a claim does, and is matched to one by car, nearby day and amount.
+ALTER TABLE garagebooks.provider_transaction DROP CONSTRAINT IF EXISTS provider_transaction_kind_check;
+ALTER TABLE garagebooks.provider_transaction ADD CONSTRAINT provider_transaction_kind_check
+    CHECK (kind IN ('claim_payment', 'per_km_charging', 'direct_payment', 'other'));
+
 -- Kilometre pace (roadmap L4): the odometer at a moment, for the dashboard's panel, with the same answer
 -- as sources.odometer_at in the app. A car TeslaMate tracks gets TeslaMate's last position at or before
 -- the moment, else (and for any other car) the latest reading entered by hand or on an expense at or

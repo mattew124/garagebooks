@@ -153,6 +153,8 @@ def admin(pg):
             # CASCADE: real TeslaMate tables (drives...) reference them
             script.append("TRUNCATE positions, charging_processes RESTART IDENTITY CASCADE")
         script += [
+            "UPDATE garagebooks.provider_sync SET state = 'idle', started_at = NULL, finished_at = NULL,"
+            " outcome = NULL, message = NULL, since = NULL",      # no sync from an earlier test
             "DELETE FROM garagebooks.lease",          # a test's lease on the first car; its budgets go with it
             "DELETE FROM garagebooks.car WHERE id <> 1",
         ]

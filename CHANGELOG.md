@@ -5,7 +5,49 @@ steps are in [RELEASING.md](RELEASING.md). Newest first.
 
 Each entry says what an installer must do to upgrade. Where nothing is said, pull the new image.
 
-## Unreleased
+## 0.5.0-rc1 - 2026-11-19
+
+**Claiming expenses from your salary packaging provider.** GarageBooks can now send an expense to a separate
+claims connector service, which claims it from the provider, and track it through to payment on a new Claims page:
+what was claimed, what the provider approved and paid, and what is still to claim. The feature is off until you
+set `CLAIMS_CONNECTOR_URL`, and requests to the connector are signed with a short-lived token from a key only
+GarageBooks holds. It also brings everything in 0.4.0-rc3.
+
+**To upgrade:** pull the new image; the app adds its new tables itself. Installers on the restricted database role
+(`SKIP_MIGRATE=1`) re-run `scripts/provision-db.sh` first. The web server timeout moves from 120 s to 180 s.
+
+**Signed requests to the claims connector.** Set `CLAIMS_CONNECTOR_KEY_FILE` to an Ed25519 private key (PEM) and
+every request to the claims connector carries a fresh, short-lived signed token instead of a shared secret, so only
+GarageBooks holds a secret and the connector keeps public keys. Nothing to do on upgrade: `CLAIMS_CONNECTOR_TOKEN`
+and `CLAIMS_CONNECTOR_TOKEN_FILE` still work while no key file is set, but are deprecated, and the app logs a
+warning at start while one is used. To switch, make a key pair, give the connector the public key, set the key file
+and remove the token settings. The token format is in [Claims connector](docs/claims-connector.md#authorising-requests)
+for anyone writing a connector. In the dev stack, `DEV_CLAIMS_CONNECTOR_KEY_FILE` replaces
+`DEV_CLAIMS_CONNECTOR_TOKEN`.
+
+**Claims page as a ledger.** Nothing to do on upgrade. The Claims page now reuses the All page's expense list,
+which gains car and date filters, and shows where each expense stands on claiming (or why it can't be claimed),
+with whether the provider has reimbursed a claim in full, including part payments. It also shows whether the
+provider is signed in (with a Sign in button) and keeps a copy of the provider's claim and transaction history
+(**Sync provider history**), tied to the expenses through claims. Needs a connector that answers
+`POST /v1/transactions` (protocol v1, [documented](docs/claims-connector.md)). Installers on the restricted
+database role re-run `scripts/provision-db.sh` first.
+
+**Claiming expenses from the salary packaging provider.** Nothing to do on upgrade: the app adds the new
+table itself, and the feature stays off until you set `CLAIMS_CONNECTOR_URL`. Installers on the
+restricted database role re-run `scripts/provision-db.sh` first. The container's web server timeout
+moves from 120 s to 180 s, and now comes from `gunicorn.conf.py` rather than the command line.
+
+- **Claims connector.** With `CLAIMS_CONNECTOR_URL` (and `CLAIMS_CONNECTOR_TOKEN` or
+  `CLAIMS_CONNECTOR_TOKEN_FILE`) set, an expense in one of the provider's claimable budget pools, on a car
+  with a lease covering its date, has a **Claim** link. The page asks a separate connector service what
+  would be claimed, shows it with any warnings, asks for what the provider needs (and the provider's
+  sign-in code when it has signed out), and submits when you confirm. The claim is kept against the
+  expense, shown as a badge with its reference and status, and listed on a new **Claims** page, where
+  **Refresh claim statuses** brings the provider's status, approved amount and paid date up to date. A
+  claimed expense can't be deleted until its claim record is removed. The protocol is on the new
+  [Claims connector](docs/claims-connector.md) page, so anyone can write a connector. This is the
+  "claimed" part of roadmap item L3.
 
 - **Faster tests.** The suite runs in parallel (`pytest -n auto`, one throwaway Postgres per worker), about three times
   faster on four cores, and the route property tests use 15 examples locally (40 in CI, as before). The `admin`
@@ -39,6 +81,7 @@ set a notification address or a marginal tax rate in Settings.
 (`SKIP_MIGRATE=1`), run `scripts/provision-db.sh` again so the role can use the new `notification` table.
 Nothing is sent until you set an address, so nothing changes if you don't.
 
+- **Dev stacks.** The development guide says how to keep the dev stacks' Docker networks out of address ranges that VPN clients and home LANs use.
 - **Notifications.** A **Notifications** section on the Settings page takes an address (ntfy, an Apprise
   API or a Home Assistant webhook) and sends a notice, once each, when a reminder comes due soon and when
   it is overdue, 30 and 7 days before the OneDrive client secret expires and when it has, and when the

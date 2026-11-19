@@ -246,6 +246,66 @@ def test_every_override_file_names_a_service_the_main_file_has():
         assert compose_services(override) and compose_services(override) <= main, override
 
 
+def test_the_stand_in_claims_connector_is_private_and_the_app_uses_it_by_default():
+    """Claiming is on in the dev stack against tests/fake_connector.py, which is never published and only
+    ever answers with invented values; DEV_CLAIMS_CONNECTOR_URL points the app at a real one instead."""
+    cfg = config()
+    fake = cfg["services"]["dev-claims-connector"]
+    assert set(fake["networks"]) == {"dev"} and "ports" not in fake
+    assert "dev-claims-connector:" not in DEV_PROXY
+    env = cfg["services"]["garagebooks-dev"]["environment"]
+    assert "dev-claims-connector:8765" in env["CLAIMS_CONNECTOR_URL"]
+    assert "DEV_CLAIMS_CONNECTOR_URL" in env["CLAIMS_CONNECTOR_URL"]
+    # signed tokens: the app gets a private key, the stand-in only the public half. No shared token any more.
+    assert env["CLAIMS_CONNECTOR_KEY_FILE"] == "/run/claims/connector.key"
+    assert "CLAIMS_CONNECTOR_TOKEN" not in env and "DEV_CLAIMS_CONNECTOR_TOKEN" not in DEV
+    assert fake["environment"]["FAKE_CONNECTOR_KEYS_DIR"] == "/claims-keys"
+    app_mounts = {v["target"]: v for v in cfg["services"]["garagebooks-dev"]["volumes"]}
+    assert app_mounts["/run/claims/connector.key"]["read_only"] is True
+    assert not app_mounts["/run/claims/connector.key"].get("bind", {}).get("create_host_path", True)
+    fake_mounts = {v["target"]: v for v in fake["volumes"]}
+    assert "stand-in.key" not in fake_mounts["/claims-keys"]["source"] and fake_mounts["/claims-keys"]["read_only"]
+
+
+def test_the_stand_in_gets_a_fresh_key_pair_on_each_start_and_only_the_public_half():
+    assert "openssl genpkey -algorithm ed25519" in SCRIPT and "openssl pkey" in SCRIPT and "-pubout" in SCRIPT
+    start = SCRIPT[SCRIPT.index("\nstart() {"):]
+    assert start.index("claims_keys") < start.index("compose up")
+
+
+# ---- a real claims connector in dev.env ----------------------------------------------------------------------
+
+def run_dev(tmp_path, dev_env, *args, env=None):
+    """dev.sh from a scratch copy of the checkout, with this dev.env: never touches docker or the real one."""
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "dev.sh").write_text(SCRIPT)
+    (tmp_path / "dev.env").write_text(dev_env)
+    return subprocess.run(["bash", str(tmp_path / "scripts" / "dev.sh"), *args], cwd=tmp_path, capture_output=True,
+                          text=True, env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), **(env or {})})
+
+
+def test_a_real_connector_without_its_token_stops_the_stack_starting(tmp_path):
+    done = run_dev(tmp_path, 'DEV_CLAIMS_CONNECTOR_URL=http://connector.invalid:8765\n', "up")
+    assert done.returncode == 2 and "DEV_CLAIMS_CONNECTOR_KEY_FILE is empty" in done.stderr
+
+
+def test_a_real_connector_with_an_unreadable_key_file_stops_the_stack_starting(tmp_path):
+    done = run_dev(tmp_path, 'DEV_CLAIMS_CONNECTOR_URL=http://connector.invalid:8765\n'
+                             f'DEV_CLAIMS_CONNECTOR_KEY_FILE={tmp_path}/nope.key\n', "up")
+    assert done.returncode == 2 and "can't read" in done.stderr and "nope.key" in done.stderr
+
+
+def test_the_browser_tests_refuse_to_run_against_a_real_connector(tmp_path):
+    done = run_dev(tmp_path, 'DEV_CLAIMS_CONNECTOR_URL=http://connector.invalid:8765\nDEV_CLAIMS_CONNECTOR_KEY_FILE=x\n',
+                   "test-browser")
+    assert done.returncode == 2 and "stand-in" in done.stderr and "STAND_IN=1" in done.stderr
+
+
+def test_stand_in_wins_over_dev_env():
+    assert 'if [ "${STAND_IN:-}" = 1 ]; then unset DEV_CLAIMS_CONNECTOR_URL DEV_CLAIMS_CONNECTOR_KEY_FILE; fi' in SCRIPT
+    assert SCRIPT.index("STAND_IN:-") > SCRIPT.index(". ./dev.env")           # applied after dev.env is read
+
+
 def merged_compose(tmp_path, *files, profiles=(), env=None):
     """The compose file as Docker reads it: anchors, profiles and overrides resolved. -> the services."""
     for name in {"docker-compose.yml", *files}:

@@ -17,10 +17,11 @@
       <a class="brand" href="{{ url_for('index') }}"><img src="{{ url_for('static', filename='icon-64.png') }}" alt="" width="28" height="28">GarageBooks</a>
       {% set endpoint = request.endpoint or '' %}
       {% macro at(section) %}{% if section %} aria-current="page"{% endif %}{% endmacro %}
-      <nav>
+      <nav{% if claims_enabled %} class="crowded"{% endif %}>
         <a href="{{ url_for('index') }}"{{ at(endpoint == 'index') }}>All</a>
         <a href="{{ url_for('categories') }}"{{ at(endpoint == 'categories') }}>Categories</a>
         <a href="{{ url_for('cars_page') }}"{{ at(endpoint.startswith(('car', 'reading'))) }}>Cars</a>
+        {% if claims_enabled %}<a href="{{ url_for('claims_page') }}"{{ at(endpoint.startswith('claim')) }}>Claims</a>{% endif %}
         <a href="{{ url_for('reminders_page') }}"{{ at(endpoint.startswith(('reminder', 'expense_reminder'))) }}>Reminders{% if reminder_attention and reminder_attention.total %} <span class="count">{{ reminder_attention.total }}<span class="visually-hidden"> need attention</span></span>{% endif %}</a>
         <a href="{{ url_for('history_page') }}"{{ at(endpoint == 'history_page') }}>History</a>
         {% if grafana_url %}<a href="{{ grafana_url }}" target="_blank" rel="noopener noreferrer"><img src="{{ url_for('provider_icon', name='grafana') }}" alt="" class="nav-icon">Dashboards</a>{% endif %}

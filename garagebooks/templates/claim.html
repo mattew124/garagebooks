@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Claim an expense{% endblock %}
+{% block main_attrs %} class="narrow"{% endblock %}
+{% block content %}
+<h1>Claim an expense</h1>
+<p>{{ expense.occurred_at|day }} · {{ expense.category }}{% if expense.vendor %} · {{ expense.vendor }}{% endif %} ·
+  <strong>{{ expense.amount|money }}</strong> <small>({{ expense.car_name }})</small></p>
+{% if errors %}<p class="notice bad" role="alert">{{ errors|join(' ') }}</p>{% endif %}
+{% if notice %}<p class="notice" role="status">{{ notice }}</p>{% endif %}
+{% if blocked %}
+<p class="notice bad" role="alert">{{ blocked }}</p>
+<p><a class="button" href="{{ url_for('edit', expense_id=expense.id, **view) }}">Edit this expense</a>
+  <a href="{{ url_for('index', **view) }}">Back</a></p>
+{% else %}
+{% if error %}<p class="notice bad" role="alert">{{ error }}</p>{% endif %}
+
+{% if signin %}
+{% set retry_url = url_for('claim_page', expense_id=expense.id, **view) %}
+{% include "_claim_signin.html" %}
+<script src="{{ url_for('static', filename='claims.js') }}" defer></script>
+{% endif %}
+
+{% if preview or needs or (error and not signin) %}
+{% if preview %}
+<section class="card stack" id="claim-preview">
+  <h2 class="card-title">What will be claimed{% if preview.provider %} from {{ preview.provider }}{% endif %}</h2>
+  {% if preview.warnings %}
+  <div class="notice bad" role="alert"><strong>Check before claiming</strong>
+    <ul class="plain">{% for w in preview.warnings %}<li>{{ w }}</li>{% endfor %}</ul></div>
+  {% endif %}
+  {% if preview.summary %}<ul class="plain">{% for line in preview.summary %}<li>{{ line }}</li>{% endfor %}</ul>{% endif %}
+  <dl class="claim-figures">
+    {% if preview.kind %}<dt>Kind</dt><dd>{{ preview.kind }}</dd>{% endif %}
+    {% if preview.car %}<dt>Car</dt><dd>{{ preview.car }}</dd>{% endif %}
+    {% if preview.amount is not none %}<dt>Amount</dt><dd>{{ preview.amount|money }}</dd>{% endif %}
+    {% if preview.gst is not none %}<dt>GST</dt><dd>{{ preview.gst|money }}</dd>{% endif %}
+    {% if preview.ex_gst is not none %}<dt>Excluding GST</dt><dd>{{ preview.ex_gst|money }}</dd>{% endif %}
+  </dl>
+</section>
+{% endif %}
+<form method="post" action="{{ url_for('claim_preview', expense_id=expense.id) }}" class="card stack" data-claim-wait>
+  <h2 class="card-title">{{ 'More details for the provider' if needs else 'Details' }}</h2>
+  {% for n in needs %}
+  <label>{{ n.label }}
+    <input name="field_{{ n.key }}" type="{{ n.type }}" value="{{ fields.get(n.key, '') }}" required>
+  </label>
+  {% endfor %}
+  {% set shown = needs|map(attribute='key')|list %}
+  {% for key, value in fields.items() if key != 'gst' and key not in shown %}<input type="hidden" name="field_{{ key }}" value="{{ value }}">{% endfor %}
+  <label>GST included in the amount (optional)
+    <input name="field_gst" value="{{ fields.get('gst', '') }}" inputmode="decimal" autocomplete="off">
+    <small>Leave empty to let the provider work it out from the invoice.</small>
+  </label>
+  {% for name, value in view.items() %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}
+  <div class="row">
+    {% if preview and not preview.warnings %}
+    <button type="submit" class="button" formaction="{{ url_for('claim_submit', expense_id=expense.id) }}">Submit claim</button>
+    <button type="submit" class="secondary">Check again</button>
+    {% else %}
+    <button type="submit" class="button">Check again</button>
+    {% endif %}
+    <a href="{{ url_for('index', **view) }}">Cancel</a>
+  </div>
+  <p class="claim-wait" role="status" hidden>Asking the provider. This can take a minute: please don't close the page.</p>
+  {% if preview and not preview.warnings %}<p><small>Submitting sends this expense and its invoice to the provider as a real claim.</small></p>{% endif %}
+</form>
+<script src="{{ url_for('static', filename='claims.js') }}" defer></script>
+{% elif not signin %}
+<p><a href="{{ url_for('claim_page', expense_id=expense.id, **view) }}">Check again</a> · <a href="{{ url_for('index', **view) }}">Back</a></p>
+{% endif %}
+{% endif %}
+{% endblock %}

@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Claims{% endblock %}
+{% block content %}
+<script src="{{ url_for('static', filename='claims.js') }}" defer></script>
+<div class="page-head">
+  <h1>Claims</h1>
+  <div class="row">
+    <form method="post" action="{{ url_for('claims_sync') }}" data-claim-wait>
+      <button type="submit" class="secondary"{% if sync.running %} disabled{% endif %}>Sync provider history</button>
+    </form>
+    <form method="post" action="{{ url_for('claims_sync') }}" data-claim-wait>
+      <input type="hidden" name="full" value="1">
+      <button type="submit" class="secondary"{% if sync.running %} disabled{% endif %} title="Fetch everything back to your first expense again. Slow.">Full resync</button>
+    </form>
+    <form method="post" action="{{ url_for('claims_refresh') }}" data-claim-wait>
+      <button type="submit" class="secondary">Refresh claim statuses</button>
+    </form>
+  </div>
+</div>
+{% if message %}<p class="notice" role="status">{{ message }}</p>{% endif %}
+{% if problem %}<p class="notice bad" role="alert">{{ problem }}</p>{% endif %}
+<p class="claim-wait" role="status" hidden>Asking the provider. This can take a minute.</p>
+{% if sync.running %}
+<p id="sync-running" class="notice" role="status" data-status-url="{{ url_for('claims_sync_status') }}">Syncing the provider's history{% if sync.since %} from {{ sync.since|day }}{% endif %}. This can take a few minutes: this page updates itself.</p>
+{% elif sync.outcome == 'problem' and sync.message %}
+<p class="notice bad" role="alert">The last sync didn't finish: {{ sync.message }}</p>
+{% endif %}
+
+<p id="provider-status" class="provider-status" data-state="{{ status.state }}">
+  {% if status.state == 'signed_in' %}<strong>{{ status.provider or 'The provider' }}</strong>: Signed in.
+  {% elif status.state == 'signed_out' %}<strong>{{ status.provider or 'The provider' }}</strong>: Not signed in.
+  {% else %}The claims connector can't be reached: {{ status.message }}{% endif %}
+  {% if synced %}<small>History last synced {{ synced|when }}.</small>{% else %}<small>History not synced yet.</small>{% endif %}
+</p>
+{% if signin %}{% set retry_url = url_for('claims_page') %}{% include "_claim_signin.html" %}{% endif %}
+
+<p class="total"><small>{{ totals.n }} expense{{ '' if totals.n == 1 else 's' }}</small> <strong>{{ totals.total|money }}</strong></p>
+{% include "_expense_list.html" %}
+
+<h2 class="card-title">Provider history</h2>
+<p class="tx-filter">
+  {% for key, label in ((None, 'Payments'), ('unmatched', 'No matching expense'), ('matched', 'Matched to an expense'), ('per_km', 'Per-km charging'), ('other', 'Deductions and other')) %}
+  {% if key == tx %}<strong>{{ label }}</strong>{% else %}<a href="{{ tx_link(key) }}">{{ label }}</a>{% endif %}{{ ' · ' if not loop.last }}
+  {% endfor %}
+</p>
+{% include "_history_list.html" %}
+{% endblock %}
