@@ -25,9 +25,9 @@ def car(admin, car_id=1):
     return admin.execute("SELECT * FROM garagebooks.car WHERE id = %s", (car_id,)).fetchone()
 
 
-def read(client, car_id=1, query=""):
+def read(client, car_id=1, query="", folder="Initial purchase"):
     return client.post(f"/local/import/{car_id}/read{query}", headers=ORIGIN, data={
-        "n": "0", "id": PATH, "url": PATH, "name": "purchase.pdf", "folder": ""}).data.decode()
+        "n": "0", "id": PATH, "url": PATH, "name": "purchase.pdf", "folder": folder}).data.decode()
 
 
 def confirm(client, admin, car_id=1, query="", **over):
@@ -85,7 +85,7 @@ def test_only_blank_details_are_offered(stocked, admin):
 def test_nothing_is_offered_for_a_document_that_isnt_a_purchase(stocked, monkeypatch):
     # a tyre invoice that happens to name the VIN must not offer to fill the car in
     monkeypatch.setattr(invoices, "extract_text", lambda pdf: "TAX INVOICE\nTyres\nVIN: " + VIN + "\nTyres\nTyres\nTotal $200.00\n")
-    row = read(stocked)
+    row = read(stocked, folder="Maintenance")
     assert 'name="car_fill_0"' not in row and "Tyres" in row
 
 
@@ -128,7 +128,7 @@ def test_choosing_a_folder_for_a_new_car_goes_to_its_import_without_saving_anyth
     page = client.get("/local/browse/0").data.decode()
     assert "a new car" in page and 'action="/local/folders/0"' in page
     resp = client.post("/local/folders/0", data={"folder_id": "/Cars/Test car"}, headers=ORIGIN)
-    assert resp.status_code == 303 and resp.headers["Location"] == "/local/import/0?folder=%2FCars%2FTest+car"
+    assert resp.status_code == 303 and resp.headers["Location"] == "/local/import/0?folder=/Cars/Test+car"
     assert admin.execute("SELECT count(*) AS n FROM garagebooks.car_folder").fetchone()["n"] == 0 and new_cars(admin) == []
 
 
@@ -143,7 +143,7 @@ FOLDER = "?folder=%2FCars%2FTest+car"
 
 def test_the_new_car_import_page_scans_and_reads_that_folder(stocked):
     page = stocked.get(f"/local/import/0{FOLDER}").data.decode()
-    assert "a new car" in page and f"/local/import/0/scan{FOLDER.replace('%2F', '%2F')}" in page.replace("&amp;", "&")
+    assert "a new car" in page and "/local/import/0/scan?folder=/Cars/Test+car" in page
     scan = stocked.get(f"/local/import/0/scan{FOLDER}").get_json()
     assert [f["name"] for f in scan["files"]] == ["purchase.pdf"]
     row = read(stocked, 0, FOLDER)

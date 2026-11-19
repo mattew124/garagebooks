@@ -119,6 +119,30 @@ document.addEventListener("DOMContentLoaded", () => {
       relabel();
     }
   });
+  // A new car's import with no purchase invoice ticked: ask what the car is, in a dialog, before saving. The
+  // dialog's fields belong to the import form, so everything typed on the page is kept.
+  const carDialog = document.getElementById("car-dialog");
+  if (importForm && carDialog) {
+    const purchaseTicked = () => [...importForm.querySelectorAll("input[name^=include_]:checked")].some((box) => {
+      const select = importForm.elements["category_id_" + box.name.slice(8)];
+      const chosen = select && select.selectedOptions[0];
+      return chosen && chosen.dataset.purchase === "1";
+    });
+    importForm.addEventListener("submit", (e) => {
+      if (purchaseTicked() || importForm.elements.new_car_name.value.trim()) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();          // the page's own submit handler would lock the button
+      carDialog.showModal();
+      importForm.elements.new_car_name.focus();
+    });
+    document.getElementById("car-dialog-go").addEventListener("click", () => {
+      if (!importForm.elements.new_car_name.value.trim()) { importForm.elements.new_car_name.focus(); return; }
+      carDialog.close();
+      importForm.requestSubmit();
+    });
+    document.getElementById("car-dialog-cancel").addEventListener("click", () => carDialog.close());
+    if (carDialog.dataset.needsCar) carDialog.showModal();
+  }
   if (importForm && importForm.dataset.scanUrl) runImport(importForm);
 
   async function runImport(f) {

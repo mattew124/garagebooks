@@ -7,6 +7,15 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+- **The car's details from its purchase invoice, and a folder for a car that isn't in the list yet.** A car now has
+  an optional VIN, year built, model year and body type (on the Cars page). Importing the initial purchase
+  invoice offers to fill them in, with a tick on the row showing what it read: only where they are blank, and
+  never the name, make or model a TeslaMate car comes with. On the **Invoice storage** page, **Folder for a new
+  car** browses for a folder and opens its import, which builds the car from the purchase invoice you tick (its
+  make, model and details; a car with neither is named after its folder). With no purchase invoice ticked, a
+  dialog asks for the car's name, type and details before the import saves. Nothing needs TeslaMate. Upgrade:
+  pull the new image (the schema gains four optional columns on `car`; installers on the restricted database
+  role need no new grant).
 - **A registration's GST is read from the notice.** The GST on a registration is only on its CTP insurance part, not
   a tenth of the total, so the import reads the GST figure printed on the notice and stores it on the expense (a
   new optional **GST in the amount** field on the Add and Edit form and on the import row). A stored GST replaces

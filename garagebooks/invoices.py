@@ -436,6 +436,30 @@ def _payment_references(text):
     return (card.group(1) if card else None, biller.group(1) if biller else None, ref.group(1) if ref else None)
 
 
+# ---- the car a purchase invoice describes ------------------------------------------------------------------
+
+_VIN_LABEL = re.compile(r"\b(?:VIN|chassis(?:\s+(?:no|number)\.?)?|vehicle\s+identification\s+number)\s*(?:/\s*chassis(?:\s+no\.?)?)?\s*[:#]?\s*"
+                        r"([A-HJ-NPR-Z0-9]{17})(?![A-Za-z0-9])", re.I)
+_BUILD_YEAR = re.compile(r"(?:year\s+of\s+manufacture|date\s+of\s+manufacture|manufactured|build\s+(?:date|year)|year\s+built)"
+                         r"\s*:?\s*(?:\d{1,2}[/ .-])?(\d{4})\b", re.I)
+_MODEL_YEAR = re.compile(r"\b(?:model\s+year|year)\s*:\s*(\d{4})\b", re.I)
+_BODY = re.compile(r"\bbody\s*(?:type|style)\s*:?\s*([A-Za-z][A-Za-z /-]{1,38}?)(?=\s{2,}|\n|$)", re.I)
+_MAKE = re.compile(r"\bmake\s*:\s*([A-Za-z][A-Za-z-]{1,29})", re.I)
+_MODEL = re.compile(r"\bmodel\s*:\s*(?!year)([A-Za-z0-9][A-Za-z0-9 -]{0,29}?)(?=\s{2,}|\n|$)", re.I)
+
+
+def _car_details(text):
+    """What a purchase invoice says about the car, as far as it says it: VIN, year built, model year, body
+    type, make and model. A plain 'Year' is the model year; manufacture and build dates are the year built."""
+    out = {}
+    for key, pattern, convert in (("vin", _VIN_LABEL, str.upper), ("build_year", _BUILD_YEAR, int), ("model_year", _MODEL_YEAR, int),
+                                  ("body_type", _BODY, str.strip), ("make", _MAKE, str.strip), ("model", _MODEL, str.strip)):
+        m = pattern.search(text)
+        if m:
+            out[key] = convert(m.group(1))
+    return out
+
+
 # ---- what a row can say beyond the basics: skip, notes, the period covered, the issuing authority -------
 
 # Words that make a document an invoice, receipt, notice or policy: without one (and without an amount) it
@@ -607,6 +631,7 @@ def propose(folder, name, text, categories, learned=None, multi_amount=None):
     gst = _gst_stated(text, amount, multi_amount or "max") if registration else None
     card_ref, biller, bpay_ref = _payment_references(text) if registration else (None, None, None)
     out = {"date": when, "category": category, "vendor": vendor, "amount": amount, "odometer_km": odometer,
+           "car_details": _car_details(text),
            "gst_amount": gst, "card_payment_ref": card_ref, "bpay_biller_code": biller, "bpay_ref": bpay_ref,
            "period_start": start, "period_end": end, "notes": _notes(text, category, multi_amount or "max"),
            # Readable, yet no amount and nothing that reads as an invoice: a brochure, say. A scan with no text
