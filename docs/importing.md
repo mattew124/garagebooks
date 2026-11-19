@@ -79,7 +79,7 @@ An expense in the **Service** category records what the service covered: tick th
 engine oil, tyre rotation, windscreen washer fluid, windscreen wipers, brakes, brake fluid, timing belt, air filter,
 coolant, cabin air filter) on its import row, or on the Add and Edit form. On an import row, the items whose names
 appear in the PDF (whole words, any case) are ticked for you. The items only show while the category is Service, and are
-dropped if you change the category.
+dropped if you change the category. The Service category is in the maintenance lease budget pool to begin with.
 
 The list is yours: **Categories → Service items** adds, renames and removes items (removing one takes it off the
 expenses that had it; renaming keeps it on them). Missing one while importing? **Add an item…** on the row opens a

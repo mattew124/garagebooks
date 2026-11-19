@@ -942,8 +942,16 @@ CREATE TABLE IF NOT EXISTS garagebooks.expense_service_item (
     PRIMARY KEY (expense_id, item_id)
 );
 CREATE INDEX IF NOT EXISTS expense_service_item_item_idx ON garagebooks.expense_service_item (item_id);
-INSERT INTO garagebooks.category (name, kind, sort_order) VALUES ('Service', 'running', 85)
-ON CONFLICT (name) DO NOTHING;
+-- The Service category is added once, in the maintenance budget pool, and not as anyone's edit: kept out of the
+-- change history. An existing category of that name is left as it is.
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM garagebooks.category WHERE name = 'Service') THEN
+        ALTER TABLE garagebooks.category DISABLE TRIGGER log_change;
+        INSERT INTO garagebooks.category (name, kind, sort_order, budget_pool) VALUES ('Service', 'running', 85, 'maintenance');
+        ALTER TABLE garagebooks.category ENABLE TRIGGER log_change;
+    END IF;
+END $$;
 CREATE OR REPLACE VIEW garagebooks.expense_service AS
     SELECT e.id AS expense_id, e.car_id, e.occurred_at, e.amount, e.vendor, e.odometer_km, i.id AS item_id, i.name AS item
     FROM garagebooks.expense_service_item l
