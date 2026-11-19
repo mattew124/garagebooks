@@ -70,6 +70,9 @@ MESSAGES = {
     "category_pool": "Budget pool saved.",
     "category_gst_free": "GST-free setting saved.",
     "category_has_period": "Period setting saved.",
+    "service_added": "Service item added.",
+    "service_renamed": "Service item renamed.",
+    "service_deleted": "Service item removed. Expenses that had it keep their other items.",
     "settings": "Settings saved.",
     "folders": "Folders saved.",
     "connected": "OneDrive connected.",
@@ -642,11 +645,28 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                   store.kind, subfolder, len(pdf), docinfo.sha12(pdf), category, timer.ms)
         return store, ref
 
+    @app.context_processor
+    def service_items_for_templates():
+        """The service items, for the forms that offer them: read once per request, and only if a page asks."""
+        def service_items():
+            if "service_items" not in g:
+                with connect() as conn:
+                    g.service_items = db.service_items(conn)
+            return g.service_items
+        return {"service_items": service_items}
+
+    def save_services(conn, expense_id, category_id, raw_ids):
+        """Keep the service items ticked for an expense: only for the Service category, and only real items."""
+        ids = []
+        if category_id == db.service_category_id(conn):
+            ids = validation.parse_service_ids(raw_ids, {i["id"] for i in db.service_items(conn)})
+        db.set_expense_services(conn, expense_id, ids)
+
     def form_values(form):
         """Echo the raw submission back into the form after a validation error."""
-        return {k: form.get(k, "") for k in (
+        return {"service_item": form.getlist("service_item"), **{k: form.get(k, "") for k in (
             "car_id", "category_id", "date", "time", "amount", "odometer_km",
-            "vendor", "notes", "invoice_url", "invoice_path", "packaged", "period_start", "period_end")}
+            "vendor", "notes", "invoice_url", "invoice_path", "packaged", "period_start", "period_end")}}
 
     # ---- routes ---------------------------------------------------------------
 
@@ -742,7 +762,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             totals = db.totals(conn, category_id, car_id, start, end, tz)
         after = after_tax_view(db.after_tax_facts(conn, tz, expense_ids=[e["id"] for e in rows]),
                                db.get_settings(conn)["marginal_tax_rate"])
-        return {"view": view, "sort_link": sort_link, "expenses": rows, "after": after,
+        services = db.expense_services(conn, [e["id"] for e in rows])
+        return {"view": view, "sort_link": sort_link, "expenses": rows, "after": after, "services": services,
                 "history_synced": connector is not None and db.last_synced(conn) is not None, "totals": totals, "claim_open": claim_open,
                 "sorts": {"date": "Date", "category": "Category", "vendor": "Vendor", "amount": "Amount",
                           "odometer": "Odometer"},
@@ -801,6 +822,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             return render_template("form.html", **form_context(form_values(request.form), errors)), 400
         with connect() as conn:
             expense_id = db.insert_expense(conn, values)
+            save_services(conn, expense_id, values["category_id"], request.form.getlist("service_item"))
         refresh_dashboard()
         log.info("expense %s saved (car %s, category %s)", expense_id, values["car_id"], values["category_id"])
         with connect() as conn:
@@ -834,6 +856,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         with connect() as conn:
             offer = bool(db.stored_open_reminders(conn, row["car_id"]))
             claim = claim_summary(conn, row)
+            values["service_item"] = [str(i) for i in db.expense_service_ids(conn, expense_id)]
         return render_template("form.html", **form_context(values, expense_id=expense_id), reminder_offer=offer,
                                claim=claim)
 
@@ -846,6 +869,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         with connect() as conn:
             if not db.update_expense(conn, expense_id, values):
                 abort(404)
+            save_services(conn, expense_id, values["category_id"], request.form.getlist("service_item"))
         refresh_dashboard()
         log.info("expense %s updated", expense_id)
         return redirect(url_for("index", **list_view(), msg=saved_msg("updated")), 303)
@@ -1842,6 +1866,65 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 abort(404)
         return redirect(url_for("categories", msg="category_gst_free"), 303)
 
+    def render_categories_page(service_error=None, status=200):
+        with connect() as conn:
+            cats = db.categories(conn)
+            budgets_on = db.lease_budgets_on(conn)
+        return render_template("categories.html", categories=cats, error=None, pools=lease.POOLS, budgets_on=budgets_on,
+                               service_error=service_error, message=None), status
+
+    @app.post("/categories/services")
+    def service_item_add():
+        try:
+            name = validation.parse_service_item_name(request.form.get("name"))
+            with connect() as conn:
+                if db.add_service_item(conn, name) is None:
+                    raise ValueError(f"“{name}” already exists.")
+        except ValueError as exc:
+            return render_categories_page((None, str(exc)), 400)
+        return redirect(url_for("categories", msg="service_added"), 303)
+
+    @app.post("/categories/services/<int:item_id>/rename")
+    def service_item_rename(item_id):
+        try:
+            name = validation.parse_service_item_name(request.form.get("name"))
+            with connect() as conn:
+                done = db.rename_service_item(conn, item_id, name)
+            if done is None:
+                raise ValueError(f"“{name}” already exists.")
+        except ValueError as exc:
+            with connect() as conn:
+                if db.service_item(conn, item_id) is None:
+                    abort(404)
+            return render_categories_page((item_id, str(exc)), 400)
+        if not done:
+            abort(404)
+        return redirect(url_for("categories", msg="service_renamed"), 303)
+
+    @app.post("/categories/services/<int:item_id>/delete")
+    def service_item_delete(item_id):
+        with connect() as conn:
+            if not db.delete_service_item(conn, item_id):
+                abort(404)
+        return redirect(url_for("categories", msg="service_deleted"), 303)
+
+    @app.post("/api/service-items")
+    def api_service_items():
+        """Add a service item from the import page's dialog, so nothing typed there is lost. An item that exists
+        (ignoring case) is returned as it is, marked `existing`, so the page just ticks it."""
+        body = request.get_json(silent=True)
+        raw = body.get("name") if isinstance(body, dict) else None
+        try:
+            name = validation.parse_service_item_name(raw if isinstance(raw, str) else "")
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
+        with connect() as conn:
+            item = db.add_service_item(conn, name)
+            if item is not None:
+                return jsonify(id=item["id"], name=item["name"]), 201
+            item = db.service_item_named(conn, name)
+        return jsonify(id=item["id"], name=item["name"], existing=True)
+
     @app.post("/categories/<int:category_id>/has_period")
     def category_has_period(category_id):
         """Whether the category's expenses cover a period (insurance, registration): the add and edit form and the
@@ -2161,7 +2244,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
     def import_row(n, **fields):
         return {"n": n, "include": False, "skip": False, "date": "", "category_id": "", "vendor": "",
                 "amount": "", "odometer_km": "", "url": "", "name": "", "folder": "",
-                "note": "", "id": "", "notes": "", "period_start": "", "period_end": "", "guess": {}, "new_name": "", "rename": False, "odo_note": "", "duplicates": [], **fields}
+                "note": "", "id": "", "services": [], "notes": "", "period_start": "", "period_end": "", "guess": {}, "new_name": "", "rename": False, "odo_note": "", "duplicates": [], **fields}
 
     def import_page(store, car, **ctx):
         """The import page's template with what every version of it needs. A row's `url` is the file's
@@ -2202,7 +2285,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         timer = docinfo.Timer()
         try:
             pdf = store.download(f["id"])
-            guess = invoices.propose(f["folder"], f["name"], invoices.extract_text(pdf), list(by_name), ctx["learned"],
+            text = invoices.extract_text(pdf)
+            guess = invoices.propose(f["folder"], f["name"], text, list(by_name), ctx["learned"],
                                      ctx["settings"]["multi_amount"])
         except storage.StorageError as exc:
             log.warning("import file=%s folder=%s skipped: %s", docinfo.quote(f["name"]), docinfo.quote(f["folder"]), exc)
@@ -2222,6 +2306,9 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             period_end=guess["period_end"].isoformat() if guess["period_end"] else "",
             note=("Couldn't read the " + ", ".join(guess["missing"]) + ": fill in to import."
                   if guess["missing"] else ""))
+        with connect() as conn:         # the service items this PDF names: shown when the category is Service
+            named = {i["name"]: str(i["id"]) for i in db.service_items(conn)}
+        row["services"] = [named[n] for n in invoices.service_items_in(text, list(named))]
         if guess["suggest_skip"]:        # a brochure or letter: not offered again unless the owner un-ticks Skip
             row.update(skip=True, include=False,
                        note="Doesn't look like an invoice (no amount, no invoice words): skipped. Untick Skip to import it.")
@@ -2447,6 +2534,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 row = import_row(n, include=bool(f("include")), skip=bool(f("skip")), rename=bool(f("rename")), date=f("date"), category_id=f("category_id"),
                                  vendor=f("vendor"), amount=f("amount"), odometer_km=f("odometer_km"),
                                  notes=f("notes"), period_start=f("period_start"), period_end=f("period_end"),
+                                 services=request.form.getlist(f"service_item_{n}"),
                                  url=f("url"), name=f("name"), folder=f("folder"), id=f("id"),
                                  guess={k: f(f"guess_{k}") for k in LEARN_FIELDS})
                 rows.append(row)
@@ -2495,7 +2583,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                         rename_failed += 1           # import it anyway, still pointing at the old name
                         log.warning("import rename item=%s to=%s failed: %s", row["id"], docinfo.quote(target), exc)
                 with connect() as conn:
-                    db.insert_expense(conn, values)
+                    expense_id = db.insert_expense(conn, values)
+                    save_services(conn, expense_id, values["category_id"], row["services"])
                 imported.append((row, values))
             log.debug("import confirm car=%d rows=%d imported=%d skipped_known=%d renamed=%d rename_failed=%d", car_id,
                       len(chosen), len(imported), len(chosen) - len(imported), renamed, rename_failed)

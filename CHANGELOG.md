@@ -7,6 +7,15 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+- **Service items.** A new **Service** category, and a list of what a service covered (fuel filter, oil filter,
+  engine oil, tyre rotation, windscreen washer fluid, windscreen wipers, brakes, brake fluid, timing belt, air
+  filter, coolant, cabin air filter). Choose the items on each Service expense (the Add and Edit form, and each
+  import row, where the items named in the PDF are ticked for you), and add, rename or remove them under **Service
+  items** on the Categories page. An item can also be added from the import page in a dialog, without losing
+  anything typed there. The items show under the vendor in the expense list, and the new `garagebooks.expense_service`
+  view has one row per expense and item for Grafana. Upgrade: pull the new image (the schema gains
+  `service_item`, `expense_service_item` and the view; installers on the restricted database role re-run
+  `scripts/provision-db.sh`).
 - **Import rows read more.** On the import page (every source), a file with no amount and nothing that reads
   as an invoice (no invoice, receipt, total, premium, renewal, policy or notice wording) starts with **Skip**
   ticked, so a brochure stops being offered. Each row has a **Notes** field, filled in where it can be read

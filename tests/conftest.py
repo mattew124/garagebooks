@@ -164,6 +164,7 @@ def admin(pg):
             f"UPDATE garagebooks.car SET name = 'Test car', kind = 'BEV', name_from_teslamate = {'true' if TESLAMATE else 'false'} WHERE id = 1",
             "SELECT garagebooks.build_ownership(true)",
             "DELETE FROM garagebooks.category WHERE sort_order = 100",
+            "DELETE FROM garagebooks.service_item WHERE sort_order = 100",       # items a test added
             # The history is append-only, even for us: lift the guard just to start each test empty.
             "ALTER TABLE garagebooks.change_log DISABLE TRIGGER USER",
             "TRUNCATE garagebooks.change_log RESTART IDENTITY",

@@ -64,7 +64,8 @@
     <td class="date" data-label="Date" title="{{ e.occurred_at|when }}">{{ e.occurred_at|day }}</td>
     <td class="cat" data-label="Category"><span class="chip hue-{{ e.category_id % 10 }}">{{ e.category }}</span>{% if e.car_name and expenses|map(attribute='car_id')|unique|list|length > 1 %} <small>({{ e.car_name }})</small>{% endif %}</td>
     <td class="vendor" data-label="Vendor" title="{{ e.vendor or '' }}">{{ e.vendor or '–' }}{% if e.period_start or e.period_end %}
-      <small class="period-note">{{ (e.period_start|day) if e.period_start else '…' }} to {{ (e.period_end|day) if e.period_end else '…' }}</small>{% endif %}</td>
+      <small class="period-note">{{ (e.period_start|day) if e.period_start else '…' }} to {{ (e.period_end|day) if e.period_end else '…' }}</small>{% endif %}{% if services and services.get(e.id) %}
+      <small class="service-note">{{ services[e.id]|join(', ') }}</small>{% endif %}</td>
     <td class="num amount{{ ' credit' if e.amount < 0 }}" data-label="Amount">{{ e.amount|money }}{% set cost = after.costs.get(e.id) %}{% if cost is not none %}
       <small class="after-tax" title="After tax: {{ cost|money }}. Paid from the package, so the GST is claimed back and the rest comes from pre-tax salary (at the marginal tax rate in Settings). Not tax advice.">{{ cost|money }} after tax</small>{% endif %}</td>
     <td class="num odo" data-label="Odometer">{{ e.odometer_km|km }}</td>

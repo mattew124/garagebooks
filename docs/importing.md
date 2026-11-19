@@ -58,6 +58,21 @@ A period can't end before it starts.
 
 <!-- screenshot: import-row-period - An import row for an insurance policy, with its notes and period -->
 
+## Service items
+
+An expense in the **Service** category records what the service covered: tick the items (fuel filter, oil filter,
+engine oil, tyre rotation, windscreen washer fluid, windscreen wipers, brakes, brake fluid, timing belt, air filter,
+coolant, cabin air filter) on its import row, or on the Add and Edit form. On an import row, the items whose names
+appear in the PDF (whole words, any case) are ticked for you. The items only show while the category is Service, and are
+dropped if you change the category. The Service category is in the maintenance lease budget pool to begin with.
+
+The list is yours: **Categories → Service items** adds, renames and removes items (removing one takes it off the
+expenses that had it; renaming keeps it on them). Missing one while importing? **Add an item…** on the row opens a
+dialog; the new item is added to every row's list and ticked on the row you were in, and nothing else on the
+page changes.
+
+<!-- screenshot: import-service-items - An import row in the Service category, with its service items and the Add an item dialog -->
+
 ## Possible duplicates
 
 Possible duplicates are flagged. Saving a new expense (the Add form) that has the same car and exactly
