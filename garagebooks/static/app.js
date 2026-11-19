@@ -36,6 +36,36 @@ document.addEventListener("DOMContentLoaded", () => {
     const button = importForm.querySelector("button[type=submit]");
     if (button && !button.disabled) button.textContent = importLabel();
   };
+  // "Attach to": the other rows, by number and file name, to merge a row's PDF into another row's expense.
+  const refreshAttach = () => {
+    importForm.querySelectorAll("select[data-attach]").forEach((select) => {
+      const own = Number(select.name.slice(7));
+      const keep = select.value || select.dataset.selected || "";
+      select.length = 1;
+      importForm.querySelectorAll("input[name^=name_]").forEach((input) => {
+        const k = Number(input.name.slice(5));
+        if (k === own) return;
+        const option = new Option(`${k === own - 1 ? "The row above" : "Row " + (k + 1)}: ${input.value}`, String(k));
+        select.add(option);
+      });
+      select.value = keep;
+      if (select.value !== keep) select.value = "";
+    });
+  };
+  if (importForm) {
+    refreshAttach();
+    // Attaching a row merges it into the other one's expense, so it isn't imported or skipped by itself.
+    importForm.addEventListener("change", (e) => {
+      const m = /^attach_(\d+)$/.exec(e.target.name || "");
+      if (!m) return;
+      const attached = e.target.value !== "";
+      ["include_", "skip_"].forEach((prefix) => {
+        const box = importForm.elements[prefix + m[1]];
+        if (box && attached) box.checked = false;
+        if (box) box.disabled = attached;
+      });
+    });
+  }
   if (importForm) {
     importForm.addEventListener("change", relabel);
     relabel();
@@ -223,6 +253,7 @@ document.addEventListener("DOMContentLoaded", () => {
       bar.value = i + 1;
     }
     f.elements.count.value = total;
+    refreshAttach();
     submit.disabled = false;
     f.dispatchEvent(new Event("change"));
     ticking = false;

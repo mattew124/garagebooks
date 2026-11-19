@@ -489,6 +489,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 "errors": errors or {},
                 "view": list_view(),
                 "expense_id": expense_id,
+                "documents": db.documents(conn, expense_id) if expense_id else [],
                 "onedrive_connected": bool(account and account["refresh_token"]),
             }
 
@@ -2225,6 +2226,26 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             abort(404)
         return send_invoice(row["invoice_path"])
 
+    @app.get("/document/<int:document_id>")
+    def document(document_id):
+        """A PDF merged into an expense on the import page: from the invoice folder, or the stored link."""
+        with connect() as conn:
+            doc = db.get_document(conn, document_id)
+        if doc is None:
+            abort(404)
+        if doc["invoice_path"]:
+            return send_invoice(doc["invoice_path"])
+        return redirect(doc["invoice_url"], 302)        # https only: the table refuses anything else
+
+    @app.post("/<int:expense_id>/documents/<int:document_id>/remove")
+    def document_remove(expense_id, document_id):
+        """Forget an attached document (the file stays where it is, and is offered for import again)."""
+        with connect() as conn:
+            if not db.delete_document(conn, expense_id, document_id):
+                abort(404)
+        log.info("document %s removed from expense %s", document_id, expense_id)
+        return redirect(url_for("edit", expense_id=expense_id, **list_view()), 303)
+
     @app.get("/local/file")
     def local_file():
         """A PDF in the folder that has no expense yet (the import page links to these)."""
@@ -2235,6 +2256,47 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
     # A folder chosen before its car exists (the import then builds the car): car id 0 in the storage routes.
     NEW_CAR = {"id": 0, "name": "", "kind": "BEV", "make": None, "model": None, "teslamate_car_id": None}
     CAR_KEYS = ("make", "model") + db.CAR_DETAIL_FIELDS
+
+    def attach_rows(rows, count, ticked, ref_field, errors):
+        """Which rows are merged into which expense: {main row n: [the rows attached to it]}. A row attached to a
+        row that is itself attached follows the chain to the one that makes the expense. Problems go into `errors`
+        (by row number): a row to attach to that doesn't exist, itself, a loop, a main row that isn't ticked, or a
+        bad link."""
+        pointing = {}
+        for row in rows:
+            if row["attach"] == "":
+                continue
+            try:
+                target = int(row["attach"])
+            except ValueError:
+                target = -1
+            if not 0 <= target < count or target == row["n"]:
+                errors[row["n"]] = "Choose another row to attach this one to."
+            else:
+                pointing[row["n"]] = target
+        attachments = {}
+        for n, target in pointing.items():
+            if n in errors:
+                continue
+            seen = {n}
+            while target in pointing and target not in seen:
+                seen.add(target)
+                target = pointing[target]
+            row = rows[n]
+            try:
+                ref = validation.parse_invoice_path(row["url"]) if ref_field == "invoice_path" else validation.parse_invoice_url(row["url"])
+            except ValueError as exc:
+                errors[n] = str(exc)
+                continue
+            if target in seen or target in pointing:
+                errors[n] = "These rows are attached to each other in a loop."
+            elif not ref or not row["name"]:
+                errors[n] = "Missing link to the PDF."
+            elif target not in ticked:
+                errors[n] = "The row it is attached to isn't ticked for import."
+            else:
+                attachments.setdefault(target, []).append({"name": row["name"], "url": ref})
+        return attachments
 
     def ctx_folder(kind):
         return new_car_folder(kind)
@@ -2280,7 +2342,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
     def import_row(n, **fields):
         return {"n": n, "include": False, "skip": False, "date": "", "category_id": "", "vendor": "",
                 "amount": "", "odometer_km": "", "url": "", "name": "", "folder": "",
-                "note": "", "id": "", "car_fill": False, "car_fields": [], "services": [], "notes": "", "gst_amount": "", "card_payment_ref": "",
+                "note": "", "id": "", "attach": "", "car_fill": False, "car_fields": [], "services": [], "notes": "", "gst_amount": "", "card_payment_ref": "",
                 "bpay_biller_code": "", "bpay_ref": "", "car_vin": "", "car_build_year": "", "car_model_year": "",
                 "car_body_type": "", "car_make": "", "car_model": "", "period_start": "", "period_end": "", "guess": {}, "new_name": "", "rename": False, "odo_note": "", "duplicates": [], **fields}
 
@@ -2603,12 +2665,14 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                                  notes=f("notes"), period_start=f("period_start"), period_end=f("period_end"),
                                  services=request.form.getlist(f"service_item_{n}"), gst_amount=f("gst_amount"),
                                  card_payment_ref=f("card_payment_ref"), bpay_biller_code=f("bpay_biller_code"),
-                                 bpay_ref=f("bpay_ref"), car_fill=bool(f("car_fill")),
+                                 bpay_ref=f("bpay_ref"), car_fill=bool(f("car_fill")), attach=f("attach"),
                                  car_fields=[k for k in CAR_KEYS if f"car_{k}_{n}" in request.form],
                                  **{f"car_{k}": f(f"car_{k}") for k in CAR_KEYS},
                                  url=f("url"), name=f("name"), folder=f("folder"), id=f("id"),
                                  guess={k: f(f"guess_{k}") for k in LEARN_FIELDS})
                 rows.append(row)
+                if row["attach"] != "":          # merged into another row's expense: sorted out below
+                    continue
                 if row["skip"] and row["url"]:
                     skip_urls.append(row["url"])
                     continue
@@ -2631,6 +2695,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                     errors[n] = " ".join(row_errors.values())
                 else:
                     chosen.append((row, values))
+            attachments = attach_rows(rows, count, {r["n"] for r, _ in chosen}, ref_field, errors)
             if errors:
                 return render_import(store, car, rows, errors=errors, status=400)
             with connect() as conn:
@@ -2681,6 +2746,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                     save_services(conn, expense_id, values["category_id"], row["services"])
                     if row["car_fill"] and row.get("car_details"):      # blanks only: never replaces what the car has
                         db.fill_car_details(conn, car_id, row["car_details"])
+                    for extra in attachments.get(row["n"], []):         # the other PDFs of this expense
+                        db.add_document(conn, expense_id, extra["name"], ref_field, extra["url"])
                 imported.append((row, values))
             log.debug("import confirm car=%d rows=%d imported=%d skipped_known=%d renamed=%d rename_failed=%d", car_id,
                       len(chosen), len(imported), len(chosen) - len(imported), renamed, rename_failed)
