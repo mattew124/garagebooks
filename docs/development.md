@@ -65,7 +65,7 @@ newest migration with the recorded one. Exit status 0 means tested, 1 means a fa
 2 means it passes but is newer than recorded. `--if-new` exits 0 at once when the release is already the
 recorded one. A daily *TeslaMate compatibility* workflow runs it with `--if-new` against the latest release
 (so nothing runs unless there is a new one). On a failure (exit 1) it opens an issue. When the tests pass on a
-newer release (exit 2) it runs `--record`, which updates `compat.py`, the README line and the CHANGELOG, opens a
+newer release (exit 2) it has already run `--record` in that same run, which updated `compat.py`, the README line and the CHANGELOG, opens a
 pull request and runs CI on it. When the next tag is clear (`scripts/auto_rc.py`: the next `-rcN` of a version that
 has only had candidates, or `-rc1` of a PATCH after a stable release when the only unreleased change is the
 compatibility entry), it then merges the pull request, renames the CHANGELOG entry, tags that candidate and

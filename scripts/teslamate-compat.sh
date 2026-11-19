@@ -12,7 +12,7 @@
 # Never touches a real TeslaMate database. Needs docker and .venv (scripts/dev.sh setup).
 #
 # Exit status: 0 = tested and nothing to change; 1 = the tests failed; 2 = the tests pass but
-# TeslaMate is newer than compat.py records (run with --record).
+# TeslaMate is newer than compat.py records (with --record, also after it has recorded it).
 # --record, after a pass, updates compat.py, the README line and the CHANGELOG (an entry at the top of
 # Unreleased) to VERSION, so only the review and the release are left.
 # --if-new exits 0 at once, running nothing, when VERSION is the release already recorded.
@@ -84,6 +84,7 @@ if [ "$record" = 1 ] && { [ "$status" = 0 ] || [ "$status" = 2 ]; }; then
     sed -i -E "s/^Tested with TeslaMate [0-9][0-9.]*\./Tested with TeslaMate $version./" README.md
     .venv/bin/python scripts/auto_rc.py record "$version" "$tested"
     echo "compat: recorded TeslaMate $version (migration $newest). Review 'git diff'."
-    status=0
+    # Exit 2 stays: "passed, and newer than recorded" is how a caller (the workflow) learns something was recorded.
+    [ "$status" = 2 ] || status=0
 fi
 exit "$status"

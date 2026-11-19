@@ -9,8 +9,8 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 - **Faster tests.** The suite runs in parallel (`pytest -n auto`, one throwaway Postgres per worker), about three times
   faster on four cores, and the route property tests use 15 examples locally (40 in CI, as before). The `admin`
-  fixture makes one round trip instead of a dozen. CI and the TeslaMate compatibility check use `-n auto`. Nothing
-  changes for installers.
+  fixture makes one round trip instead of a dozen. CI and the TeslaMate compatibility check use `-n auto`, and the check
+  runs the suite once rather than twice (`--record` keeps exit status 2). Nothing changes for installers.
 
 ## 0.4.0-rc3 - 2026-11-19
 
