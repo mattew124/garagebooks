@@ -5,7 +5,16 @@ steps are in [RELEASING.md](RELEASING.md). Newest first.
 
 Each entry says what an installer must do to upgrade. Where nothing is said, pull the new image.
 
-## Unreleased
+## 0.4.0-rc2 - 2026-11-19
+
+This candidate adds notifications, scheduled jobs, cost after tax for a novated lease, kilometre pace, a change
+history, and lease form import, and makes TeslaMate optional. It is worth testing if you want a notice sent
+when a reminder falls due or the OneDrive sign-in stops working, or to see what a leased car costs after tax.
+
+**To upgrade:** back up TeslaMate's database, as for any release that changes the schema, then pull the new
+image. The app adds its new tables, columns and functions itself on start. If you use the restricted database
+role (`SKIP_MIGRATE=1`), run `scripts/provision-db.sh` first. Nothing is sent and no tax is calculated until you
+set a notification address or a marginal tax rate in Settings.
 
 **Notifications.** The app adds the new table and columns itself. If you use the restricted database role
 (`SKIP_MIGRATE=1`), run `scripts/provision-db.sh` again so the role can use the new `notification` table.
