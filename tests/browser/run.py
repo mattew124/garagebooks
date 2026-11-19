@@ -886,7 +886,7 @@ def test_onedrive_page(page):
     expect(page.locator("h1")).to_have_text("Invoice storage")
     expect(page.locator("#onedrive h2")).to_have_text("OneDrive")
     expect(page.locator("#cars h2")).to_have_text("Folder per car")       # one page for every storage
-    expect(page.locator("code.copy")).to_have_text(re.compile(re.escape(BASE) + r"/onedrive/callback$"))
+    expect(page.locator("code.copy")).to_have_text(re.compile(re.escape(BASE) + r"/microsoft/callback$"))
     if not page.locator("details[open]").count():
         page.click("#onedrive summary")
     page.fill("input[name=client_id]", "not-a-client-id")

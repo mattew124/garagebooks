@@ -29,7 +29,7 @@ KEY = Fernet.generate_key().decode()
 CLIENT_ID = "11111111-2222-3333-4444-555555555555"
 SECRET = "s3cret~value"
 WEB_URL = "https://onedrive.live.com/?id=FILE1"
-CALLBACK = "http://localhost/onedrive/callback"
+CALLBACK = "http://localhost/microsoft/callback"
 FILE_DOWNLOAD = "https://cdn.example.com/F1"
 
 # A small drive: root -> Cars -> Test car -> Invoices
@@ -68,6 +68,7 @@ class FakeMicrosoft:
         self.expires_in = 3600
         self.challenge = None
         self.created = []
+        self.callback = CALLBACK      # the redirect URI the sign-in must come back to
 
     def __call__(self, method, url, data=None, headers=None, raw=False):
         headers = headers or {}
@@ -80,7 +81,7 @@ class FakeMicrosoft:
             if grant == "authorization_code":
                 if form["code"] != ["AUTH-CODE"]:
                     return 400, {"error": "invalid_grant", "error_description": "bad code"}
-                assert form["redirect_uri"] == [CALLBACK]
+                assert form["redirect_uri"] == [self.callback]
                 verifier = form["code_verifier"][0].encode()
                 expected = base64.urlsafe_b64encode(hashlib.sha256(verifier).digest()).rstrip(b"=").decode()
                 assert expected == self.challenge, "PKCE verifier doesn't match the challenge"
@@ -190,7 +191,7 @@ def start_sign_in(client, ms):
 def sign_in(client, ms):
     save_credentials(client)
     q = start_sign_in(client, ms)
-    resp = client.get(f"/onedrive/callback?code=AUTH-CODE&state={q['state']}")
+    resp = client.get(f"/microsoft/callback?code=AUTH-CODE&state={q['state']}")
     assert resp.status_code == 303 and "msg=connected" in resp.headers["Location"]
 
 
@@ -210,6 +211,49 @@ def with_pdf(data, content=PDF, name="invoice.pdf"):
 
 def account(admin):
     return admin.execute("SELECT * FROM garagebooks.onedrive_account").fetchone()
+
+
+# ---- the Microsoft account: one registration for OneDrive and the mailbox ----------
+
+OLD_CALLBACK = "http://localhost/onedrive/callback"
+
+
+def test_the_registration_is_a_microsoft_account_card(client):
+    page = client.get("/storage").data.decode()
+    card = page.split('id="microsoft"', 1)[1].split("</section>", 1)[0]
+    assert "<h2>Microsoft account</h2>" in card or "Microsoft account</h2>" in card
+    assert 'name="client_secret"' in card and CALLBACK in card
+    assert "OneDrive and the Outlook mailbox" in card
+
+
+def test_new_registration_signs_in_at_the_microsoft_address(client, ms, admin):
+    save_credentials(client)
+    assert account(admin)["callback"] == "microsoft"
+    q = start_sign_in(client, ms)
+    assert q["redirect_uri"] == CALLBACK
+    resp = client.get(f"/microsoft/callback?code=AUTH-CODE&state={q['state']}")
+    assert resp.status_code == 303 and "msg=connected" in resp.headers["Location"]
+
+
+def test_registration_saved_before_keeps_the_onedrive_address(client, ms, admin):
+    """An installation registered before the address moved keeps working without touching Microsoft."""
+    save_credentials(client)
+    admin.execute("UPDATE garagebooks.onedrive_account SET callback = NULL")
+    page = client.get("/storage").data.decode()
+    assert OLD_CALLBACK in page and CALLBACK in page        # the one in use, and the one to move to
+    ms.callback = OLD_CALLBACK
+    q = start_sign_in(client, ms)
+    assert q["redirect_uri"] == OLD_CALLBACK
+    resp = client.get(f"/onedrive/callback?code=AUTH-CODE&state={q['state']}")
+    assert resp.status_code == 303 and "msg=connected" in resp.headers["Location"]
+
+
+def test_saving_the_registration_again_moves_to_the_new_address(client, ms, admin):
+    save_credentials(client)
+    admin.execute("UPDATE garagebooks.onedrive_account SET callback = NULL")
+    save_credentials(client)
+    assert account(admin)["callback"] == "microsoft"
+    assert OLD_CALLBACK not in client.get("/storage").data.decode()
 
 
 # ---- not configured -------------------------------------------------------------
@@ -244,7 +288,7 @@ def test_redirect_uri_follows_the_proxy(app_for, ms, monkeypatch):
     c = app_for(ms)
     page = c.get("/expenses/storage", headers={"X-Forwarded-Proto": "https",
                                                 "X-Forwarded-Host": "cars.example.org"}).data.decode()
-    assert "https://cars.example.org/expenses/onedrive/callback" in page
+    assert "https://cars.example.org/expenses/microsoft/callback" in page
 
 
 def test_credentials_are_validated_and_secret_encrypted(client, admin):
@@ -284,7 +328,7 @@ def test_web_sign_in(client, ms, admin):
     assert q["response_type"] == "code" and q["code_challenge_method"] == "S256"
     assert "offline_access" in q["scope"] and "Files.ReadWrite" in q["scope"]
     assert len(q["state"]) >= 32
-    resp = client.get(f"/onedrive/callback?code=AUTH-CODE&state={q['state']}", follow_redirects=True)
+    resp = client.get(f"/microsoft/callback?code=AUTH-CODE&state={q['state']}", follow_redirects=True)
     assert b"Connected as <strong>Test Owner</strong>" in resp.data
     row = account(admin)
     assert row["account"] == "Test Owner" and row["auth_state"] is None
@@ -295,7 +339,7 @@ def test_web_sign_in(client, ms, admin):
 def test_callback_with_wrong_state_is_refused(client, ms, admin):
     save_credentials(client)
     start_sign_in(client, ms)
-    resp = client.get("/onedrive/callback?code=AUTH-CODE&state=forged")
+    resp = client.get("/microsoft/callback?code=AUTH-CODE&state=forged")
     assert resp.status_code == 400 and account(admin)["refresh_token"] is None
 
 
@@ -305,19 +349,19 @@ def test_callback_from_another_browser_is_refused(client, app_for, ms, admin):
     save_credentials(client)
     q = start_sign_in(client, ms)
     other = app_for(ms)
-    resp = other.get(f"/onedrive/callback?code=AUTH-CODE&state={q['state']}")
+    resp = other.get(f"/microsoft/callback?code=AUTH-CODE&state={q['state']}")
     assert resp.status_code == 400 and account(admin)["refresh_token"] is None
 
 
 def test_callback_without_starting_is_refused(client, ms):
     save_credentials(client)
-    assert client.get("/onedrive/callback?code=AUTH-CODE&state=x").status_code == 400
+    assert client.get("/microsoft/callback?code=AUTH-CODE&state=x").status_code == 400
 
 
 def test_sign_in_cancelled_at_microsoft(client, ms, admin):
     save_credentials(client)
     q = start_sign_in(client, ms)
-    resp = client.get(f"/onedrive/callback?error=access_denied&error_description=User+cancelled&state={q['state']}")
+    resp = client.get(f"/microsoft/callback?error=access_denied&error_description=User+cancelled&state={q['state']}")
     assert resp.status_code == 400 and b"User cancelled" in resp.data
     assert account(admin)["refresh_token"] is None
 
@@ -811,7 +855,7 @@ def test_signing_in_again_does_not_reuse_the_old_access_token(client, ms):
     pick(client)
     client.post("/onedrive/disconnect", headers=ORIGIN)
     q = start_sign_in(client, ms)
-    client.get(f"/onedrive/callback?code=AUTH-CODE&state={q['state']}")
+    client.get(f"/microsoft/callback?code=AUTH-CODE&state={q['state']}")
     before = len(refreshes(ms))
     assert pick(client).status_code == 200
     assert len(refreshes(ms)) - before == 1     # the new sign-in's refresh token has no kept access token

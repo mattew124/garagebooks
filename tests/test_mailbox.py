@@ -134,7 +134,7 @@ def connect_mailbox(client, ms):
     href = html.unescape(re.search(r'<a id="continue-sign-in" href="([^"]+)"', resp.data.decode()).group(1))
     q = {k: v[0] for k, v in parse_qs(urlparse(href).query).items()}
     ms.challenge = q["code_challenge"]
-    resp = client.get(f"/onedrive/callback?code=AUTH-CODE&state={q['state']}")
+    resp = client.get(f"/microsoft/callback?code=AUTH-CODE&state={q['state']}")
     assert resp.status_code == 303 and "msg=mail_connected" in resp.headers["Location"]
     return q
 
@@ -173,7 +173,7 @@ def test_mailbox_signs_in_with_the_same_registration_asking_only_to_read_mail(cl
     save_credentials(client)
     q = connect_mailbox(client, ms)
     assert q["client_id"] == CLIENT_ID
-    assert q["redirect_uri"] == "http://localhost/onedrive/callback"     # no second redirect URI to register
+    assert q["redirect_uri"] == "http://localhost/microsoft/callback"     # no second redirect URI to register
     assert set(q["scope"].split()) == {"Mail.Read", "User.Read", "offline_access"}
     row = account(admin)
     assert row["mail_refresh_token"] and "RT-1" not in row["mail_refresh_token"]     # encrypted
@@ -307,7 +307,7 @@ def test_import_without_storage_links_the_email(mailbox, admin):
 
 def test_import_copies_the_attachment_into_the_cars_storage(mailbox, ms, admin):
     q = start_sign_in(mailbox, ms)                      # OneDrive too, on the registration already saved
-    assert mailbox.get(f"/onedrive/callback?code=AUTH-CODE&state={q['state']}").status_code == 303
+    assert mailbox.get(f"/microsoft/callback?code=AUTH-CODE&state={q['state']}").status_code == 303
     choose_folder(mailbox)                              # OneDrive folder for the car's invoices
     f = scan(mailbox)["files"][0]
     resp = confirm(mailbox, admin, [(f, {"date": "2026-10-24", "category_id": cat(admin, "Tyres"),
