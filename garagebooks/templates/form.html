@@ -89,7 +89,7 @@
   <label>Category
     <select name="category_id" required>
       <option value="">Choose…</option>
-      {% for c in categories %}<option value="{{ c.id }}" {{ 'selected' if values.category_id|string == c.id|string }}>{{ c.name }}</option>{% endfor %}
+      {% for c in categories %}<option value="{{ c.id }}" data-period="{{ 1 if c.has_period else 0 }}" {{ 'selected' if values.category_id|string == c.id|string }}>{{ c.name }}</option>{% endfor %}
     </select>{{ err('category_id') }}
     <small><a href="{{ url_for('categories') }}">Need another category?</a></small>
   </label>
@@ -170,6 +170,13 @@
   </label>
 
   <label>Vendor / shop <input name="vendor" maxlength="500" value="{{ values.vendor }}">{{ err('vendor') }}</label>
+
+  {# Insurance and registration cover a stretch of time; app.js shows these for a category that has one. #}
+  {% set period_on = (categories|selectattr('id', 'equalto', values.get('category_id', 0)|int(0))|selectattr('has_period')|list) or values.period_start or values.period_end or errors.get('period_end') %}
+  <div class="row" id="period-fields" {{ '' if period_on else 'hidden' }}>
+    <label>Period from <input type="date" name="period_start" value="{{ values.period_start }}">{{ err('period_start') }}</label>
+    <label>to <input type="date" name="period_end" value="{{ values.period_end }}">{{ err('period_end') }}</label>
+  </div>
   </section>
 
   <section class="card stack">

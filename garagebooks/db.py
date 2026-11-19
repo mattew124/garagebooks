@@ -307,7 +307,7 @@ def set_ev_charging_rate(conn, year, cents_per_km):
 
 def categories(conn):
     return conn.execute(
-        "SELECT id, name, kind, upload_folder, budget_pool, gst_free FROM garagebooks.category ORDER BY sort_order, name"
+        "SELECT id, name, kind, upload_folder, budget_pool, gst_free, has_period FROM garagebooks.category ORDER BY sort_order, name"
     ).fetchall()
 
 
@@ -315,6 +315,12 @@ def set_gst_free(conn, category_id, gst_free):
     """Whether a category's invoices carry no GST. False if no such category."""
     return conn.execute("UPDATE garagebooks.category SET gst_free = %s WHERE id = %s",
                         (bool(gst_free), category_id)).rowcount == 1
+
+
+def set_has_period(conn, category_id, has_period):
+    """Whether a category's expenses cover a period (insurance, registration). False if no such category."""
+    return conn.execute("UPDATE garagebooks.category SET has_period = %s WHERE id = %s",
+                        (bool(has_period), category_id)).rowcount == 1
 
 
 def add_category(conn, name):
@@ -340,8 +346,8 @@ def set_upload_folder(conn, category_id, folder):
 _SELECT = """
     SELECT e.id, e.car_id, c.name AS car_name, e.category_id, cat.name AS category,
            cat.kind, e.occurred_at, e.amount, e.odometer_km, e.vendor, e.notes,
-           e.invoice_url, e.invoice_path, e.packaged,
-           c.make AS car_make, c.model AS car_model, cat.budget_pool,
+           e.invoice_url, e.invoice_path, e.packaged, e.period_start, e.period_end,
+           cat.has_period, c.make AS car_make, c.model AS car_model, cat.budget_pool,
            cl.provider AS claim_provider, cl.provider_id AS claim_provider_id, cl.reference AS claim_reference,
            cl.status AS claim_status, cl.paid_date AS claim_paid_date, cl.approved_amount AS claim_approved,
            (EXISTS (SELECT 1 FROM garagebooks.provider_claim pc WHERE pc.expense_id = e.id)
@@ -430,14 +436,16 @@ def get_expense(conn, expense_id):
 
 
 _FIELDS = ("car_id", "category_id", "occurred_at", "amount", "odometer_km",
-           "vendor", "notes", "invoice_url", "invoice_path", "packaged")
+           "vendor", "notes", "invoice_url", "invoice_path", "packaged", "period_start", "period_end")
+
+_DEFAULTS = {"invoice_path": None, "packaged": None, "period_start": None, "period_end": None}
 
 
 def insert_expense(conn, v):
     return conn.execute(
         f"INSERT INTO garagebooks.expense ({', '.join(_FIELDS)}) "
         f"VALUES ({', '.join('%(' + f + ')s' for f in _FIELDS)}) RETURNING id",
-        {"invoice_path": None, "packaged": None, **v},
+        {**_DEFAULTS, **v},
     ).fetchone()["id"]
 
 
@@ -530,7 +538,7 @@ def update_expense(conn, expense_id, v):
     sets = ", ".join(f"{f} = %({f})s" for f in _FIELDS)
     cur = conn.execute(
         f"UPDATE garagebooks.expense SET {sets}, updated_at = now() WHERE id = %(id)s",
-        {"invoice_path": None, "packaged": None, **v, "id": expense_id},
+        {**_DEFAULTS, **v, "id": expense_id},
     )
     return cur.rowcount == 1
 

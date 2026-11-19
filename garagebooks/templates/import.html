@@ -23,7 +23,7 @@
   <div class="table-wrap">
   <table class="import-table">
     <thead><tr><th>Import</th><th>Skip</th><th>File</th><th>Date</th><th>Category</th><th>Vendor</th>
-      <th class="num">Amount</th><th class="num">Odometer (km)</th></tr></thead>
+      <th class="num">Amount</th><th class="num">Odometer (km)</th><th>Notes</th></tr></thead>
     <tbody>
     {% for r in rows %}{% set n = r.n %}{% include "_import_row.html" %}{% endfor %}
     </tbody>

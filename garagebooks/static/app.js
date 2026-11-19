@@ -39,6 +39,13 @@ document.addEventListener("DOMContentLoaded", () => {
   if (importForm) {
     importForm.addEventListener("change", relabel);
     relabel();
+    // A category that has a period (insurance, registration) shows its start and end dates.
+    importForm.addEventListener("change", (e) => {
+      if (!/^category_id_\d+$/.test(e.target.name || "")) return;
+      const fields = e.target.closest("tr").querySelector("[data-period-fields]");
+      const chosen = e.target.selectedOptions[0];
+      if (fields) fields.hidden = !(chosen && chosen.dataset.period === "1");
+    });
   }
 
   // Pressing Import with files left neither ticked to import nor to skip: offer to skip them, so they
@@ -129,7 +136,7 @@ document.addEventListener("DOMContentLoaded", () => {
       } catch (e) {
         const tr = rows.insertRow();
         const td = tr.insertCell();
-        td.colSpan = 8;
+        td.colSpan = 9;
         td.textContent = `Couldn't read ${file.name} (${e.message}). Reload the page to try again.`;
       }
       bar.value = i + 1;
@@ -739,11 +746,18 @@ document.addEventListener("DOMContentLoaded", () => {
   const pdfInput = form.elements.invoice_file;
   const prefillHint = document.getElementById("prefill-hint");
   const touched = new Set();
-  ["car_id", "category_id", "date", "time", "amount", "odometer_km", "vendor"].forEach((name) => {
+  ["car_id", "category_id", "date", "time", "amount", "odometer_km", "vendor", "notes", "period_start", "period_end"].forEach((name) => {
     const el = form.elements[name];
     if (!el) return;
     ["input", "change"].forEach((ev) => el.addEventListener(ev, () => touched.add(name)));
   });
+  // The period fields follow the category: only insurance, registration and the like have one.
+  const periodFields = document.getElementById("period-fields");
+  const periodShown = () => {
+    const chosen = form.elements.category_id.selectedOptions[0];
+    periodFields.hidden = !((chosen && chosen.dataset.period === "1") || form.elements.period_start.value || form.elements.period_end.value);
+  };
+  if (periodFields) form.elements.category_id.addEventListener("change", periodShown);
   // Fill the form from what /api/prefill read in a PDF; `body` is the form data to send it.
   async function prefillFrom(body) {
     prefillHint.textContent = "Reading the invoice…";
@@ -765,6 +779,10 @@ document.addEventListener("DOMContentLoaded", () => {
       set("amount", "amount", data.amount);
       set("vendor", "vendor", data.vendor);
       set("odometer_km", "odometer", data.odometer_km);
+      set("notes", "notes", data.notes);
+      set("period_start", "period start", data.period_start);
+      set("period_end", "period end", data.period_end);
+      if (periodFields) periodShown();
       if (data.odometer_km && filled.includes("odometer")) hint.textContent = "Read from the invoice.";
       else if (!data.odometer_km && !touched.has("odometer_km")) await fill(false);
       prefillHint.textContent = filled.length

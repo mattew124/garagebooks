@@ -7,6 +7,18 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+- **Import rows read more.** On the import page (every source), a file with no amount and nothing that reads
+  as an invoice (no invoice, receipt, total, premium, renewal, policy or notice wording) starts with **Skip**
+  ticked, so a brochure stops being offered. Each row has a **Notes** field, filled in where it can be read
+  easily (an insurance endorsement such as a change of address or additional premium, a refund, "12 months
+  registration"), and saved to the expense. Insurance and registration expenses now have a **period** (start
+  and end dates) read from the document ("Period of insurance", "Registration period", the expiry date, the
+  policy start and end), shown on the import row, the Add and Edit form and the list. A new **Has a period**
+  setting on the Categories page chooses which categories have one (Insurance and Registration by default).
+  A registration notice's vendor is now the issuing authority, not the CTP insurer it names, and a dealer's
+  invoice for the car itself is read by its "Drive away price", "Total payable" or "Balance payable" lines.
+  Upgrade: pull the new image (the schema gains `expense.period_start`, `period_end` and `category.has_period`
+  on start; installers on the restricted database role re-run `scripts/provision-db.sh`).
 - **Faster tests.** The suite runs in parallel (`pytest -n auto`, one throwaway Postgres per worker), about three times
   faster on four cores, and the route property tests use 15 examples locally (40 in CI, as before). The `admin`
   fixture makes one round trip instead of a dozen. CI and the TeslaMate compatibility check use `-n auto`, and the check

@@ -37,7 +37,7 @@ def read(client, name, n=0):
 def test_a_row_that_is_not_an_invoice_starts_skipped_and_unticked(stocked):
     row = read(stocked, "brochure.pdf")
     assert 'name="skip_0" checked' in row and 'name="include_0" checked' not in row
-    assert "doesn&#39;t look like an invoice" in row
+    assert "Doesn&#39;t look like an invoice" in row
 
 
 def test_a_row_that_looks_like_an_invoice_but_misses_a_field_is_unticked_not_skipped(stocked):
@@ -120,4 +120,4 @@ def test_the_list_shows_the_period(client, admin):  # noqa: F811
     client.post("/new", data=form(admin, category_id=str(insurance), period_start="2026-11-01", period_end="2027-11-01"),
                 headers=ORIGIN)
     page = client.get("/").data.decode()
-    assert "1 Nov 2026" in page and "1 Nov 2027" in page
+    assert "01 Nov 2026" in page and "01 Nov 2027" in page
