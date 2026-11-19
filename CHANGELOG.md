@@ -34,6 +34,7 @@ set a notification address or a marginal tax rate in Settings.
 (`SKIP_MIGRATE=1`), run `scripts/provision-db.sh` again so the role can use the new `notification` table.
 Nothing is sent until you set an address, so nothing changes if you don't.
 
+- **Dev stacks.** The development guide says how to keep the dev stacks' Docker networks out of address ranges that VPN clients and home LANs use.
 - **Notifications.** A **Notifications** section on the Settings page takes an address (ntfy, an Apprise
   API or a Home Assistant webhook) and sends a notice, once each, when a reminder comes due soon and when
   it is overdue, 30 and 7 days before the OneDrive client secret expires and when it has, and when the
