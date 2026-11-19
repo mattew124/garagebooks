@@ -5,6 +5,11 @@ steps are in [RELEASING.md](RELEASING.md). Newest first.
 
 Each entry says what an installer must do to upgrade. Where nothing is said, pull the new image.
 
+## Unreleased
+
+- The Claims page shows a sync's "Syncing the provider's history" notice once, not three times, and any other
+  message on it once, not twice.
+
 ## 0.5.0-rc1 - 2026-11-19
 
 **Claiming expenses from your salary packaging provider.** GarageBooks can now send an expense to a separate
