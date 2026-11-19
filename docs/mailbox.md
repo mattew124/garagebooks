@@ -14,8 +14,8 @@ moved, marked as read, flagged or deleted.
 
 ## Turning it on
 
-The mailbox uses the [OneDrive](onedrive.md) app registration, so set OneDrive up first (the encryption key and
-the registration; connecting OneDrive itself is optional). Then, on the **Invoice storage** page:
+The mailbox signs in with the [Microsoft account](microsoft-account.md) app registration, so set that up first (the
+encryption key and the registration; connecting OneDrive itself is optional). Then, on the **Invoice storage** page:
 
 1. Under **Invoices by email**, press **Connect mailbox**, and sign in as the account whose mailbox gets the
    invoices. It can be the same Microsoft account as the OneDrive, or a different one. The app asks only for
@@ -32,8 +32,8 @@ drag them in by hand). GarageBooks can't create the folder, because it only has 
 
 ### The app registration
 
-Nothing needs to change on the registration: the mailbox signs in through the same redirect URI
-(`…/onedrive/callback`) with the same client ID and secret. If you added the registration's **API
+Nothing needs adding to the registration: the mailbox signs in through the same redirect URI with the same
+client ID and secret as OneDrive. If you added the registration's **API
 permissions** by hand, add `Mail.Read` and `User.Read` (Microsoft Graph, delegated) as well, or simply consent
 to them when you connect. The mailbox has its own sign-in, separate from OneDrive's, so an installation that only
 uses OneDrive never grants access to mail, and disconnecting one leaves the other connected. Entering a new client

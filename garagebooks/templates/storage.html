@@ -8,6 +8,7 @@
 {% if notice %}<p class="notice bad">{{ notice }}</p>{% endif %}
 
 {# One card per place, from STORES: a new provider is a new _storage_<kind>.html. #}
+{% if onedrive_enabled %}{% include "_storage_microsoft.html" %}{% endif %}
 {% for p in providers %}{% include "_storage_" ~ p.kind ~ ".html" %}
 {% endfor %}
 

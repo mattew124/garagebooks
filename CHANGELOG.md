@@ -14,6 +14,12 @@ mailbox uses the OneDrive app registration and redirect URI, with its own read-o
 `mail` job counts what is waiting every 30 minutes, and a notice says when new emails arrive. See
 [Invoices by email](docs/mailbox.md).
 
+**The app registration is now the Microsoft account.** It has a card of its own on the Invoice storage page, shared by
+OneDrive and the mailbox, and a registration saved from now on signs in at `…/microsoft/callback`. Nothing to do on
+upgrade: a registration saved before keeps `…/onedrive/callback`, and the card shows how to move (see
+[Microsoft account](docs/microsoft-account.md#an-older-registration)). The client secret notices now say
+"Microsoft client secret".
+
 **To upgrade:** pull the new image; the app adds its new tables itself. Installers on the restricted database role
 (`SKIP_MIGRATE=1`) re-run `scripts/provision-db.sh` first.
 

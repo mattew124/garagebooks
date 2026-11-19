@@ -10,7 +10,7 @@ Told so far:
   * a reminder coming due ("due soon"), and again when it becomes overdue. The odometer is only what
     `sources` knows (TeslaMate's, or a reading by hand): a reminder whose odometer isn't known is told on
     its date alone, never on a zero. A registration the provider renews is not pushed.
-  * the OneDrive client secret 30 days and 7 days before its expiry date, and once it has passed
+  * the Microsoft account's client secret (OneDrive and the mailbox) 30 days and 7 days before its expiry date, and once it has passed
   * the OneDrive sign-in no longer working
   * TeslaMate newer than this release was tested with (opt-in on Settings), once for each new migration
   * emails waiting to be imported from a car's mailbox folder (what the `mail` job last found), once for
@@ -95,17 +95,17 @@ def secret_notices(account, today):
     if not expires:
         return []
     left = (expires - today).days
-    where = "Enter a new one on the Invoice storage page before invoices stop uploading."
+    where = "Enter a new one on the Invoice storage page before OneDrive and the mailbox stop working."
     if left < 0:
-        return [Notice(f"onedrive_secret:{expires}:expired", "OneDrive client secret has expired",
-                       f"It expired on {_day(expires)}. Enter a new one on the Invoice storage page, then connect OneDrive again.",
+        return [Notice(f"onedrive_secret:{expires}:expired", "Microsoft client secret has expired",
+                       f"It expired on {_day(expires)}. Enter a new one on the Invoice storage page, then connect OneDrive and the mailbox again.",
                        ("key",))]
     # The nearest lead reached: one notice, not one for each lead already passed.
     reached = [lead for lead in SECRET_LEAD_DAYS if left <= lead]
     if not reached:
         return []
     lead = min(reached)
-    return [Notice(f"onedrive_secret:{expires}:{lead}d", f"OneDrive client secret expires in {_plural(left, 'day')}",
+    return [Notice(f"onedrive_secret:{expires}:{lead}d", f"Microsoft client secret expires in {_plural(left, 'day')}",
                    f"It expires on {_day(expires)}. {where}", ("key",))]
 
 

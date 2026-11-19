@@ -920,3 +920,10 @@ CREATE TABLE IF NOT EXISTS garagebooks.mail_import (
     imported_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS mail_import_expense_idx ON garagebooks.mail_import (expense_id);
+
+-- The Microsoft account: the app registration OneDrive and the mailbox share.
+--   onedrive_account.callback  the redirect URI its sign-ins use: 'microsoft' (/microsoft/callback) for a
+--                  registration saved since that address was added; NULL for one saved before, which keeps
+--                  /onedrive/callback, the address its installer registered. Saving the registration again moves it.
+ALTER TABLE garagebooks.onedrive_account ADD COLUMN IF NOT EXISTS callback text
+    CHECK (callback IS NULL OR callback = 'microsoft');

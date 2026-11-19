@@ -1,7 +1,7 @@
 """Uploading invoice PDFs to a personal OneDrive through Microsoft Graph.
 
 Sign-in is the standard web flow (OAuth 2.0 authorisation code with PKCE):
-Connect sends the browser to Microsoft, which sends it back to /onedrive/callback
+Connect sends the browser to Microsoft, which sends it back to /microsoft/callback (/onedrive/callback for a registration saved before it)
 with a code the app swaps for tokens. Microsoft only redirects to addresses
 registered on the app, and every installation has its own address, so each
 installer registers their own Entra app and enters its client ID and secret on

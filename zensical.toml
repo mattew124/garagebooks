@@ -9,6 +9,7 @@ nav = [
   { "Home" = "index.md" },
   { "Setup" = "setup.md" },
   { "Publishing (Traefik and Cloudflare)" = "publishing.md" },
+  { "Microsoft account" = "microsoft-account.md" },
   { "OneDrive uploads" = "onedrive.md" },
   { "Invoice folder on the server" = "local-folder.md" },
   { "Importing invoices" = "importing.md" },

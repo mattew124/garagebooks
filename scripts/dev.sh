@@ -503,11 +503,12 @@ SQL
         printf '%s\n' "$row"
         cat <<'SQL'
 \.
-INSERT INTO garagebooks.onedrive_account (id, client_id, client_secret, secret_expires, account, refresh_token)
-    SELECT true, client_id, client_secret, secret_expires, account, refresh_token FROM incoming
+-- The registration signs in at /microsoft/callback (the older /onedrive/callback isn't registered any more).
+INSERT INTO garagebooks.onedrive_account (id, client_id, client_secret, secret_expires, account, refresh_token, callback)
+    SELECT true, client_id, client_secret, secret_expires, account, refresh_token, 'microsoft' FROM incoming
     ON CONFLICT (id) DO UPDATE SET client_id = EXCLUDED.client_id, client_secret = EXCLUDED.client_secret,
         secret_expires = EXCLUDED.secret_expires, account = EXCLUDED.account, refresh_token = EXCLUDED.refresh_token,
-        auth_state = NULL, auth_expires_at = NULL, updated_at = now();
+        callback = 'microsoft', auth_state = NULL, auth_expires_at = NULL, updated_at = now();
 COMMIT;
 SQL
     } | dev_psql

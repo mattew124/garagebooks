@@ -72,7 +72,7 @@ MESSAGES = {
     "settings": "Settings saved.",
     "folders": "Folders saved.",
     "connected": "OneDrive connected.",
-    "credentials": "App registration saved. Now connect OneDrive.",
+    "credentials": "App registration saved. Now connect OneDrive or the mailbox.",
     "disconnected": "OneDrive disconnected.",
     "mail_connected": "Mailbox connected. Now choose a mailbox folder for each car.",
     "mail_disconnected": "Mailbox disconnected.",
@@ -2020,8 +2020,12 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         if drive is None:
             abort(404)
 
-    def callback_url():
-        return url_for("onedrive_callback", _external=True)
+    def callback_url(account=None, new=False):
+        """Where Microsoft sends the browser back after a sign-in. A registration saved since the address
+        moved (callback = 'microsoft') uses /microsoft/callback; one saved before keeps /onedrive/callback,
+        which is what its installer registered. new=True: the address a registration saved now would use."""
+        legacy = not new and account is not None and account["client_id"] and account["callback"] is None
+        return url_for("onedrive_callback" if legacy else "microsoft_callback", _external=True)
 
     def car_or_404(car_id):
         with connect() as conn:
@@ -2057,7 +2061,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                      for kind, info in STORES.items()]
         ctx = {
             "providers": providers, "cars": cars, "folders": folders, "account": account,
-            "connected": ready["onedrive"], "callback_url": callback_url() if drive is not None else None,
+            "connected": ready["onedrive"], "callback_url": callback_url(account) if drive is not None else None,
+            "new_callback_url": callback_url(new=True) if drive is not None else None,
             "errors": errors or {}, "values": request.form if errors else {}, "notice": notice,
             "message": MESSAGES.get(request.args.get("msg", "")), "name_example": name_example(settings_row),
             "secret_days_left": (expires - date.today()).days if expires else None,
@@ -2088,7 +2093,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                                      account=None, auth_state=None, auth_expires_at=None,
                                      signin_lost_at=None, signin_checked_at=None, mail_refresh_token=None,
                                      mail_account=None, mail_signin_lost_at=None, mail_signin_checked_at=None,
-                                     **fields)
+                                     callback="microsoft", **fields)
         return redirect(url_for("storage_page", msg="credentials"), 303)
 
     @app.post("/onedrive/connect")
@@ -2118,14 +2123,17 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         # A link (followed by app.js) is a plain navigation, as n8n does it.
         resp = make_response(render_template(
             "connecting.html",
-            sign_in_url=drive.authorize_url(account["client_id"], callback_url(), state, challenge, scopes)))
+            sign_in_url=drive.authorize_url(account["client_id"], callback_url(account), state, challenge, scopes)))
         # Ties the sign-in to this browser: the callback must come back to the one that started it.
         resp.set_cookie(STATE_COOKIE, state, max_age=SIGN_IN_MINUTES * 60, httponly=True,
                         samesite="Lax", secure=request.is_secure, path=request.script_root or "/")
         return resp
 
+    @app.get("/microsoft/callback", endpoint="microsoft_callback")
     @app.get("/onedrive/callback")
     def onedrive_callback():
+        """Microsoft sends the browser back here after a sign-in, for OneDrive or the mailbox. Both
+        addresses work; which one the sign-in asked for is callback_url(account)."""
         need_drive()
         with connect() as conn:
             account = db.onedrive_account(conn)
@@ -2150,7 +2158,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                                    + (request.args.get("error_description") or request.args["error"]))
         try:
             tokens = drive.redeem_code(account["client_id"], drive.decrypt(account["client_secret"]),
-                                       request.args.get("code", ""), callback_url(), pending[1],
+                                       request.args.get("code", ""), callback_url(account), pending[1],
                                        onedrive.MAIL_SCOPES if mail else onedrive.SCOPES)
         except onedrive.OneDriveError as exc:
             log.warning("%s sign-in failed: %s", what, exc)

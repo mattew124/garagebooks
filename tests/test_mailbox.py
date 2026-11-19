@@ -195,10 +195,10 @@ def test_mailbox_and_onedrive_keep_separate_sign_ins(client, ms, admin):
 
 def test_storage_page_offers_the_mailbox_once_registered(client, ms):
     page = client.get("/storage").data.decode()
-    assert "Connect mailbox" not in page            # no registration yet
+    assert "Connect mailbox</button>" not in page            # no registration yet
     save_credentials(client)
     page = client.get("/storage").data.decode()
-    assert "Connect mailbox" in page and "Mail.Read" in page
+    assert "Connect mailbox</button>" in page and "Mail.Read" in page
 
 
 def test_refresh_for_mail_asks_for_the_mail_scope(mailbox, ms, monkeypatch):

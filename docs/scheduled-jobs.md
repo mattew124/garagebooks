@@ -11,7 +11,7 @@ move it to a container of its own.
 | `teslamate` | every hour | Looks at TeslaMate again: adds its new cars, and holds its figures back or lets them through (see [TeslaMate version](reference.md#teslamate-version)). With no TeslaMate it records that, and nothing else. |
 | `dashboard` | every 6 hours | Rewrites the Grafana dashboard file, so its time range and panels follow the data. |
 | `mail` | every 30 minutes | Looks in each car's [mailbox folder](mailbox.md) and counts the emails not yet imported, for the Invoice storage page and a notice. It only reads. Says *no mailbox connected* until the mailbox is. |
-| `notifications` | every 15 minutes | Sends the [notices](notifications.md) you asked for: a reminder coming due, the OneDrive client secret nearing its expiry, the OneDrive sign-in lost. Does nothing, and says *off*, until an address is set on the Settings page. |
+| `notifications` | every 15 minutes | Sends the [notices](notifications.md) you asked for: a reminder coming due, the Microsoft client secret nearing its expiry, the OneDrive or mailbox sign-in lost. Does nothing, and says *off*, until an address is set on the Settings page. |
 
 A job that was missed (the app was stopped for a day) runs once when something is running again, not
 once for every time it was missed. A new job runs the first time the scheduler looks, within a

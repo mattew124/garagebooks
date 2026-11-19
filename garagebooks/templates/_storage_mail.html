@@ -7,7 +7,7 @@
     PDFs. Each attached PDF is one expense, saved in the car's invoice storage; an email with no PDF, such as a
     refund notice, is read from its text.</p>
   {% if not (account and account.client_id) %}
-  <p><small>It uses the OneDrive app registration: set that up above first.</small></p>
+  <p><small>It signs in with the <a href="#microsoft">Microsoft account</a> app registration: set that up above first.</small></p>
   {% elif mail_connected %}
   <p>Mailbox connected as <strong>{{ account.mail_account }}</strong>.</p>
   <form method="post" action="{{ url_for('mail_disconnect') }}" data-confirm="Disconnect the mailbox? Expenses already imported stay as they are.">
@@ -17,8 +17,8 @@
   <form method="post" action="{{ url_for('mail_connect') }}">
     <button type="submit" class="button">Connect mailbox</button>
   </form>
-  <small>Opens Microsoft's sign-in page, then comes back here, with the same app registration and redirect URI as
-    OneDrive. Sign in as the account whose mailbox gets the invoices (it can be a different one from the
+  <small>Opens Microsoft's sign-in page, then comes back here, with the Microsoft account's app registration and
+    redirect URI. Sign in as the account whose mailbox gets the invoices (it can be a different one from the
     OneDrive's). The app asks only to read mail (<code>Mail.Read</code>) and your name (<code>User.Read</code>), and
     never moves, marks or deletes an email. If you listed the registration's API permissions by hand, add those
     two as delegated permissions as well, or consent to them when you connect.</small>
