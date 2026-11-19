@@ -1,7 +1,8 @@
 {# The Invoice storage page's mailbox card: a second sign-in on the OneDrive app registration, then the
    mailbox folder each car's invoice emails arrive in. Included by storage.html when OneDrive is on. #}
+{% from "_provider.html" import brand with context %}
 <section class="card stack" id="mail">
-  <h2>Invoices by email</h2>
+  <h2>{{ brand("outlook") }} Invoices by email</h2>
   <p>Invoices and refunds that arrive by email can be imported from an Outlook.com mailbox: choose the mail
     folder each car's emails are filed in, and its emails are offered on the same import page as a folder of
     PDFs. Each attached PDF is one expense, saved in the car's invoice storage; an email with no PDF, such as a
@@ -15,7 +16,7 @@
   </form>
   {% else %}
   <form method="post" action="{{ url_for('mail_connect') }}">
-    <button type="submit" class="button">Connect mailbox</button>
+    <button type="submit" class="button">{{ brand("outlook") }} Connect mailbox</button>
   </form>
   <small>Opens Microsoft's sign-in page, then comes back here, with the Microsoft account's app registration and
     redirect URI. Sign in as the account whose mailbox gets the invoices (it can be a different one from the

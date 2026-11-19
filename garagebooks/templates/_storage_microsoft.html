@@ -1,8 +1,9 @@
 {# The Microsoft account card of the Invoice storage page: the installer's own Entra app registration, which
    OneDrive and the Outlook mailbox both sign in with (each with a sign-in of its own, in its own card). #}
+{% from "_provider.html" import brand with context %}
 {% macro err(field) %}{% if errors.get(field) %}<span class="error">{{ errors[field] }}</span>{% endif %}{% endmacro %}
 <section class="card stack" id="microsoft">
-  <h2>Microsoft account</h2>
+  <h2>{{ brand("microsoft") }} Microsoft account</h2>
   <p>The app registration that OneDrive and the Outlook mailbox both sign in with: one per installation. Each
     of them is then connected on its own, below, and can be a different Microsoft account.</p>
   {% if account and account.client_id %}
@@ -61,4 +62,7 @@
     <code>{{ new_callback_url }}</code> as a <strong>Web</strong> redirect URI on the registration, then save the
     registration here again (the client secret too) and connect again.</small></p>
   {% endif %}
+  <p><small>Microsoft and Outlook logos: <a href="{{ icon_credit.url }}" target="_blank" rel="noopener noreferrer">{{ icon_credit.text }}</a>,
+  <a href="{{ icon_credit.licence_url }}" target="_blank" rel="noopener noreferrer">{{ icon_credit.licence }}</a>.
+  Microsoft, OneDrive and Outlook are trademarks of Microsoft Corporation.</small></p>
 </section>

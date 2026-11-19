@@ -42,7 +42,8 @@ def cache(fetch, enabled=True, clock=None):
 
 
 def test_the_source_is_pinned_to_an_exact_commit_over_https():
-    files = {"onedrive": "microsoft-onedrive", "grafana": "grafana"}
+    files = {"onedrive": "microsoft-onedrive", "grafana": "grafana", "microsoft": "microsoft",
+             "outlook": "microsoft-outlook"}
     assert set(icons.SOURCES) == set(files)
     for name, file in files.items():
         url = icons.SOURCES[name]["url"]
@@ -51,6 +52,8 @@ def test_the_source_is_pinned_to_an_exact_commit_over_https():
 
 def test_only_the_storage_logo_waits_for_a_storage_provider():
     assert icons.SOURCES["onedrive"]["storage"] is True and icons.SOURCES["grafana"]["storage"] is False
+    # The Microsoft account and Outlook marks go with the OneDrive set-up: only when it is turned on.
+    assert icons.SOURCES["microsoft"]["storage"] is True and icons.SOURCES["outlook"]["storage"] is True
 
 
 def test_a_fetched_icon_is_kept():

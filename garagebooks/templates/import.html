@@ -1,8 +1,8 @@
 {% extends "base.html" %}
-{% from "_provider.html" import mark with context %}
+{% from "_provider.html" import mark, brand with context %}
 {% block title %}Import invoices{% endblock %}
 {% block content %}
-<h1>{% if kind == 'onedrive' %}{{ mark() }} {% endif %}Import invoices for {{ car.name or ('Car ' ~ car.id) }}</h1>
+<h1>{% if kind == 'onedrive' %}{{ mark() }} {% elif kind == 'mail' %}{{ brand('outlook') }} {% endif %}Import invoices for {{ car.name or ('Car ' ~ car.id) }}</h1>
 {% if notice %}<p class="notice bad">{{ notice }}</p>{% endif %}
 {% if rows or scanning %}
 {% if kind == 'mail' %}

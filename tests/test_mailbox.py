@@ -442,3 +442,27 @@ def test_received_date_is_local(mailbox, admin, ms):
     f = scan(mailbox)["files"][0]
     assert 'value="2026-10-31"' in read_row(mailbox, 0, f)
 
+
+
+# ---- the Microsoft account and Outlook marks -------------------------------------
+
+def test_the_microsoft_account_and_mailbox_cards_carry_their_marks(client):
+    save_credentials(client)
+    page = client.get("/storage").data.decode()
+    microsoft = page.split('id="microsoft"', 1)[1].split("</section>", 1)[0]
+    mail = page.split('id="mail"', 1)[1].split("</section>", 1)[0]
+    assert re.search(r'<h2><img src="[^"]*/provider-icon/microsoft" alt="" class="provider-icon"> Microsoft account', microsoft)
+    assert re.search(r'<h2><img src="[^"]*/provider-icon/outlook" alt="" class="provider-icon"> Invoices by email', mail)
+    assert re.search(r'<img src="[^"]*/provider-icon/outlook"[^>]*>\s*Connect mailbox</button>', mail)
+    assert "trademarks of Microsoft" in microsoft
+
+
+def test_the_marks_are_served_with_a_bundled_stand_in(client):
+    for name in ("microsoft", "outlook"):
+        resp = client.get(f"/provider-icon/{name}")
+        assert resp.status_code == 200 and resp.mimetype == "image/svg+xml" and b"<svg" in resp.data
+
+
+def test_the_marks_need_the_onedrive_set_up(app_for, ms, admin):
+    c = app_for(ms, key=None)
+    assert c.get("/provider-icon/microsoft").status_code == 404

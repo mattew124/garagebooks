@@ -434,7 +434,9 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                     "credit": icons.CREDIT} if drive else None
         return {"claims_enabled": connector is not None,
                 "onedrive_enabled": drive is not None, "local_enabled": local is not None,
-                "uploads_enabled": bool(drive or local), "storage": provider, "icon_credit": icons.CREDIT}
+                "uploads_enabled": bool(drive or local), "storage": provider, "icon_credit": icons.CREDIT,
+                # The Microsoft account's and Outlook's marks, for their cards and buttons (with OneDrive only).
+                "marks": {n: url_for("provider_icon", name=n) for n in ("microsoft", "outlook")} if drive else {}}
 
     @app.context_processor
     def footer():

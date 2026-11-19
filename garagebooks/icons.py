@@ -34,6 +34,20 @@ SOURCES = {
         "colour": None,
         "storage": True,
     },
+    # The Microsoft account card (the app registration OneDrive and the mailbox share), and the mailbox's
+    # cards and buttons: served only when OneDrive is set up, like the OneDrive logo.
+    "microsoft": {
+        "url": "https://cdn.jsdelivr.net/gh/selfhst/icons@7ffe1c720c0ff64e2769197fa52631b9f980c135"
+               "/svg/microsoft.svg",
+        "colour": None,
+        "storage": True,
+    },
+    "outlook": {
+        "url": "https://cdn.jsdelivr.net/gh/selfhst/icons@7ffe1c720c0ff64e2769197fa52631b9f980c135"
+               "/svg/microsoft-outlook.svg",
+        "colour": None,
+        "storage": True,
+    },
     # Beside the header's Dashboards link.
     "grafana": {
         "url": "https://cdn.jsdelivr.net/gh/selfhst/icons@7ffe1c720c0ff64e2769197fa52631b9f980c135"
