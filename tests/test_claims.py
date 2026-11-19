@@ -32,7 +32,8 @@ def fake():
 def make_client(pg, monkeypatch, tmp_path, url, **env):
     monkeypatch.delenv("BASE_PATH", raising=False)
     monkeypatch.setenv("APP_TZ", "Australia/Brisbane")
-    for key in ("CLAIMS_CONNECTOR_URL", "CLAIMS_CONNECTOR_TOKEN", "CLAIMS_CONNECTOR_TOKEN_FILE", "INVOICES_DIR"):
+    for key in ("CLAIMS_CONNECTOR_URL", "CLAIMS_CONNECTOR_TOKEN", "CLAIMS_CONNECTOR_TOKEN_FILE",
+                "CLAIMS_CONNECTOR_KEY_FILE", "INVOICES_DIR"):
         monkeypatch.delenv(key, raising=False)
     (tmp_path / "invoices" / "Tyres").mkdir(parents=True)
     (tmp_path / "invoices" / "Tyres" / "INV12345.pdf").write_bytes(PDF)

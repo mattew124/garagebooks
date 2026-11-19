@@ -59,7 +59,9 @@ if [ -f dev.env ]; then
     set +a
 fi
 # STAND_IN=1 uses the stand-in claims connector whatever dev.env says. The browser tests need it: they submit claims.
-if [ "${STAND_IN:-}" = 1 ]; then unset DEV_CLAIMS_CONNECTOR_URL DEV_CLAIMS_CONNECTOR_TOKEN; fi
+if [ "${STAND_IN:-}" = 1 ]; then unset DEV_CLAIMS_CONNECTOR_URL DEV_CLAIMS_CONNECTOR_KEY_FILE; fi
+# The private key the app signs claims requests with: your own for a real connector, else the stand-in's.
+export DEV_CLAIMS_KEY_SOURCE="${DEV_CLAIMS_CONNECTOR_KEY_FILE:-./.dev/claims/stand-in.key}"
 export APP_TZ="${APP_TZ:-UTC}"
 SEED_FROM="${SEED_FROM:-teslamate-database-1}"
 ENVF=.dev/env
@@ -344,6 +346,7 @@ start() {
     local image="${1:-}"
     ensure_env
     require_invoices
+    claims_keys
     prepare_database
     if [ -n "$image" ]; then
         export GARAGEBOOKS_IMAGE="$image"
@@ -503,12 +506,29 @@ SQL
     onedrive_save >/dev/null   # Microsoft replaced the refresh token: keep the newest
 }
 
-# A real claims connector in dev.env (DEV_CLAIMS_CONNECTOR_URL) must come with its token, and the stack says so.
+# A fresh Ed25519 key pair for the stand-in claims connector at each start: the app gets the private key, the
+# stand-in only the public one. Written in place so the running containers' bind mounts see the new files.
+claims_keys() {
+    mkdir -p .dev/claims/keys
+    ( umask 077
+      tmp="$(mktemp)"
+      openssl genpkey -algorithm ed25519 -out "$tmp"
+      cat "$tmp" > .dev/claims/stand-in.key
+      openssl pkey -in "$tmp" -pubout > .dev/claims/keys/stand-in.pub
+      rm -f "$tmp" )
+}
+
+# A real claims connector in dev.env (DEV_CLAIMS_CONNECTOR_URL) must come with a signing key it accepts, and the stack says so.
 claims_check() {
     [ -n "${DEV_CLAIMS_CONNECTOR_URL:-}" ] || return 0
-    if [ -z "${DEV_CLAIMS_CONNECTOR_TOKEN:-}" ]; then
-        echo "dev: dev.env points the claims feature at a real connector, but DEV_CLAIMS_CONNECTOR_TOKEN is empty:" >&2
-        echo "dev: the user running this can't read the token file. Run it as one who can, or use STAND_IN=1." >&2
+    if [ -z "${DEV_CLAIMS_CONNECTOR_KEY_FILE:-}" ]; then
+        echo "dev: dev.env points the claims feature at a real connector, but DEV_CLAIMS_CONNECTOR_KEY_FILE is empty." >&2
+        echo "dev: Set it to the dev private key's file (see dev.env.example), or use STAND_IN=1." >&2
+        exit 2
+    fi
+    if [ ! -r "$DEV_CLAIMS_CONNECTOR_KEY_FILE" ]; then
+        echo "dev: the user running this can't read DEV_CLAIMS_CONNECTOR_KEY_FILE ($DEV_CLAIMS_CONNECTOR_KEY_FILE)." >&2
+        echo "dev: Run it as one who can, or use STAND_IN=1." >&2
         exit 2
     fi
     echo "dev: claims connector: the REAL one (preview and sync only: submitting sends a real claim)"

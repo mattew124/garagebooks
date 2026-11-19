@@ -169,12 +169,13 @@ add the dev stack's callback address (shown in the OneDrive card of its Invoice 
 your app registration. A sign-in writes to your real OneDrive, so give each car a test folder.
 
 The claims feature is on in the dev stack against a stand-in connector (`tests/fake_connector.py`, invented
-answers, on the stack's private network). To try a real connector instead, set `DEV_CLAIMS_CONNECTOR_URL` and
-`DEV_CLAIMS_CONNECTOR_TOKEN` in `dev.env` (see `dev.env.example`; the file is read by the shell, so the token can be
-read from its file each time rather than saved). Give it a token of its own that you can revoke, not your live one,
-and remember that submitting there sends a real claim: preview and sync only, unless you mean it. The address must be
-reachable from the stack's containers. `up` says which connector it uses and refuses a real one with an empty token
-(the user running it can't read the token file). The browser tests submit claims, so they refuse to run while a real
+answers, on the stack's private network). The app signs each request to it with a new Ed25519 key pair that `up` makes
+at every start (the stand-in is given only the public half, so nothing there is a secret). To try a real connector
+instead, set `DEV_CLAIMS_CONNECTOR_URL` and `DEV_CLAIMS_CONNECTOR_KEY_FILE` (the path of a private key file) in
+`dev.env` (see `dev.env.example`). Give it a key pair of its own that you can revoke, not your live one, and remember
+that submitting there sends a real claim: preview and sync only, unless you mean it. The address must be reachable
+from the stack's containers. `up` says which connector it uses and refuses a real one with no key file, or one the
+user running it can't read. The browser tests submit claims, so they refuse to run while a real
 connector is set: use `STAND_IN=1 scripts/dev.sh up` and `STAND_IN=1 scripts/dev.sh test-browser` for them.
 
 The seed only reads from TeslaMate. It copies all of `cars` and `charging_processes`, and one

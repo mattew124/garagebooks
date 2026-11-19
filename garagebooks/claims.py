@@ -6,9 +6,12 @@ expenses can be claimed. The whole feature is off unless CLAIMS_CONNECTOR_URL is
 """
 
 import base64
+import hashlib
 import json
 import logging
 import os
+import secrets
+import time
 import urllib.error
 import urllib.request
 from collections import defaultdict
@@ -16,6 +19,10 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 from urllib.parse import urlparse
+
+import jwt
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ed25519
 
 log = logging.getLogger("garagebooks.claims")
 
@@ -31,6 +38,8 @@ FIELD_KEYS = ("policy_number", "start", "end", "description", "provider", "invoi
 FIELD_TYPES = ("date", "text")
 SIGNIN_STATES = ("idle", "starting", "code_needed", "checking", "signed_in", "failed")
 FIELD_LIMIT = 500
+# The signed token (docs/claims-connector.md, "Authorising requests"): short-lived, one per request.
+TOKEN_ISSUER, TOKEN_AUDIENCE, TOKEN_LIFETIME = "garagebooks", "claims-connector", 60
 MAX_MONEY = Decimal(10) ** 10   # what numeric(12, 2) can hold, with room: a bigger figure is not a money value
 
 
@@ -72,6 +81,17 @@ class Reply:
         return out
 
 
+def b64url(raw):
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+
+
+def thumbprint(public_key):
+    """An Ed25519 public key's RFC 7638 JWK thumbprint: the `kid` of the tokens it verifies, which the
+    connector works out for itself from its copy of the key."""
+    raw = public_key.public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+    return b64url(hashlib.sha256(b'{"crv":"Ed25519","kty":"OKP","x":"' + b64url(raw).encode() + b'"}').digest())
+
+
 def text(value, limit=2000):
     """Whatever the connector sent as a plain, bounded string (None for anything else)."""
     if isinstance(value, str) and value.strip():
@@ -93,14 +113,39 @@ def number(value):
 
 
 class Connector:
-    """The client. `url` has no trailing /v1. The token is read from `token` or, at each request, from
-    the file `token_file` (so it can be rotated without a restart)."""
+    """The client. `url` has no trailing /v1. With `key_file` (an Ed25519 private key in PEM form, read at each
+    request so it can be rotated without a restart) every request carries a fresh signed token. Otherwise
+    (deprecated) it sends the shared `token`, or the one in the file `token_file`."""
 
-    def __init__(self, url, token=None, token_file=None, timeout=TIMEOUT_SECONDS):
+    def __init__(self, url, token=None, token_file=None, timeout=TIMEOUT_SECONDS, key_file=None):
         self.url = url.rstrip("/")
-        self.token, self.token_file, self.timeout = token, token_file, timeout
+        self.token, self.token_file, self.key_file, self.timeout = token, token_file, key_file, timeout
+        self.kid = None          # of the key last used, for the message on a refusal
+
+    def _signed(self):
+        """A new token, valid for a minute, signed with the key file's key."""
+        try:
+            with open(self.key_file, "rb") as handle:
+                pem = handle.read()
+        except OSError as exc:
+            raise ConnectorError("The claims connector's signing key file can't be read. "
+                                 "Check CLAIMS_CONNECTOR_KEY_FILE.") from exc
+        not_ed25519 = ConnectorError("The claims connector's signing key file isn't an unencrypted Ed25519 "
+                                     "private key in PEM form. Check CLAIMS_CONNECTOR_KEY_FILE.")
+        try:
+            key = serialization.load_pem_private_key(pem, password=None)
+        except (ValueError, TypeError) as exc:
+            raise not_ed25519 from exc
+        if not isinstance(key, ed25519.Ed25519PrivateKey):
+            raise not_ed25519
+        self.kid = thumbprint(key.public_key())
+        now = int(time.time())
+        return jwt.encode({"iss": TOKEN_ISSUER, "aud": TOKEN_AUDIENCE, "iat": now, "exp": now + TOKEN_LIFETIME,
+                           "jti": secrets.token_urlsafe(16)}, key, algorithm="EdDSA", headers={"kid": self.kid})
 
     def _token(self):
+        if self.key_file:
+            return self._signed()
         if self.token_file:
             try:
                 with open(self.token_file, encoding="utf-8") as handle:
@@ -109,6 +154,14 @@ class Connector:
                 raise ConnectorError("The claims connector's token file can't be read. "
                                      "Check CLAIMS_CONNECTOR_TOKEN_FILE.") from exc
         return (self.token or "").strip()
+
+    def _refused(self):
+        if self.key_file:
+            return ConnectorError(
+                "The claims connector refused the signed token. Check that CLAIMS_CONNECTOR_KEY_FILE is the key "
+                f"whose public key the connector lists (key id {self.kid}), and that the clocks of both machines "
+                "are right.")
+        return ConnectorError("The claims connector refused the token. Check CLAIMS_CONNECTOR_TOKEN.")
 
     def call(self, method, path, body=None, timeout=None):
         """-> Reply. A connector's own error answers (4xx, 5xx with a JSON body) are replies, not exceptions."""
@@ -135,10 +188,10 @@ class Connector:
             parsed = None
         if not isinstance(parsed, dict):
             if status in (401, 403):
-                raise ConnectorError("The claims connector refused the token. Check CLAIMS_CONNECTOR_TOKEN.")
+                raise self._refused()
             raise ConnectorError(f"The claims connector answered {status} with something other than JSON.")
         if status in (401, 403):
-            raise ConnectorError("The claims connector refused the token. Check CLAIMS_CONNECTOR_TOKEN.")
+            raise self._refused()
         return Reply(status, parsed)
 
     def health(self, timeout=None):
@@ -167,6 +220,9 @@ class Connector:
         return self.call("POST", "signin/code", {"code": code})
 
 
+warned_legacy = []   # the deprecation is logged once per process
+
+
 def from_env(environ=os.environ):
     """The connector the installer configured, or None (the feature is then invisible)."""
     url = (environ.get("CLAIMS_CONNECTOR_URL") or "").strip()
@@ -174,8 +230,20 @@ def from_env(environ=os.environ):
         return None
     if urlparse(url).scheme not in ("http", "https") or not urlparse(url).netloc:
         raise RuntimeError("CLAIMS_CONNECTOR_URL must be an http:// or https:// address, such as http://host:8765")
+    key_file = (environ.get("CLAIMS_CONNECTOR_KEY_FILE") or "").strip() or None
     token_file = (environ.get("CLAIMS_CONNECTOR_TOKEN_FILE") or "").strip() or None
-    return Connector(url, token=environ.get("CLAIMS_CONNECTOR_TOKEN"), token_file=token_file)
+    token = environ.get("CLAIMS_CONNECTOR_TOKEN")
+    if key_file:
+        if token or token_file:
+            log.warning("CLAIMS_CONNECTOR_KEY_FILE is set, so CLAIMS_CONNECTOR_TOKEN and CLAIMS_CONNECTOR_TOKEN_FILE "
+                        "are ignored. Remove them.")
+        return Connector(url, key_file=key_file)
+    if (token or "").strip() or token_file:
+        if not warned_legacy:
+            warned_legacy.append(True)
+            log.warning("CLAIMS_CONNECTOR_TOKEN and CLAIMS_CONNECTOR_TOKEN_FILE are deprecated: switch to "
+                        "CLAIMS_CONNECTOR_KEY_FILE, which signs a fresh token for every request.")
+    return Connector(url, token=token, token_file=token_file)
 
 
 def covered(spans, car_id, day):

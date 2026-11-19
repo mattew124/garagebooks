@@ -87,8 +87,8 @@ app have no name either way.
 
 ## Claims connector
 
-`CLAIMS_CONNECTOR_URL` (with `CLAIMS_CONNECTOR_TOKEN`, or `CLAIMS_CONNECTOR_TOKEN_FILE` for a file holding
-the token) turns on claiming expenses from a salary packaging provider through a separate connector
+`CLAIMS_CONNECTOR_URL` (with `CLAIMS_CONNECTOR_KEY_FILE`, a private key file that signs each request; the
+shared `CLAIMS_CONNECTOR_TOKEN` and `CLAIMS_CONNECTOR_TOKEN_FILE` are deprecated) turns on claiming expenses from a salary packaging provider through a separate connector
 service. Unset, the feature is invisible and its addresses answer 404. The settings, what the connector
 is sent and the protocol it speaks are on the [Claims connector](claims-connector.md) page.
 

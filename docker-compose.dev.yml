@@ -42,7 +42,9 @@ services:
       # Claiming is on in dev, against a stand-in connector with invented answers (tests/fake_connector.py,
       # below); DEV_CLAIMS_CONNECTOR_URL in dev.env points it at a connector of your own instead.
       CLAIMS_CONNECTOR_URL: ${DEV_CLAIMS_CONNECTOR_URL:-http://dev-claims-connector:8765}
-      CLAIMS_CONNECTOR_TOKEN: ${DEV_CLAIMS_CONNECTOR_TOKEN:-fake-connector-token}
+      # Every request is signed with this private key (scripts/dev.sh makes a new pair for the stand-in at each
+      # start; DEV_CLAIMS_CONNECTOR_KEY_FILE in dev.env supplies your own for a real connector).
+      CLAIMS_CONNECTOR_KEY_FILE: /run/claims/connector.key
     volumes:
       - dev-dashboards:/dashboards
       - type: bind
@@ -50,6 +52,12 @@ services:
         target: /invoices
         bind:
           create_host_path: false   # as in production: scripts/dev.sh makes it, Docker never does
+      - type: bind
+        source: ${DEV_CLAIMS_KEY_SOURCE:-./.dev/claims/stand-in.key}
+        target: /run/claims/connector.key
+        read_only: true
+        bind:
+          create_host_path: false
     depends_on:
       dev-db:
         condition: service_healthy
@@ -76,8 +84,16 @@ services:
     security_opt: ["no-new-privileges:true"]
     user: "${DEV_UID:-10001}:${DEV_GID:-10001}"
     entrypoint: ["python3", "/fake_connector.py", "8765"]
+    environment:
+      FAKE_CONNECTOR_KEYS_DIR: /claims-keys    # public keys only; it reads them again at each request
     volumes:
       - ./tests/fake_connector.py:/fake_connector.py:ro
+      - type: bind
+        source: ./.dev/claims/keys
+        target: /claims-keys
+        read_only: true
+        bind:
+          create_host_path: false
     networks: [dev]
 
   # The dashboard volume belongs to whoever wrote it first (root when new, 10001 from an earlier
