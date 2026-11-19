@@ -45,7 +45,9 @@ document.addEventListener("DOMContentLoaded", () => {
       const row = e.target.closest("tr");
       const fields = row.querySelector("[data-period-fields]");
       const services = row.querySelector("[data-service-fields]");
+      const gst = row.querySelector("[data-gst-fields]");
       const chosen = e.target.selectedOptions[0];
+      if (gst) gst.hidden = !(chosen && chosen.dataset.gstfree === "1") && !gst.querySelector("input").value;
       if (fields) fields.hidden = !(chosen && chosen.dataset.period === "1");
       if (services) services.hidden = !(chosen && chosen.dataset.service === "1");
     });
@@ -801,7 +803,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const pdfInput = form.elements.invoice_file;
   const prefillHint = document.getElementById("prefill-hint");
   const touched = new Set();
-  ["car_id", "category_id", "date", "time", "amount", "odometer_km", "vendor", "notes", "period_start", "period_end"].forEach((name) => {
+  ["car_id", "category_id", "date", "time", "amount", "odometer_km", "vendor", "notes", "period_start", "period_end", "gst_amount", "card_payment_ref", "bpay_biller_code", "bpay_ref"].forEach((name) => {
     const el = form.elements[name];
     if (!el) return;
     ["input", "change"].forEach((ev) => el.addEventListener(ev, () => touched.add(name)));
@@ -840,6 +842,10 @@ document.addEventListener("DOMContentLoaded", () => {
       set("vendor", "vendor", data.vendor);
       set("odometer_km", "odometer", data.odometer_km);
       set("notes", "notes", data.notes);
+      set("gst_amount", "GST", data.gst_amount);
+      set("card_payment_ref", "payment reference", data.card_payment_ref);
+      set("bpay_biller_code", "BPAY biller code", data.bpay_biller_code);
+      set("bpay_ref", "BPAY reference", data.bpay_ref);
       set("period_start", "period start", data.period_start);
       set("period_end", "period end", data.period_end);
       if (periodFields) periodShown();

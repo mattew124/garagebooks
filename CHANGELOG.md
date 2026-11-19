@@ -7,6 +7,17 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+- **A registration's GST is read from the notice.** The GST on a registration is only on its CTP insurance part, not
+  a tenth of the total, so the import reads the GST figure printed on the notice and stores it on the expense (a
+  new optional **GST in the amount** field on the Add and Edit form and on the import row). A stored GST replaces
+  the category's GST rule when the cost after tax is worked out (the amount less that GST, instead of all of it for
+  a GST-free category or ten elevenths for the rest). Registration is still ticked GST-free on the Categories page,
+  now only as the fallback for an expense with no figure. The claim page offers the stored figure in the connector
+  protocol's existing `gst` field. The card payment reference and BPAY biller code and reference on the notice are
+  kept too, in a closed **Payment references** section of the Edit form: never in the list, the tiles, the
+  dashboard or the change history's displayed values. Upgrade: pull the new image (the schema gains columns on
+  `expense` and the after-tax function is replaced on start; installers on the restricted database role re-run
+  `scripts/provision-db.sh`).
 - **Service items.** A new **Service** category, and a list of what a service covered (fuel filter, oil filter,
   engine oil, tyre rotation, windscreen washer fluid, windscreen wipers, brakes, brake fluid, timing belt, air
   filter, coolant, cabin air filter). Choose the items on each Service expense (the Add and Edit form, and each

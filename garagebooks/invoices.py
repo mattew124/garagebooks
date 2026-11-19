@@ -403,6 +403,39 @@ def service_items_in(text, names):
     return [name for _, name in sorted(found)]
 
 
+# ---- a registration notice: the GST on its CTP part, and how to pay it ---------------------------------------
+
+_GST_AFTER = re.compile(r"\bGST\b([^\n]{0,90})", re.I)
+_EX_GST = re.compile(r"excl|\bex\.?\s+gst|before\s+gst", re.I)
+CARD_REF = re.compile(r"card\s+payment\s+ref(?:erence)?(?:\s+(?:no|number)\.?)?\s*:?\s*(\d+(?: \d+){0,5}|[A-Za-z0-9]{6,30})", re.I)
+BILLER = re.compile(r"biller\s+code\s*:?\s*(\d{3,8})", re.I)
+BPAY_REF = re.compile(r"\bref(?:erence)?(?:\s+(?:no|number)\.?)?\s*:?\s*(\d+(?: \d+){0,5})", re.I)
+
+
+def _gst_stated(text, total, multi):
+    """The GST a notice states (the CTP insurance part's): the figure after a 'GST' label, one per line. Two
+    figures on one line are 6 and 12 month options, chosen as the amount is. Never more than the total."""
+    for m in _GST_AFTER.finditer(text):
+        if _EX_GST.search(m.group(0)):
+            continue
+        figures = [Decimal(f.replace(",", "")) for f in re.findall(r"\$\s*([\d,]+\.\d{2})", m.group(1))]
+        if not figures:
+            continue
+        gst = figures[0] if len(figures) == 1 else {"max": max, "min": min}[multi](figures) if multi in ("max", "min") else None
+        if gst is not None and (total is None or gst <= total):
+            return gst
+    return None
+
+
+def _payment_references(text):
+    """-> (card payment reference, BPAY biller code, BPAY reference), each None when the notice has none."""
+    card = CARD_REF.search(text)
+    bpay = re.search(r"\bBPAY\b", text)
+    after = text[bpay.end():bpay.end() + 120] if bpay else ""
+    biller, ref = BILLER.search(after), BPAY_REF.search(after)
+    return (card.group(1) if card else None, biller.group(1) if biller else None, ref.group(1) if ref else None)
+
+
 # ---- what a row can say beyond the basics: skip, notes, the period covered, the issuing authority -------
 
 # Words that make a document an invoice, receipt, notice or policy: without one (and without an amount) it
@@ -567,10 +600,14 @@ def propose(folder, name, text, categories, learned=None, multi_amount=None):
     if vendor is None and named and category == named:
         vendor = _filename_vendor(name, named)
 
-    if (category or "").lower() == "registration":
+    registration = (category or "").lower() == "registration"
+    if registration:
         vendor = _authority(text) or vendor
     start, end = _period(text, category, multi_amount or "max")
+    gst = _gst_stated(text, amount, multi_amount or "max") if registration else None
+    card_ref, biller, bpay_ref = _payment_references(text) if registration else (None, None, None)
     out = {"date": when, "category": category, "vendor": vendor, "amount": amount, "odometer_km": odometer,
+           "gst_amount": gst, "card_payment_ref": card_ref, "bpay_biller_code": biller, "bpay_ref": bpay_ref,
            "period_start": start, "period_end": end, "notes": _notes(text, category, multi_amount or "max"),
            # Readable, yet no amount and nothing that reads as an invoice: a brochure, say. A scan with no text
            # at all is not suggested for skipping: nobody can tell what it is.

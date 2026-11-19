@@ -506,6 +506,32 @@ def parse_notify_format(raw):
     return choice
 
 
+MAX_PAYMENT_REF_LEN = 60
+_PAYMENT_REF = re.compile(r"[A-Za-z0-9][A-Za-z0-9 .\-/]*")
+
+
+def parse_payment_ref(raw, label):
+    """A card payment reference or BPAY code as printed: letters, digits and a few separators. Blank -> None."""
+    text = " ".join((raw or "").split())
+    if not text:
+        return None
+    if len(text) > MAX_PAYMENT_REF_LEN:
+        raise ValueError(f"{label} is too long (max {MAX_PAYMENT_REF_LEN} characters).")
+    if not _PAYMENT_REF.fullmatch(text):
+        raise ValueError(f"{label} can only hold letters, digits, spaces and . - /")
+    return text
+
+
+def parse_gst_amount(raw, amount):
+    """The GST the document states: blank -> None. Money between nothing and the amount (the amount's own sign)."""
+    if not (raw or "").strip():
+        return None
+    gst = parse_amount(raw)
+    if amount is not None and not (min(Decimal(0), amount) <= gst <= max(Decimal(0), amount)):
+        raise ValueError("GST must be between nothing and the amount.")
+    return gst
+
+
 def parse_expense_form(form, tz, valid_car_ids, valid_category_ids):
     """-> (values, errors). `values` is only meaningful when `errors` is empty."""
     values, errors = {}, {}
@@ -537,6 +563,10 @@ def parse_expense_form(form, tz, valid_car_ids, valid_category_ids):
     attempt("packaged", parse_paid_from, form.get("packaged"))
     attempt("period_start", parse_optional_date, form.get("period_start"))
     attempt("period_end", parse_optional_date, form.get("period_end"))
+    attempt("gst_amount", parse_gst_amount, form.get("gst_amount"), values.get("amount"))
+    for field, label in (("card_payment_ref", "Card payment reference"), ("bpay_biller_code", "BPAY biller code"),
+                         ("bpay_ref", "BPAY reference")):
+        attempt(field, parse_payment_ref, form.get(field), label)
     start, end = values.get("period_start"), values.get("period_end")
     if start and end and end < start:
         errors["period_end"] = "The period's end can't be before its start."

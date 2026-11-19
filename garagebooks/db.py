@@ -411,7 +411,7 @@ _SELECT = """
     SELECT e.id, e.car_id, c.name AS car_name, e.category_id, cat.name AS category,
            cat.kind, e.occurred_at, e.amount, e.odometer_km, e.vendor, e.notes,
            e.invoice_url, e.invoice_path, e.packaged, e.period_start, e.period_end,
-           cat.has_period, c.make AS car_make, c.model AS car_model, cat.budget_pool,
+           e.gst_amount, e.card_payment_ref, e.bpay_biller_code, e.bpay_ref, cat.has_period, c.make AS car_make, c.model AS car_model, cat.budget_pool,
            cl.provider AS claim_provider, cl.provider_id AS claim_provider_id, cl.reference AS claim_reference,
            cl.status AS claim_status, cl.paid_date AS claim_paid_date, cl.approved_amount AS claim_approved,
            (EXISTS (SELECT 1 FROM garagebooks.provider_claim pc WHERE pc.expense_id = e.id)
@@ -426,7 +426,7 @@ _SELECT = """
 # category's pool, kind and GST status, and the payments of the lease covering its date in time zone %(tz)s.
 _AFTER_TAX_SELECT = """
     SELECT e.id, e.car_id, e.category_id, cat.name AS category, cat.kind, cat.budget_pool, cat.gst_free, e.amount,
-           e.occurred_at, e.packaged, l.id AS lease_id, l.pretax_payment, l.posttax_payment
+           e.gst_amount, e.occurred_at, e.packaged, l.id AS lease_id, l.pretax_payment, l.posttax_payment
     FROM garagebooks.expense e
     JOIN garagebooks.category cat ON cat.id = e.category_id
     LEFT JOIN LATERAL (SELECT * FROM garagebooks.lease l WHERE l.car_id = e.car_id
@@ -500,9 +500,11 @@ def get_expense(conn, expense_id):
 
 
 _FIELDS = ("car_id", "category_id", "occurred_at", "amount", "odometer_km",
-           "vendor", "notes", "invoice_url", "invoice_path", "packaged", "period_start", "period_end")
+           "vendor", "notes", "invoice_url", "invoice_path", "packaged", "period_start", "period_end",
+           "gst_amount", "card_payment_ref", "bpay_biller_code", "bpay_ref")
 
-_DEFAULTS = {"invoice_path": None, "packaged": None, "period_start": None, "period_end": None}
+_DEFAULTS = {"invoice_path": None, "packaged": None, "period_start": None, "period_end": None, "gst_amount": None,
+             "card_payment_ref": None, "bpay_biller_code": None, "bpay_ref": None}
 
 
 def insert_expense(conn, v):
