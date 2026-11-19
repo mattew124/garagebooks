@@ -1007,3 +1007,15 @@ AS $fn$
                                     THEN l.posttax_payment ELSE 0 END AS post) q
     CROSS JOIN (SELECT (SELECT marginal_tax_rate FROM garagebooks.setting WHERE id = 1) AS rate) r
 $fn$;
+
+-- Car details read from the purchase invoice (all optional): the VIN (17 characters, without I, O and Q), the
+-- year it was built, its model year and its body type. Filled in from the import, only where blank; the Cars
+-- page edits them. None of them is a TeslaMate-sourced field, so a sync never touches them.
+ALTER TABLE garagebooks.car ADD COLUMN IF NOT EXISTS vin text
+    CHECK (vin IS NULL OR vin ~ '^[A-HJ-NPR-Z0-9]{17}$');
+ALTER TABLE garagebooks.car ADD COLUMN IF NOT EXISTS build_year smallint
+    CHECK (build_year IS NULL OR build_year BETWEEN 1900 AND 2100);
+ALTER TABLE garagebooks.car ADD COLUMN IF NOT EXISTS model_year smallint
+    CHECK (model_year IS NULL OR model_year BETWEEN 1900 AND 2100);
+ALTER TABLE garagebooks.car ADD COLUMN IF NOT EXISTS body_type text
+    CHECK (body_type IS NULL OR (btrim(body_type) <> '' AND length(body_type) <= 40));

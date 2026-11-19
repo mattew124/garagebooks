@@ -58,6 +58,24 @@ A period can't end before it starts.
 
 <!-- screenshot: import-row-period - An import row for an insurance policy, with its notes and period -->
 
+## The car's details, and a folder for a new car
+
+Importing the **initial purchase** invoice (any category of the purchase kind) offers to fill in the car's details:
+VIN, year built, model year and body type, read from labels such as `VIN` or `Vehicle identification number`,
+`Year of manufacture` or `Build date` (year built), `Model year` or a plain `Year` (model year) and `Body type`. The
+row shows the values in a **Fill in the car's details from this invoice** box, ticked to begin with: correct them or untick
+it. Only details the car has no value for are offered and filled in; nothing it already has is replaced, and the
+name, make and model (which a TeslaMate car takes from TeslaMate) are never touched. The Cars page edits the same fields.
+
+A car that isn't in the list yet: on the **Invoice storage** page, **Folder for a new car** browses for its folder
+(in OneDrive or on the server) and opens the import of that folder. The car is made when you press Import, from the
+purchase invoice you ticked (its make and model name it, and its details are filled in; with neither, it is named
+after the folder, and its type starts as battery electric: change it on the Cars page). With no purchase invoice
+ticked, a dialog asks for the car's name, type and details first, and nothing is saved until you complete it. The folder
+becomes the car's invoice folder. None of this needs TeslaMate.
+
+<!-- screenshot: import-new-car-dialog - The dialog that asks for a new car's details when no purchase invoice is ticked -->
+
 ## A registration's GST and payment references
 
 GST on a registration is only on its CTP insurance part, so it isn't a tenth of the total. When a **Registration**

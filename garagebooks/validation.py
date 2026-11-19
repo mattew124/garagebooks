@@ -327,6 +327,35 @@ MAX_CAR_NAME_LEN = 100
 MAX_CAR_TEXT_LEN = 60
 
 
+_VIN = re.compile(r"[A-HJ-NPR-Z0-9]{17}")
+MAX_BODY_TYPE_LEN = 40
+
+
+def parse_car_extras(get):
+    """A car's VIN, build year, model year and body type, from `get(field)` (raw text or None) -> (values, errors).
+    All optional: blank is None. The VIN is upper case without spaces."""
+    values, errors = {}, {}
+    vin = re.sub(r"\s+", "", get("vin") or "").upper()
+    if vin and not _VIN.fullmatch(vin):
+        errors["vin"] = "A VIN is 17 letters and digits (no I, O or Q)."
+    values["vin"] = vin or None
+    for field, label in (("build_year", "The year built"), ("model_year", "The model year")):
+        raw = (get(field) or "").strip()
+        try:
+            year = int(raw) if raw else None
+            if year is not None and not 1900 <= year <= 2100:
+                raise ValueError
+        except ValueError:
+            errors[field] = f"{label} is a year such as 2025."
+            year = None
+        values[field] = year
+    body = " ".join((get("body_type") or "").split())
+    if len(body) > MAX_BODY_TYPE_LEN:
+        errors["body_type"] = f"The body type is too long (max {MAX_BODY_TYPE_LEN} characters)."
+    values["body_type"] = body or None
+    return values, errors
+
+
 def parse_car_form(form, kinds):
     """A car's name, type (one of `kinds`), make and model. -> (values, errors). The name is optional:
     a car without a nickname is called by its make and model, so one of the two must be there."""
@@ -345,7 +374,8 @@ def parse_car_form(form, kinds):
     values["name"] = name or car_name(values["make"], values["model"])
     if not values["name"]:
         errors["name"] = "Enter the make and model, or a name for the car."
-    return values, errors
+    extras, more = parse_car_extras(form.get)
+    return {**values, **extras}, {**errors, **more}
 
 
 def car_name(make, model):

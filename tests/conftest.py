@@ -161,7 +161,8 @@ def admin(pg):
         if not TESLAMATE:
             script.append(OWN_CAR)       # a test may have deleted it
         script += [
-            f"UPDATE garagebooks.car SET name = 'Test car', kind = 'BEV', name_from_teslamate = {'true' if TESLAMATE else 'false'} WHERE id = 1",
+            f"UPDATE garagebooks.car SET name = 'Test car', kind = 'BEV', name_from_teslamate = {'true' if TESLAMATE else 'false'},"
+            " vin = NULL, build_year = NULL, model_year = NULL, body_type = NULL WHERE id = 1",
             "SELECT garagebooks.build_ownership(true)",
             "DELETE FROM garagebooks.category WHERE sort_order = 100",
             "DELETE FROM garagebooks.service_item WHERE sort_order = 100",       # items a test added

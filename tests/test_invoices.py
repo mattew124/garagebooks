@@ -538,3 +538,38 @@ def test_payable_totals_without_cents_are_read():
 def test_a_deposit_line_is_not_the_amount():
     text = "TAX INVOICE\nDeposit paid        $1,000.00\n"
     assert invoices.propose("Initial purchase", "x.pdf", text, CATS)["amount"] is None
+
+
+# ---- a purchase invoice names the car -------------------------------------------------------------
+
+DEALER_CAR = """
+   TAX INVOICE                                       Example Motors Pty Ltd
+   Invoice date: 15/03/2026                           ABN 11 111 111 111
+   Make: Example          Model: Roadster
+   VIN: 1ABCD23EFGH456789          Body type:  Hatchback
+   Year of manufacture: 2025        Model year: 2026
+   Drive away price   $52,000.00
+"""
+
+
+def test_the_cars_details_are_read_from_a_purchase_invoice():
+    got = invoices.propose("Initial purchase", "x.pdf", DEALER_CAR, CATS)["car_details"]
+    assert got == {"vin": "1ABCD23EFGH456789", "build_year": 2025, "model_year": 2026, "body_type": "Hatchback",
+                   "make": "Example", "model": "Roadster"}
+
+
+def test_only_what_is_there_is_read():
+    got = invoices.propose("Initial purchase", "x.pdf", "TAX INVOICE\nVehicle identification number: 1abcd23efgh456789\nTotal $1.00\n",
+                           CATS)["car_details"]
+    assert got == {"vin": "1ABCD23EFGH456789"}
+    assert invoices.propose("", "x.pdf", TYRES, CATS)["car_details"] == {}
+
+
+def test_a_vin_with_the_wrong_letters_or_length_is_not_one():
+    for vin in ("1ABCD23EFGH45678", "1ABCD23EFGH4567890", "1ABCO23EFGH456789"):      # 16, 18, and an O
+        assert invoices.propose("", "x.pdf", f"TAX INVOICE\nVIN: {vin}\nTotal $1.00\n", CATS)["car_details"] == {}
+
+
+def test_a_plain_year_is_the_model_year_and_manufacture_dates_are_the_build_year():
+    got = invoices.propose("", "x.pdf", "TAX INVOICE\nYear: 2024\nBuild date: 03/2023\nTotal $1.00\n", CATS)["car_details"]
+    assert got == {"model_year": 2024, "build_year": 2023}

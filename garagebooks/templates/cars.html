@@ -22,6 +22,18 @@
       </select>
       {% if e.kind %}<span class="error">{{ e.kind }}</span>{% endif %}</label>
   </div>
+  <div class="row">
+    <label>VIN <input name="vin" maxlength="20" value="{{ v.vin or '' }}" autocomplete="off">
+      {% if e.vin %}<span class="error">{{ e.vin }}</span>{% endif %}</label>
+    <label>Body type <input name="body_type" maxlength="40" value="{{ v.body_type or '' }}" autocomplete="off">
+      {% if e.body_type %}<span class="error">{{ e.body_type }}</span>{% endif %}</label>
+  </div>
+  <div class="row">
+    <label>Year built <input name="build_year" inputmode="numeric" maxlength="4" value="{{ v.build_year or '' }}" autocomplete="off">
+      {% if e.build_year %}<span class="error">{{ e.build_year }}</span>{% endif %}</label>
+    <label>Model year <input name="model_year" inputmode="numeric" maxlength="4" value="{{ v.model_year or '' }}" autocomplete="off">
+      {% if e.model_year %}<span class="error">{{ e.model_year }}</span>{% endif %}</label>
+  </div>
   {% if several %}
   <p class="car-purchases"><small>Bought for <strong>{{ c.purchase_price|money }}</strong>, in {{ c.purchases }} purchase expenses:
     change them in the <a href="{{ url_for('index') }}">expense list</a>.</small></p>

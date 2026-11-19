@@ -139,6 +139,7 @@ def car_details(conn):
     and the final odometer entered with its sale."""
     return conn.execute(
         "SELECT c.id, c.name, c.kind, c.make, c.model, c.teslamate_car_id, c.sold_at, c.sale_price,"
+        " c.vin, c.build_year, c.model_year, c.body_type,"
         " (SELECT count(*) FROM garagebooks.expense e WHERE e.car_id = c.id) AS expenses,"
         " (SELECT count(*) FROM garagebooks.lease l WHERE l.car_id = c.id) AS leases,"
         " p.purchases, p.purchase_price, p.purchased_at, p.purchase_km,"
@@ -180,16 +181,40 @@ def set_purchase(conn, car_id, v):
 def add_car(conn, v):
     """A car entered by hand. Returns its id."""
     return conn.execute(
-        "INSERT INTO garagebooks.car (name, kind, make, model) VALUES (%(name)s, %(kind)s, %(make)s, %(model)s) "
+        "INSERT INTO garagebooks.car (name, kind, make, model, vin, build_year, model_year, body_type) "
+        "VALUES (%(name)s, %(kind)s, %(make)s, %(model)s, %(vin)s, %(build_year)s, %(model_year)s, %(body_type)s) "
         "RETURNING id", v).fetchone()["id"]
 
 
 def update_car(conn, car_id, v):
     """Returns False when there is no such car. A TeslaMate car renamed here keeps the new name."""
     return conn.execute(
-        "UPDATE garagebooks.car SET kind = %(kind)s, make = %(make)s, model = %(model)s, "
+        "UPDATE garagebooks.car SET kind = %(kind)s, make = %(make)s, model = %(model)s, vin = %(vin)s, "
+        "build_year = %(build_year)s, model_year = %(model_year)s, body_type = %(body_type)s, "
         "name_from_teslamate = name_from_teslamate AND name = %(name)s, name = %(name)s WHERE id = %(id)s",
         {**v, "id": car_id}).rowcount == 1
+
+
+CAR_DETAIL_FIELDS = ("vin", "build_year", "model_year", "body_type")
+
+
+def car_blank_details(conn, car_id):
+    """Which of the car's own details (CAR_DETAIL_FIELDS) are still empty, for the import to offer. A car that
+    doesn't exist yet (id 0) has all of them blank."""
+    if car_id == 0:
+        return list(CAR_DETAIL_FIELDS)
+    row = conn.execute("SELECT vin, build_year, model_year, body_type FROM garagebooks.car WHERE id = %s",
+                       (car_id,)).fetchone()
+    return [f for f in CAR_DETAIL_FIELDS if row and row[f] is None]
+
+
+def fill_car_details(conn, car_id, v):
+    """Put `v`'s details on the car where it has none. Nothing it already has is replaced, and nothing TeslaMate
+    supplies (the name, make and model) is touched."""
+    conn.execute(
+        "UPDATE garagebooks.car SET vin = COALESCE(vin, %(vin)s), build_year = COALESCE(build_year, %(build_year)s), "
+        "model_year = COALESCE(model_year, %(model_year)s), body_type = COALESCE(body_type, %(body_type)s) "
+        "WHERE id = %(id)s", {"vin": None, "build_year": None, "model_year": None, "body_type": None, **v, "id": car_id})
 
 
 def set_sale(conn, car_id, sold_at, sale_price, sale_km=None):
