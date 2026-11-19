@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Which release candidate the TeslaMate compatibility workflow may tag by itself.
 
+  scripts/auto_rc.py record VERSION PREVIOUS   adds the TeslaMate compatibility entry to Unreleased.
   scripts/auto_rc.py prepare   renames CHANGELOG.md's Unreleased entry for the next candidate, and prints
                                its tag (v0.4.0-rc2). Prints nothing, and changes nothing, when the next tag
                                isn't unambiguous: the owner releases then.
@@ -47,12 +48,27 @@ def next_tag(tags, unreleased):
     return None
 
 
+def add_compat_entry(text, version, previous):
+    """The entry `teslamate-compat.sh --record` adds at the top of Unreleased (making that heading when the
+    last release took it). Once only."""
+    if f"**TeslaMate {version}.**" in text:
+        return text
+    entry = (f"{COMPAT_ENTRY}{version}.** Tested with TeslaMate {version} (it was {previous}). Nothing to do on upgrade: "
+             f"pull the new image. A TeslaMate database up to that release no longer has its figures held back.\n\n")
+    if "## Unreleased\n" not in text:
+        text = re.sub(r"^## ", "## Unreleased\n\n## ", text, count=1, flags=re.M)
+    return re.sub(r"^## Unreleased\n\n?", lambda m: m.group(0).rstrip("\n") + "\n\n" + entry, text, count=1, flags=re.M)
+
+
 def rename_unreleased(text, tag, today):
     """Unreleased becomes the tag's entry, and an empty Unreleased stays above it."""
     return text.replace("## Unreleased\n", f"## Unreleased\n\n## {tag.removeprefix('v')} - {today.isoformat()}\n", 1)
 
 
 def main(argv):
+    if len(argv) == 4 and argv[1] == "record":
+        CHANGELOG.write_text(add_compat_entry(CHANGELOG.read_text(), argv[2], argv[3]))
+        return
     if argv[1:] != ["prepare"]:
         sys.exit(__doc__)
     tags = subprocess.run(["git", "tag"], capture_output=True, text=True, check=True).stdout.split()

@@ -49,3 +49,16 @@ def test_the_changelog_entry_is_renamed_and_an_empty_unreleased_stays_on_top():
 
 def test_unreleased_body_is_read_between_its_heading_and_the_next():
     assert rc.unreleased_body(log(OTHER)) == OTHER.strip() + "\n"
+
+
+def test_a_compat_entry_is_added_under_unreleased_and_only_once():
+    out = rc.add_compat_entry(log(OTHER), "4.5.0", "4.4.0")
+    assert out.split("## Unreleased\n\n")[1].startswith("**TeslaMate 4.5.0.** Tested with TeslaMate 4.5.0 (it was 4.4.0).")
+    assert rc.add_compat_entry(out, "4.5.0", "4.4.0") == out
+
+
+def test_a_compat_entry_makes_the_unreleased_heading_when_the_last_release_took_it():
+    text = "# Changelog\n\nintro\n\n## 0.4.0-rc2 - 2026-11-19\n\nold\n"
+    out = rc.add_compat_entry(text, "4.5.0", "4.4.0")
+    assert out.index("## Unreleased") < out.index("**TeslaMate 4.5.0.**") < out.index("## 0.4.0-rc2")
+    assert rc.next_tag(["v0.4.0-rc2"], rc.unreleased_body(out)) == "v0.4.0-rc3"

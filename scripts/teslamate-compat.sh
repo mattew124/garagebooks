@@ -73,18 +73,7 @@ if [ "$record" = 1 ] && { [ "$status" = 0 ] || [ "$status" = 2 ]; }; then
     sed -i -E "s/^TESTED_TESLAMATE = .*/TESTED_TESLAMATE = \"$version\"/; s/^TESTED_MIGRATION = .*/TESTED_MIGRATION = $newest/" \
         garagebooks/compat.py
     sed -i -E "s/^Tested with TeslaMate [0-9][0-9.]*\./Tested with TeslaMate $version./" README.md
-    VERSION="$version" PREVIOUS="$tested" .venv/bin/python - <<'PY'
-import os
-import pathlib
-version, previous = os.environ["VERSION"], os.environ["PREVIOUS"]
-path = pathlib.Path("CHANGELOG.md")
-text = path.read_text()
-marker = "## Unreleased\n\n"
-entry = (f"**TeslaMate {version}.** Tested with TeslaMate {version} (it was {previous}). Nothing to do on upgrade: pull the new image. "
-         f"A TeslaMate database up to that release no longer has its figures held back.\n\n")
-if marker in text and f"**TeslaMate {version}.**" not in text:
-    path.write_text(text.replace(marker, marker + entry, 1))
-PY
+    .venv/bin/python scripts/auto_rc.py record "$version" "$tested"
     echo "compat: recorded TeslaMate $version (migration $newest). Review 'git diff'."
     status=0
 fi
