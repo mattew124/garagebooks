@@ -3,7 +3,7 @@
 {% block title %}Choose folder{% endblock %}
 {% block main_attrs %} class="narrow"{% endblock %}
 {% block content %}
-<h1>{% if kind == 'onedrive' %}{{ mark() }} {% endif %}Folder for {{ car.name or ('Car ' ~ car.id) }}</h1>
+<h1>{% if kind == 'onedrive' %}{{ mark() }} {% endif %}{% if kind == 'mail' %}Mailbox folder{% else %}Folder{% endif %} for {{ car.name or ('Car ' ~ car.id) }}</h1>
 <p class="here"><code>{{ here.path }}</code></p>
 <ul class="plain folder-list">
   {% if not is_root %}
@@ -17,9 +17,14 @@
 </ul>
 <form method="post" action="{{ url_for(kind ~ '_choose_folder', car_id=car.id) }}" class="row">
   <input type="hidden" name="folder_id" value="{{ '' if is_root else here.id }}">
-  <button type="submit" class="button">Use {{ here.path }}</button>
+  {% if kind == 'mail' and is_root %}<small>Open the folder the car's invoice emails arrive in.</small>
+  {% else %}<button type="submit" class="button">Use {{ here.path }}</button>{% endif %}
   <a href="{{ url_for('storage_page') }}">Cancel</a>
 </form>
+{% if kind == 'mail' %}
+<p><small>Only emails directly in the folder you choose are read, never its subfolders, and nothing in the
+  mailbox is changed. To make a folder, or a rule that files the garage's emails into it, use Outlook.</small></p>
+{% else %}
 <form method="post" action="{{ url_for(kind ~ '_new_folder', car_id=car.id) }}" class="stack new-folder">
   <input type="hidden" name="parent_id" value="{{ '' if is_root else here.id }}">
   <label>New folder in <code>{{ here.path }}</code>
@@ -28,4 +33,5 @@
   </label>
   <button type="submit" class="secondary">Create folder</button>
 </form>
+{% endif %}
 {% endblock %}

@@ -18,8 +18,8 @@ import pytest
 
 from garagebooks import invoices, notices
 from tests.test_app import ORIGIN, rows
-from tests.test_onedrive import (CLIENT_ID, FakeMicrosoft, account, app_for, choose_folder,  # noqa: F401  (fixtures)
-                                 save_credentials, sign_in)
+from tests.test_onedrive import (CLIENT_ID, FakeMicrosoft, account, an_hour_passes, app_for,  # noqa: F401  (fixtures)
+                                 choose_folder, save_credentials, sign_in, start_sign_in)
 from tests.test_validation import PDF
 
 TYRES_PDF = b"%PDF-mail-tyres"
@@ -201,7 +201,8 @@ def test_storage_page_offers_the_mailbox_once_registered(client, ms):
     assert "Connect mailbox" in page and "Mail.Read" in page
 
 
-def test_refresh_for_mail_asks_for_the_mail_scope(mailbox, ms):
+def test_refresh_for_mail_asks_for_the_mail_scope(mailbox, ms, monkeypatch):
+    an_hour_passes(monkeypatch)
     ms.scopes.clear()
     scan(mailbox)
     assert ms.scopes and all("Mail.Read" in s and "Files" not in s for s in ms.scopes)
@@ -270,13 +271,19 @@ def test_refund_email_without_attachment_is_a_negative_amount(mailbox, admin):
     row = read_row(mailbox, 1, f)
     assert 'value="-45.00"' in row
     assert 'value="2026-10-30"' in row           # the day it was received (Brisbane time)
-    assert 'value="Example Tyres"' in row        # the sender, as nothing better was found
+    assert 'value="Example Tyres Pty Ltd"' in row     # the company the text names, as for a PDF
+
+
+def test_email_vendor_falls_back_to_the_sender(mailbox, ms):
+    ms.messages = [message("M9", "Refund", "Example Tyres", "2026-10-30T02:00:00Z", body="We have refunded $5.00.")]
+    f = scan(mailbox)["files"][0]
+    assert 'value="Example Tyres"' in read_row(mailbox, 0, f)
 
 
 def test_email_with_nothing_to_read_starts_unticked(mailbox):
     f = scan(mailbox)["files"][2]
     row = read_row(mailbox, 2, f)
-    assert 'name="include_2" checked' not in row and "Couldn't read the" in row
+    assert 'name="include_2" checked' not in row and "read the category, amount" in row
 
 
 def confirm(client, admin, files, **over):
@@ -299,7 +306,8 @@ def test_import_without_storage_links_the_email(mailbox, admin):
 
 
 def test_import_copies_the_attachment_into_the_cars_storage(mailbox, ms, admin):
-    sign_in(mailbox, ms)
+    q = start_sign_in(mailbox, ms)                      # OneDrive too, on the registration already saved
+    assert mailbox.get(f"/onedrive/callback?code=AUTH-CODE&state={q['state']}").status_code == 303
     choose_folder(mailbox)                              # OneDrive folder for the car's invoices
     f = scan(mailbox)["files"][0]
     resp = confirm(mailbox, admin, [(f, {"date": "2026-10-24", "category_id": cat(admin, "Tyres"),
@@ -332,7 +340,7 @@ def test_import_page_opens_from_the_storage_page(mailbox):
     page = mailbox.get("/storage").data.decode()
     assert "/mail/import/1" in page
     page = mailbox.get("/mail/import/1").data.decode()
-    assert "the car's mailbox folder" in page
+    assert "mailbox folder but not yet in your expenses" in page
 
 
 def test_mail_import_needs_a_folder(client, ms):
@@ -371,7 +379,8 @@ def test_mail_job_is_quiet_when_no_mailbox_is_connected(client, admin):
         assert app.extensions["scheduler"].jobs["mail"].run(admin) == "no mailbox connected"
 
 
-def test_lost_mail_sign_in_is_noted_and_told(mailbox, ms, admin):
+def test_lost_mail_sign_in_is_noted_and_told(mailbox, ms, admin, monkeypatch):
+    an_hour_passes(monkeypatch)
     ms.refresh_ok = False
     app = mailbox.application
     with app.app_context():

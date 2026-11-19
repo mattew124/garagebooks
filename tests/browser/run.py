@@ -922,7 +922,7 @@ def test_settings_lists_the_scheduled_jobs(page):
     assert section.locator("h2").text_content() == "Scheduled jobs", section.locator("h2").text_content()
     assert section.locator("#jobs-where").inner_text().strip(), "it says where the jobs run"
     names = section.locator("li[data-job]").evaluate_all("els => els.map(e => e.dataset.job)")
-    assert names == ["dashboard", "notifications", "teslamate"], names
+    assert names == ["dashboard", "mail", "notifications", "teslamate"], names
     states = section.locator("li[data-job]").evaluate_all("els => els.map(e => e.dataset.state)")
     assert set(states) <= {"never", "ok", "failed", "running"}, states
     assert "every hour" in section.locator('li[data-job="teslamate"]').inner_text()

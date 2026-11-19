@@ -26,7 +26,7 @@ from psycopg import errors as pg_errors
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from . import claims as claim_lib, dashboard, db, docinfo, icons, invoices, jobs, jobtext, lease, leaseform, logs, notices, notify, onedrive, reminders, sources, storage, updates, validation
+from . import claims as claim_lib, dashboard, db, docinfo, icons, invoices, jobs, jobtext, lease, leaseform, logs, notices, notify, onedrive, outlook, reminders, sources, storage, updates, validation
 
 log = logging.getLogger("garagebooks.app")
 
@@ -74,6 +74,8 @@ MESSAGES = {
     "connected": "OneDrive connected.",
     "credentials": "App registration saved. Now connect OneDrive.",
     "disconnected": "OneDrive disconnected.",
+    "mail_connected": "Mailbox connected. Now choose a mailbox folder for each car.",
+    "mail_disconnected": "Mailbox disconnected.",
     "imported": "Invoices imported.",
     "category_folder": "OneDrive folder saved.",
     "learned_deleted": "Removed.",
@@ -108,6 +110,11 @@ STORES = {
                  "where": "the car's OneDrive folder",
                  "choose_first": "Choose a OneDrive folder for this car on the Invoice storage page first."},
 }
+# Where invoices can be imported from: every storage, and an Outlook mailbox folder (outlook.py), which
+# is only read. A car's mailbox folder is chosen on the same page but kept apart from its storage folder.
+SOURCES = {**STORES, "mail": {
+    "label": "Outlook", "title": "Outlook mailbox", "short": "mailbox folder", "where": "the car's mailbox folder",
+    "choose_first": "Choose a mailbox folder for this car on the Invoice storage page first."}}
 
 
 class PrefixMiddleware:
@@ -246,6 +253,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         drive = onedrive.OneDrive(key, onedrive_transport)
     elif os.environ.get("ONEDRIVE_TOKEN_KEY"):
         log.warning("ONEDRIVE_TOKEN_KEY was renamed GARAGEBOOKS_ENCRYPTION_KEY; OneDrive stays off until it is set.")
+    # The mailbox uses OneDrive's app registration and encryption key, with a sign-in of its own.
+    mailbox = outlook.Mailbox(drive) if drive else None
     # INVOICES_DIR turns on keeping invoices in a folder on the server: a host folder (a NAS share,
     # say) mounted into the container. The app serves those PDFs itself, at /invoice/<id>.
     local = None
@@ -311,6 +320,38 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
     scheduler.add("notifications", timedelta(minutes=15), notifications,
                   "Sends the notices you have asked for (Settings, Notifications): a reminder coming due, the OneDrive "
                   "client secret nearing its expiry, the OneDrive sign-in lost. Each is sent once.")
+
+    def check_mail(conn):
+        """Count what is waiting in each car's mailbox folder, for the storage page and the notifications job.
+        Nothing is imported or changed: that is the owner's to do, on the import page."""
+        if mailbox is None:
+            return "off"
+        account = db.onedrive_account(conn)
+        if not (account and account["mail_refresh_token"]):
+            return "no mailbox connected"
+        store, total, failed = store_for("mail"), 0, []
+        for car_id, folder in db.car_mail_folders(conn).items():
+            try:
+                items = store.pdfs(folder["folder_id"])
+            except onedrive.SignInExpired as exc:
+                raise jobs.JobError(exc.user_message) from None
+            except storage.StorageError as exc:
+                log.warning("mail folder of car %d not looked in: %s", car_id, exc)
+                failed.append(exc.user_message)
+                continue
+            known = db.known_invoices(conn, [f["web_url"] for f in items])
+            skipped = db.skipped_import_urls(conn, car_id)
+            waiting = [f for f in items if f["web_url"] not in known and f["web_url"] not in skipped]
+            emails = len({outlook.split_id(f["id"])[0] for f in waiting})
+            db.note_mail_waiting(conn, car_id, emails, max((f["received"] for f in waiting if f["received"]), default=None))
+            total += emails
+        said = f"{total} email{'' if total == 1 else 's'} waiting"
+        if failed:
+            raise jobs.JobError(f"{said}; a folder couldn't be read: {failed[0]}")
+        return said
+    scheduler.add("mail", timedelta(minutes=30), check_mail,
+                  "Looks in each car's mailbox folder for emails not yet imported, for the Invoice storage page and "
+                  "a notice. It only reads: importing is done on the import page.")
     app.extensions["scheduler"] = scheduler
     try:
         jobs_mode = jobs.mode(os.environ)
@@ -547,53 +588,66 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         """The storage of that kind, or None when this installation doesn't have it."""
         if kind == "onedrive" and drive is not None:
             return storage.OneDriveStore(drive, access_token)
+        if kind == "mail" and mailbox is not None:
+            return storage.MailStore(mailbox, lambda: access_token(mail=True))
         return local if kind == "local" else None
 
     def car_folder(conn, car_id, kind):
-        """The car's folder, if it is in that storage."""
+        """The car's folder, if it is in that storage (for "mail", its mailbox folder)."""
+        if kind == "mail":
+            return db.car_mail_folders(conn).get(car_id)
         folder = db.car_folders(conn).get(car_id)
         return folder if folder and folder["backend"] == kind else None
 
     def connected(conn, kind):
-        """Ready to use? OneDrive needs a sign-in; the folder on the server needs nothing."""
-        return kind == "local" or bool((db.onedrive_account(conn) or {}).get("refresh_token"))
+        """Ready to use? OneDrive and the mailbox need their sign-ins; the folder on the server needs nothing."""
+        return kind == "local" or bool((db.onedrive_account(conn) or {}).get(
+            "mail_refresh_token" if kind == "mail" else "refresh_token"))
 
-    kept = {}   # this worker's access token: {"key": the stored refresh token it came with, "token", "until"}
+    kept = {"drive": {}, "mail": {}}   # this worker's access tokens, per sign-in: {"key": the stored refresh token it came with, "token", "until"}
 
-    def access_token():
-        """An access token for Graph. Microsoft's last about an hour, so one is kept and reused until
+    def access_token(mail=False):
+        """An access token for Graph: OneDrive's, or with mail=True the mailbox's (its own sign-in on the same
+        app registration, outlook.py). Microsoft's last about an hour, so one is kept and reused until
         shortly before it expires (a refresh costs most of a second). It is only reused while the stored
         refresh token is the one it came with: disconnecting, signing in again or new credentials all
         change that, so none of them leaves a kept token in use. Otherwise: spend the stored refresh token
         and store the one Microsoft hands back. A sign-in Microsoft refuses is noted (signin_lost_at), so
         the notifications job can say so; a refresh that works clears it."""
+        p = "mail_" if mail else ""
+        mine = kept["mail" if mail else "drive"]
         lost = None
         with connect() as conn:
             account = db.onedrive_account(conn, lock=True)
-            if not account or not account["refresh_token"]:
-                kept.clear()
+            if not account or not account[f"{p}refresh_token"]:
+                mine.clear()
+                if mail:
+                    raise onedrive.NotConnected.mailbox()
                 raise onedrive.NotConnected()
-            if kept.get("key") == account["refresh_token"] and kept["until"] > time.monotonic():
-                return kept["token"]
+            if mine.get("key") == account[f"{p}refresh_token"] and mine["until"] > time.monotonic():
+                return mine["token"]
             try:
                 tokens = drive.refresh(account["client_id"], drive.decrypt(account["client_secret"]),
-                                       drive.decrypt(account["refresh_token"]))
+                                       drive.decrypt(account[f"{p}refresh_token"]),
+                                       scopes=onedrive.MAIL_SCOPES if mail else onedrive.SCOPES,
+                                       what="mailbox" if mail else "OneDrive")
             except onedrive.SignInExpired as exc:
                 lost = exc
             else:
-                key = account["refresh_token"]
+                key = account[f"{p}refresh_token"]
                 if tokens.get("refresh_token"):
                     key = drive.encrypt(tokens["refresh_token"])
-                db.save_onedrive_account(conn, refresh_token=key, signin_lost_at=None, signin_checked_at=datetime.now(timezone.utc))
+                db.save_onedrive_account(conn, **{f"{p}refresh_token": key, f"{p}signin_lost_at": None,
+                                                  f"{p}signin_checked_at": datetime.now(timezone.utc)})
         if lost is not None:        # after the transaction above, which holds the row
-            kept.clear()
+            mine.clear()
             with connect() as conn:
-                db.note_signin_lost(conn)
+                db.note_signin_lost(conn, mail=mail)
             raise lost
         lifetime = tokens.get("expires_in", 0) - TOKEN_MARGIN_SECONDS
-        kept.clear()
+        mine.clear()
         if lifetime > 0:
-            kept.update(key=key, token=tokens["access_token"], until=time.monotonic() + lifetime)
+            mine.update(key=key, token=tokens["access_token"], until=time.monotonic() + lifetime)
         return tokens["access_token"]
 
     def check_signin():
@@ -777,6 +831,12 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             text += f" Renamed {renamed}{'' if request.args.get('store') == 'local' else ' in OneDrive'}."
         if failed:
             text += f" Couldn't rename {failed} (a file with that name may already exist): imported with the old name."
+        copied, not_copied = (request.args.get(k, 0, type=int) for k in ("copied", "copy_failed"))
+        if copied:
+            text += f" Saved {copied} attached PDF{'' if copied == 1 else 's'} in the car's invoice storage."
+        if not_copied:
+            text += (f" Couldn't save {not_copied} attached PDF{'' if not_copied == 1 else 's'} in the car's invoice "
+                     "storage: those expenses link to the email instead.")
         return text
 
     @app.get("/new")
@@ -1985,6 +2045,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         account = None
         with connect() as conn:
             cars, folders = db.cars(conn), db.car_folders(conn)
+            mail_folders = db.car_mail_folders(conn)
             settings_row = db.get_settings(conn)
             if drive is not None:
                 account = db.onedrive_account(conn)
@@ -2002,6 +2063,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             "secret_days_left": (expires - date.today()).days if expires else None,
             "available": ready["local"], "root": str(local.root) if local else None,
             "local_shown": local_shown if local else None,
+            "mail_folders": mail_folders, "mail_connected": bool(account and account["mail_refresh_token"]),
         }
         return render_template("storage.html", **ctx), status
 
@@ -2024,11 +2086,23 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             # A new registration can't use the old one's sign-in.
             db.save_onedrive_account(conn, client_secret=drive.encrypt(secret), refresh_token=None,
                                      account=None, auth_state=None, auth_expires_at=None,
-                                     signin_lost_at=None, signin_checked_at=None, **fields)
+                                     signin_lost_at=None, signin_checked_at=None, mail_refresh_token=None,
+                                     mail_account=None, mail_signin_lost_at=None, mail_signin_checked_at=None,
+                                     **fields)
         return redirect(url_for("storage_page", msg="credentials"), 303)
 
     @app.post("/onedrive/connect")
     def onedrive_connect():
+        return start_sign_in("drive")
+
+    @app.post("/mail/connect")
+    def mail_connect():
+        return start_sign_in("mail")
+
+    def start_sign_in(purpose):
+        """Send the browser to Microsoft to sign in, for OneDrive ("drive") or the mailbox ("mail"). Both use
+        the one app registration and come back to the one callback address; the pending sign-in remembers
+        which it was for."""
         need_drive()
         with connect() as conn:
             account = db.onedrive_account(conn)
@@ -2037,13 +2111,14 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         state, verifier, challenge = onedrive.new_pkce()
         with connect() as conn:
             db.save_onedrive_account(
-                conn, auth_state=drive.encrypt(f"{state} {verifier}"),
+                conn, auth_state=drive.encrypt(f"{state} {verifier} {purpose}"),
                 auth_expires_at=datetime.now(timezone.utc) + timedelta(minutes=SIGN_IN_MINUTES))
+        scopes = onedrive.MAIL_SCOPES if purpose == "mail" else onedrive.SCOPES
         # Not a redirect: Chrome applies form-action to a form POST's redirect.
         # A link (followed by app.js) is a plain navigation, as n8n does it.
         resp = make_response(render_template(
             "connecting.html",
-            sign_in_url=drive.authorize_url(account["client_id"], callback_url(), state, challenge)))
+            sign_in_url=drive.authorize_url(account["client_id"], callback_url(), state, challenge, scopes)))
         # Ties the sign-in to this browser: the callback must come back to the one that started it.
         resp.set_cookie(STATE_COOKIE, state, max_age=SIGN_IN_MINUTES * 60, httponly=True,
                         samesite="Lax", secure=request.is_secure, path=request.script_root or "/")
@@ -2067,22 +2142,27 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 f"{SIGN_IN_MINUTES} minutes. Press Connect OneDrive to try again."))
         with connect() as conn:
             db.save_onedrive_account(conn, auth_state=None, auth_expires_at=None)
+        mail = pending[2:] == ["mail"]       # a sign-in started before the mailbox existed has no third part
+        what = "the mailbox" if mail else "OneDrive"
         if request.args.get("error"):
-            log.warning("Microsoft didn't connect OneDrive: %s", docinfo.quote(request.args["error"]))
-            return render_storage(status=400, notice="Microsoft didn't connect OneDrive: "
+            log.warning("Microsoft didn't connect %s: %s", what, docinfo.quote(request.args["error"]))
+            return render_storage(status=400, notice=f"Microsoft didn't connect {what}: "
                                    + (request.args.get("error_description") or request.args["error"]))
         try:
             tokens = drive.redeem_code(account["client_id"], drive.decrypt(account["client_secret"]),
-                                       request.args.get("code", ""), callback_url(), pending[1])
+                                       request.args.get("code", ""), callback_url(), pending[1],
+                                       onedrive.MAIL_SCOPES if mail else onedrive.SCOPES)
         except onedrive.OneDriveError as exc:
-            log.warning("OneDrive sign-in failed: %s", exc)
+            log.warning("%s sign-in failed: %s", what, exc)
             return render_storage(status=400, notice=exc.user_message)
-        name = drive.account_name(tokens["access_token"]) or "your Microsoft account"
+        p = "mail_" if mail else ""
+        name = (mailbox if mail else drive).account_name(tokens["access_token"]) or "your Microsoft account"
         with connect() as conn:
-            db.save_onedrive_account(conn, refresh_token=drive.encrypt(tokens["refresh_token"]), account=name,
-                                     signin_lost_at=None, signin_checked_at=None)
-        log.info("OneDrive connected")
-        resp = redirect(url_for("storage_page", msg="connected"), 303)
+            db.save_onedrive_account(conn, **{f"{p}refresh_token": drive.encrypt(tokens["refresh_token"]),
+                                              f"{p}account": name, f"{p}signin_lost_at": None,
+                                              f"{p}signin_checked_at": None})
+        log.info("%s connected", what)
+        resp = redirect(url_for("storage_page", msg="mail_connected" if mail else "connected"), 303)
         resp.delete_cookie(STATE_COOKIE, path=request.script_root or "/")
         return resp
 
@@ -2093,6 +2173,16 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             db.save_onedrive_account(conn, refresh_token=None, account=None, signin_lost_at=None, signin_checked_at=None)
         log.info("OneDrive disconnected")
         return redirect(url_for("storage_page", msg="disconnected"), 303)
+
+    @app.post("/mail/disconnect")
+    def mail_disconnect():
+        """Forget the mailbox's sign-in. Each car's mailbox folder is kept, for when it is connected again."""
+        need_drive()
+        with connect() as conn:
+            db.save_onedrive_account(conn, mail_refresh_token=None, mail_account=None, mail_signin_lost_at=None,
+                                     mail_signin_checked_at=None)
+        log.info("mailbox disconnected")
+        return redirect(url_for("storage_page", msg="mail_disconnected"), 303)
 
     # ---- the invoice folder on the server ---------------------------------------
 
@@ -2152,7 +2242,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
     def import_page(store, car, **ctx):
         """The import page's template with what every version of it needs. A row's `url` is the file's
         reference (what the expense will store); `link` turns it into an address to open."""
-        return render_template("import.html", car=car, kind=store.kind, info=STORES[store.kind], link=store.link,
+        return render_template("import.html", car=car, kind=store.kind, info=SOURCES[store.kind], link=store.link,
                                learn_after=invoices.LEARN_AFTER, **ctx)
 
     def render_import(store, car, rows, remaining=0, errors=None, status=200, notice=None, skipped=None):
@@ -2180,24 +2270,55 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         pending = [f for f in left if f["web_url"] not in skipped]
         return files, pending, len(left) - len(pending)
 
+    def read_document(store, item_id):
+        """-> (text, the PDF's bytes or None, the email or None) of one thing to import. From a mailbox, an
+        attached PDF is read with its email (for the refund words and what to fall back on), and an email
+        with none is read from its subject and text."""
+        if store.kind != "mail":
+            pdf = store.download(item_id)
+            return invoices.extract_text(pdf), pdf, None
+        message_id, attachment_id = outlook.split_id(item_id)
+        email = store.message(message_id)
+        if attachment_id is None:
+            return f"{email['subject']}\n\n{email['text']}", None, email
+        pdf = store.download(item_id)
+        return invoices.extract_text(pdf), pdf, email
+
+    def from_email(guess, email, text):
+        """What an email adds to the guesses from its text or PDF: a refund is a negative amount (the figure
+        beside "refunded" first), and the day it arrived and who sent it stand in for a date and vendor
+        that couldn't be read."""
+        if invoices.is_refund(email["subject"], text):
+            amount = invoices.refund_amount(text)
+            amount = amount if amount is not None else guess["amount"]
+            guess["amount"] = -abs(amount) if amount is not None else None
+        if guess["date"] is None and email["received"]:
+            guess["date"] = email["received"].astimezone(ZoneInfo(tz)).date()
+        guess["vendor"] = guess["vendor"] or email["sender"] or None
+        guess["missing"] = [f for f in ("date", "category", "amount") if guess[f] is None]
+        return guess
+
     def read_file(store, car, ctx, n, f):
-        """Read one PDF and propose its expense: an import row. A file that can't be fetched
+        """Read one PDF (or email) and propose its expense: an import row. A file that can't be fetched
         becomes a row saying why, never an error for the whole page."""
         by_name = {c["name"]: c["id"] for c in ctx["categories"]}
         row = import_row(n, url=f["url"], name=f["name"], folder=f["folder"], id=f["id"])
         timer = docinfo.Timer()
         try:
-            pdf = store.download(f["id"])
-            guess = invoices.propose(f["folder"], f["name"], invoices.extract_text(pdf), list(by_name), ctx["learned"],
+            text, pdf, email = read_document(store, f["id"])
+            guess = invoices.propose(f["folder"], f["name"], text, list(by_name), ctx["learned"],
                                      ctx["settings"]["multi_amount"])
+            if email is not None:
+                guess = from_email(guess, email, text)
         except storage.StorageError as exc:
             log.warning("import file=%s folder=%s skipped: %s", docinfo.quote(f["name"]), docinfo.quote(f["folder"]), exc)
             row["note"] = exc.user_message
             return row
         have, missing = docinfo.found(guess)
         # The bytes actually read, not the size the page sent back: that is only what the listing said.
+        content = pdf if pdf is not None else text.encode()
         log.debug("import file=%s folder=%s bytes=%d sha256=%s found=%s missing=%s ms=%d", docinfo.quote(f["name"]),
-                  docinfo.quote(f["folder"]), len(pdf), docinfo.sha12(pdf), have, missing, timer.ms)
+                  docinfo.quote(f["folder"]), len(content), docinfo.sha12(content), have, missing, timer.ms)
         row.update(
             date=guess["date"].isoformat() if guess["date"] else "",
             category_id=str(by_name.get(guess["category"], "")),
@@ -2220,7 +2341,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             if same:
                 row["duplicates"] = dup_view(same)
                 row["include"] = False          # the owner decides, not the default
-        if guess["date"] and guess["category"]:
+        if guess["date"] and guess["category"] and store.kind != "mail":    # an email's PDF is copied, not renamed
             target = validation.invoice_filename(
                 datetime.combine(guess["date"], dtime(12)), guess["category"], guess["vendor"],
                 ctx["settings"]["invoice_date_format"], ctx["settings"]["invoice_name_format"],
@@ -2248,7 +2369,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                     changed = [f for f in invoices.LEARNABLE if typed[f] is not None and not same_value(f, typed[f], guess.get(f))]
                     if not changed or not row["id"]:
                         continue
-                    text = invoices.extract_text(store.download(row["id"]))
+                    text = read_document(store, row["id"])[0]
                     for field in changed:
                         for label in invoices.find_labels(text, field, typed[field]):
                             db.record_label(conn, field, label)
@@ -2269,8 +2390,10 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
 
     def storage_routes(kind):
         """One storage's routes, at /onedrive/... or /local/...: choosing each car's folder, importing
-        the invoices already in it, and the Add form's file picker. The same code serves both."""
-        info = STORES[kind]
+        the invoices already in it, and the Add form's file picker. The same code serves both, and the
+        mailbox (/mail/...), which is only read: its folder is chosen and imported from the same way,
+        but it has no new folder and no file picker, and its folder is not where a car's invoices go."""
+        info = SOURCES[kind]
         page = "storage_page"
 
         def need_store():
@@ -2284,7 +2407,6 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             store = need_store()
             return render_browse(store, car_or_404(car_id), request.args.get("folder") or None)
 
-        @app.post(f"/{kind}/browse/<int:car_id>/new-folder", endpoint=f"{kind}_new_folder")
         def new_folder(car_id):
             store = need_store()
             car = car_or_404(car_id)
@@ -2299,19 +2421,27 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 return render_browse(store, car, parent_id, error=said, status=400)
             return redirect(url_for(f"{kind}_browse", car_id=car_id, folder=created["id"]), 303)
 
+        if kind != "mail":      # the mailbox is only read (Mail.Read can't make a folder)
+            app.post(f"/{kind}/browse/<int:car_id>/new-folder", endpoint=f"{kind}_new_folder")(new_folder)
+
         @app.post(f"/{kind}/folders/<int:car_id>", endpoint=f"{kind}_choose_folder")
         def choose_folder(car_id):
             store = need_store()
             car_or_404(car_id)
             try:
                 chosen = store.folder(request.form.get("folder_id") or None)
+                if kind == "mail" and chosen["is_root"]:
+                    raise storage.StorageError("Choose a folder in the mailbox, not the top of it.")
                 if kind == "local":
                     local.claim()          # from now on, the folder must carry its marker (storage.py)
             except storage.StorageError as exc:
                 log.warning("%s folder choice failed: %s", kind, exc)
-                return render_storage(status=400, notice=f"Couldn't use that folder: {exc}")
+                return render_storage(status=400, notice=f"Couldn't use that folder: {exc.user_message}")
             with connect() as conn:
-                db.set_car_folder(conn, car_id, chosen["id"], chosen["path"], kind)
+                if kind == "mail":
+                    db.set_car_mail_folder(conn, car_id, chosen["id"], chosen["path"])
+                else:
+                    db.set_car_folder(conn, car_id, chosen["id"], chosen["path"], kind)
             return redirect(url_for(page, msg="folders"), 303)
 
         @app.post(f"/{kind}/folders/<int:car_id>/clear", endpoint=f"{kind}_clear_folder")
@@ -2319,7 +2449,10 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             need_store()
             car_or_404(car_id)
             with connect() as conn:
-                db.clear_car_folder(conn, car_id, kind)
+                if kind == "mail":
+                    db.clear_car_mail_folder(conn, car_id)
+                else:
+                    db.clear_car_folder(conn, car_id, kind)
             return redirect(url_for(page, msg="folders"), 303)
 
         # ---- import the invoices already in the car's folder ----------------------
@@ -2356,7 +2489,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             except storage.StorageError as exc:
                 return render_storage(status=502, notice=exc.user_message)
             return render_import(store, car, rows, remaining=len(pending) - len(rows), skipped=skipped, status=200,
-                                 notice=None if files else "No PDFs found in that folder.")
+                                 notice=None if files else ("No emails found in that folder." if kind == "mail"
+                                                            else "No PDFs found in that folder."))
 
         @app.get(f"/{kind}/import/<int:car_id>/scan", endpoint=f"{kind}_import_scan")
         def import_scan(car_id):
@@ -2454,11 +2588,19 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 if skip_urls:
                     return redirect(url_for(f"{kind}_import", car_id=car_id), 303)
                 return render_import(store, car, rows, status=400, notice="Tick at least one invoice to import.")
-            imported, renamed, rename_failed = [], 0, 0
+            imported, renamed, rename_failed, copied, copy_failed = [], 0, 0, 0, 0
             with connect() as conn:
                 known = db.known_invoices(conn, [v[ref_field] for _, v in chosen])
             for row, values in chosen:
                 if values[ref_field] in known:   # a double submit imports once
+                    continue
+                if kind == "mail":
+                    outcome = keep_attachment(store, row, values)
+                    copied += outcome == "copied"
+                    copy_failed += outcome == "failed"
+                    with connect() as conn:
+                        db.record_mail_import(conn, car_id, row["url"], db.insert_expense(conn, values))
+                    imported.append((row, values))
                     continue
                 target = validation.invoice_filename(
                     values["occurred_at"].astimezone(ZoneInfo(tz)), cat_names[values["category_id"]], values["vendor"],
@@ -2481,10 +2623,11 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             refresh_dashboard()
             learn_from(store, imported)
             more = {"store": kind} if kind == "local" else {}
+            if copied or copy_failed:
+                more.update(copied=copied, copy_failed=copy_failed)
             return redirect(url_for("index", msg="imported", n=len(imported), renamed=renamed,
                                     rename_failed=rename_failed, **more), 303)
 
-        @app.get(f"/api/{kind}/browse/<int:car_id>", endpoint=f"api_{kind}_browse")
         def api_browse(car_id):
             """One folder for the Add form's file picker. Starts in the car's folder; ?folder=<id> goes
             elsewhere (up included) and ?folder=root is the top of the storage."""
@@ -2509,7 +2652,27 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             return jsonify(id=here["id"], path=here["path"], parent_id=here["parent_id"], is_root=here["is_root"],
                            folders=folders, files=files)
 
-    for kind in STORES:
+        if kind != "mail":      # the Add form's file picker: an email's PDF is imported, not picked
+            app.get(f"/api/{kind}/browse/<int:car_id>", endpoint=f"api_{kind}_browse")(api_browse)
+
+    def keep_attachment(store, row, values):
+        """An email's PDF goes into the car's invoice storage like an uploaded one (category subfolder, the
+        file name template), and the expense links that copy. -> "copied", "failed" (it links the email
+        instead), or None when there is nothing to copy (no PDF, or no storage folder for the car)."""
+        if outlook.split_id(row["id"])[1] is None or not upload_ready(values["car_id"]):
+            return None
+        try:
+            pdf = validation.parse_invoice_pdf(row["name"] if row["name"].lower().endswith(".pdf") else "attachment.pdf",
+                                               store.download(row["id"]))
+            kept_in, ref = upload_invoice(values, pdf)
+        except (ValueError, storage.StorageError) as exc:
+            log.warning("emailed PDF %s not saved in the car's storage: %s", docinfo.quote(row["name"]), exc)
+            return "failed"
+        values["invoice_url"] = values["invoice_path"] = None
+        values[kept_in.ref_field] = ref
+        return "copied"
+
+    for kind in SOURCES:
         storage_routes(kind)
 
     def name_example(values):

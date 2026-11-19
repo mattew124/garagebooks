@@ -53,3 +53,5 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON garagebooks.expense_claim TO :"app_role"
 GRANT SELECT, INSERT, UPDATE, DELETE ON garagebooks.provider_transaction TO :"app_role";
 GRANT SELECT, INSERT, UPDATE, DELETE ON garagebooks.provider_claim TO :"app_role";
 GRANT SELECT, INSERT, UPDATE ON garagebooks.provider_sync TO :"app_role";
+-- Invoices by email: each car's mailbox folder, and which emails became which expense.
+GRANT SELECT, INSERT, UPDATE, DELETE ON garagebooks.car_mail_folder, garagebooks.mail_import TO :"app_role";

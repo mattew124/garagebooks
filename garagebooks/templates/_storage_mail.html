@@ -1,0 +1,47 @@
+{# The Invoice storage page's mailbox card: a second sign-in on the OneDrive app registration, then the
+   mailbox folder each car's invoice emails arrive in. Included by storage.html when OneDrive is on. #}
+<section class="card stack" id="mail">
+  <h2>Invoices by email</h2>
+  <p>Invoices and refunds that arrive by email can be imported from an Outlook.com mailbox: choose the mail
+    folder each car's emails are filed in, and its emails are offered on the same import page as a folder of
+    PDFs. Each attached PDF is one expense, saved in the car's invoice storage; an email with no PDF, such as a
+    refund notice, is read from its text.</p>
+  {% if not (account and account.client_id) %}
+  <p><small>It uses the OneDrive app registration: set that up above first.</small></p>
+  {% elif mail_connected %}
+  <p>Mailbox connected as <strong>{{ account.mail_account }}</strong>.</p>
+  <form method="post" action="{{ url_for('mail_disconnect') }}" data-confirm="Disconnect the mailbox? Expenses already imported stay as they are.">
+    <button type="submit" class="secondary">Disconnect mailbox</button>
+  </form>
+  {% else %}
+  <form method="post" action="{{ url_for('mail_connect') }}">
+    <button type="submit" class="button">Connect mailbox</button>
+  </form>
+  <small>Opens Microsoft's sign-in page, then comes back here, with the same app registration and redirect URI as
+    OneDrive. Sign in as the account whose mailbox gets the invoices (it can be a different one from the
+    OneDrive's). The app asks only to read mail (<code>Mail.Read</code>) and your name (<code>User.Read</code>), and
+    never moves, marks or deletes an email. If you listed the registration's API permissions by hand, add those
+    two as delegated permissions as well, or consent to them when you connect.</small>
+  {% endif %}
+
+  {% if mail_connected or mail_folders %}
+  <h3>Mailbox folder per car</h3>
+  <ul class="plain folders">
+    {% for c in cars %}{% set m = mail_folders.get(c.id) %}
+    <li>
+      <span><strong>{{ c.name or ('Car ' ~ c.id) }}</strong><br>
+        <small>{% if m %}<code>{{ m.folder_path }}</code>{% if m.waiting %} · {{ m.waiting }} email{{ '' if m.waiting == 1 else 's' }} waiting{% endif %}
+          {% else %}No mailbox folder{% endif %}</small></span>
+      <span class="actions">
+        {% if mail_connected %}<a href="{{ url_for('mail_browse', car_id=c.id) }}">{{ 'Change' if m else 'Choose mailbox folder' }}</a>{% endif %}
+        {% if m and mail_connected %}<a href="{{ url_for('mail_import', car_id=c.id) }}">Import emails</a>{% endif %}
+        {% if m %}<form method="post" action="{{ url_for('mail_clear_folder', car_id=c.id) }}">
+          <button type="submit" class="linklike">Clear</button></form>{% endif %}
+      </span>
+    </li>
+    {% endfor %}
+  </ul>
+  <small>The <a href="{{ url_for('settings') }}#scheduled-jobs">mail job</a> looks in each folder every 30 minutes, and with
+    <a href="{{ url_for('settings') }}">notifications</a> set up, tells you when new emails are waiting.</small>
+  {% endif %}
+</section>

@@ -13,6 +13,8 @@ Told so far:
   * the OneDrive client secret 30 days and 7 days before its expiry date, and once it has passed
   * the OneDrive sign-in no longer working
   * TeslaMate newer than this release was tested with (opt-in on Settings), once for each new migration
+  * emails waiting to be imported from a car's mailbox folder (what the `mail` job last found), once for
+    each newest email, and the mailbox sign-in no longer working
 Still to come, with the roadmap items that make them: new invoices waiting for review (item 13) and a
 lease budget heading for a shortfall (L3).
 """
@@ -116,6 +118,28 @@ def signin_notices(account, tz_now):
                    "Connect again on the Invoice storage page.", ("warning",))]
 
 
+def mail_signin_notices(account, tz_now):
+    lost = account and account["mail_signin_lost_at"]
+    if not lost:
+        return []
+    return [Notice(f"mail_signin:{lost.astimezone(tz_now.tzinfo).date()}", "Mailbox sign-in lost",
+                   "Outlook no longer accepts the saved mailbox sign-in, so emailed invoices aren't being looked for. "
+                   "Connect the mailbox again on the Invoice storage page.", ("warning",))]
+
+
+def mail_notices(conn):
+    """Emails in a car's mailbox folder not yet imported, as the mail job last counted them. Keyed by the
+    newest one, so a new email is told again and the same ones are not."""
+    found = conn.execute(
+        "SELECT f.car_id, f.waiting, f.newest_at, c.name FROM garagebooks.car_mail_folder f "
+        "JOIN garagebooks.car c ON c.id = f.car_id WHERE f.waiting > 0 AND f.newest_at IS NOT NULL "
+        "ORDER BY f.car_id").fetchall()
+    return [Notice(f"mail:{r['car_id']}:{r['newest_at']:%Y%m%dT%H%M%S}",
+                   f"{_plural(r['waiting'], 'email')} waiting to import ({r['name'] or 'Car ' + str(r['car_id'])})",
+                   "Check and import them from the car's mailbox folder on the Invoice storage page.", ("envelope",))
+            for r in found]
+
+
 def teslamate_notices(teslamate):
     """TeslaMate has moved past what this release was tested with, so its figures are held back."""
     if teslamate.state != "untested" or teslamate.migration is None:
@@ -153,6 +177,8 @@ def run(conn, send, teslamate, now, onedrive=False, signin_check=None):
             account = db.onedrive_account(conn)
         wanted += signin_notices(account, now)
         wanted += secret_notices(account, now.date())
+        wanted += mail_signin_notices(account, now)
+        wanted += mail_notices(conn)
     if db.get_notify_teslamate(conn):
         wanted += teslamate_notices(teslamate)
     found, open_ids = reminder_notices(conn, teslamate, now)

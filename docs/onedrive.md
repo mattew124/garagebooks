@@ -111,6 +111,9 @@ out before an invoice fails to upload.
 A dev stack or second installation needs its own callback address: add it as another **Web**
 redirect URI on the same registration.
 
+The same registration also reads invoices from an Outlook.com mailbox, with a sign-in of its own that only
+reads mail: see [Invoices by email](mailbox.md). Nothing more needs registering for it.
+
 A redirect URI you have just added can take a few minutes to take effect. If **Connect OneDrive**
 shows Microsoft's "invalid request" error straight after adding one, and the address matches
 exactly, wait a few minutes and press it again.

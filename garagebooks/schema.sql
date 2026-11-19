@@ -891,3 +891,32 @@ CREATE TABLE IF NOT EXISTS garagebooks.notification (
 ALTER TABLE garagebooks.setting ADD COLUMN IF NOT EXISTS notify_teslamate boolean NOT NULL DEFAULT false;
 ALTER TABLE garagebooks.onedrive_account ADD COLUMN IF NOT EXISTS signin_lost_at timestamptz;
 ALTER TABLE garagebooks.onedrive_account ADD COLUMN IF NOT EXISTS signin_checked_at timestamptz;
+
+-- Invoices by email: an Outlook.com mailbox folder per car, read with the OneDrive app registration.
+--   onedrive_account.mail_refresh_token  the mailbox's own sign-in (Mail.Read), encrypted like refresh_token;
+--                  a separate sign-in from the drive's, so it can be another account, and NULL = not connected
+--   mail_account / mail_signin_lost_at / mail_signin_checked_at: as account and signin_*_at, for the mailbox
+--   car_mail_folder  the folder each car's emailed invoices arrive in (where they come from, not where they
+--                  are kept: that stays car_folder). waiting / newest_at are what the mail job last found
+--                  not yet imported, so a notice can say so once per new email.
+--   mail_import    which emails (and which PDF in each) became which expense, by the email's link; an
+--                  expense that is deleted takes its row with it, and the email is offered again.
+ALTER TABLE garagebooks.onedrive_account ADD COLUMN IF NOT EXISTS mail_refresh_token text;
+ALTER TABLE garagebooks.onedrive_account ADD COLUMN IF NOT EXISTS mail_account text;
+ALTER TABLE garagebooks.onedrive_account ADD COLUMN IF NOT EXISTS mail_signin_lost_at timestamptz;
+ALTER TABLE garagebooks.onedrive_account ADD COLUMN IF NOT EXISTS mail_signin_checked_at timestamptz;
+CREATE TABLE IF NOT EXISTS garagebooks.car_mail_folder (
+    car_id      smallint PRIMARY KEY REFERENCES garagebooks.car (id) ON DELETE CASCADE,
+    folder_id   text NOT NULL CHECK (folder_id <> ''),
+    folder_path text NOT NULL,
+    waiting     integer CHECK (waiting IS NULL OR waiting >= 0),
+    newest_at   timestamptz,
+    checked_at  timestamptz
+);
+CREATE TABLE IF NOT EXISTS garagebooks.mail_import (
+    ref         text PRIMARY KEY CHECK (ref ~* '^https://[^[:space:]]+$' AND length(ref) <= 4000),
+    car_id      smallint NOT NULL REFERENCES garagebooks.car (id) ON DELETE CASCADE,
+    expense_id  bigint NOT NULL REFERENCES garagebooks.expense (id) ON DELETE CASCADE,
+    imported_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS mail_import_expense_idx ON garagebooks.mail_import (expense_id);

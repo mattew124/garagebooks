@@ -143,7 +143,7 @@ def pg():
 def admin(pg):
     """Superuser connection with a clean slate of expenses + TeslaMate stub data."""
     with pg.admin() as conn:
-        conn.execute("TRUNCATE garagebooks.expense, garagebooks.car_folder, garagebooks.onedrive_account,"
+        conn.execute("TRUNCATE garagebooks.expense, garagebooks.car_folder, garagebooks.car_mail_folder, garagebooks.onedrive_account,"
                      " garagebooks.learned_label, garagebooks.learned_vendor, garagebooks.import_skip,"
                      " garagebooks.odometer_reading, garagebooks.reminder RESTART IDENTITY CASCADE")
         if TESLAMATE:
