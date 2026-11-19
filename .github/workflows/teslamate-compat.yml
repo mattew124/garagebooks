@@ -6,8 +6,9 @@
 #     the next release candidate, which the Release workflow builds. scripts/auto_rc.py decides the tag,
 #     and only when it is unambiguous (see there); otherwise the pull request is left for the owner.
 # A stable release is never tagged here: the owner tests the candidate and tags it.
-# Needs Settings > Actions > "Allow GitHub Actions to create pull requests". Pushes and pull requests made
-# with the workflow token don't start other workflows, so CI and the release are started by dispatch.
+# Needs Settings > Actions > "Allow GitHub Actions to create pull requests". The pull request's CI runs wait
+# for approval (the bot is a first-time contributor), so the workflow approves them; a tag pushed with the
+# workflow token doesn't start the Release workflow, so that is started by dispatch.
 name: TeslaMate compatibility
 on:
   schedule:
@@ -71,11 +72,16 @@ jobs:
           gh pr create --base main --head "$branch" --title "Record TeslaMate $version as tested" \
               --body-file "$RUNNER_TEMP/pr-body.md" || gh pr view "$branch" --json url --jq .url
           [ -n "$tag" ] || exit 0
-          # CI on the branch: a dispatched run starts even though the push was made with the workflow token.
-          gh workflow run ci.yml --ref "$branch"
+          # The pull request's own CI runs wait for approval, as a first-time contributor's do (the workflow's
+          # bot is one), and main requires them. Approve them: this branch holds only what this run made.
+          for _ in $(seq 12); do
+              ids="$(gh run list --branch "$branch" --event pull_request --json databaseId,conclusion --jq '.[]|select(.conclusion=="action_required")|.databaseId')"
+              [ -n "$ids" ] && break
+              sleep 10
+          done
+          for id in $ids; do gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/approve" --silent; done
           sleep 30
-          run="$(gh run list --workflow ci.yml --branch "$branch" --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId')"
-          gh run watch "$run" --exit-status
+          gh pr checks "$branch" --watch --required
           gh pr merge "$branch" --squash --delete-branch
           sha="$(gh pr view "$branch" --json mergeCommit --jq .mergeCommit.oid)"
           git tag -a "$tag" -m "$tag" "$sha"
@@ -104,3 +110,11 @@ jobs:
               gh issue create --title "$title" --body "$body"
           fi
           exit 1
+      - name: Close the issue once it is resolved
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for n in $(gh issue list --state open --search '"Latest TeslaMate release needs attention" in:title' --json number --jq '.[].number'); do
+              gh issue close "$n" --comment "The latest TeslaMate release passed or has been recorded: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          done

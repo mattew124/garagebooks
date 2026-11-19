@@ -4,7 +4,6 @@ on:
     branches: [main]
   pull_request:
   workflow_call:
-  workflow_dispatch:   # the TeslaMate compatibility workflow starts it on the pull request it opens
 
 permissions:
   contents: read
