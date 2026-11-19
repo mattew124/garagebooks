@@ -42,9 +42,64 @@ document.addEventListener("DOMContentLoaded", () => {
     // A category that has a period (insurance, registration) shows its start and end dates.
     importForm.addEventListener("change", (e) => {
       if (!/^category_id_\d+$/.test(e.target.name || "")) return;
-      const fields = e.target.closest("tr").querySelector("[data-period-fields]");
+      const row = e.target.closest("tr");
+      const fields = row.querySelector("[data-period-fields]");
+      const services = row.querySelector("[data-service-fields]");
       const chosen = e.target.selectedOptions[0];
       if (fields) fields.hidden = !(chosen && chosen.dataset.period === "1");
+      if (services) services.hidden = !(chosen && chosen.dataset.service === "1");
+    });
+  }
+
+  // "Add an item" on an import row: a dialog that posts to the server and adds the item to every row's list,
+  // so nothing typed on the page is lost.
+  const serviceDialog = document.getElementById("service-dialog");
+  if (importForm && serviceDialog) {
+    const dialogForm = document.getElementById("service-dialog-form");
+    const dialogStatus = document.getElementById("service-dialog-status");
+    let opener = null;
+    importForm.addEventListener("click", (e) => {
+      const button = e.target.closest("[data-add-service]");
+      if (!button) return;
+      opener = button.closest("[data-service-fields]");
+      dialogForm.reset();
+      dialogStatus.textContent = "";
+      serviceDialog.showModal();
+      dialogForm.elements.name.focus();
+    });
+    document.getElementById("service-dialog-cancel").addEventListener("click", () => serviceDialog.close());
+    const addToRow = (fields, item, tick) => {
+      const list = fields.querySelector("[data-service-list]");
+      let box = [...list.querySelectorAll("input")].find((i) => i.value === String(item.id));
+      if (!box) {
+        const label = document.createElement("label");
+        label.className = "inline";
+        box = document.createElement("input");
+        box.type = "checkbox";
+        box.name = "service_item_" + fields.dataset.n;
+        box.value = item.id;
+        const text = document.createElement("small");
+        text.textContent = " " + item.name;
+        label.append(box, text);
+        list.append(label);
+      }
+      if (tick) box.checked = true;
+    };
+    dialogForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      dialogStatus.textContent = "Adding…";
+      try {
+        const res = await fetch(serviceDialog.dataset.serviceUrl, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: dialogForm.elements.name.value }),
+        });
+        const item = await res.json();
+        if (!res.ok) { dialogStatus.textContent = item.error || "Couldn't add it."; return; }
+        importForm.querySelectorAll("[data-service-fields]").forEach((f) => addToRow(f, item, f === opener));
+        serviceDialog.close();
+      } catch (err) {
+        dialogStatus.textContent = "Couldn't add it. Try again.";
+      }
     });
   }
 
@@ -758,6 +813,11 @@ document.addEventListener("DOMContentLoaded", () => {
     periodFields.hidden = !((chosen && chosen.dataset.period === "1") || form.elements.period_start.value || form.elements.period_end.value);
   };
   if (periodFields) form.elements.category_id.addEventListener("change", periodShown);
+  const serviceFields = document.getElementById("service-fields");
+  if (serviceFields) form.elements.category_id.addEventListener("change", () => {
+    const chosen = form.elements.category_id.selectedOptions[0];
+    serviceFields.hidden = !(chosen && chosen.dataset.service === "1");
+  });
   // Fill the form from what /api/prefill read in a PDF; `body` is the form data to send it.
   async function prefillFrom(body) {
     prefillHint.textContent = "Reading the invoice…";

@@ -913,3 +913,39 @@ BEGIN
         ALTER TABLE garagebooks.category ENABLE TRIGGER log_change;
     END IF;
 END $$;
+
+-- Services: the Service category, and the items a service covered (fuel filter, brake fluid...), chosen per
+-- expense. The list is the owner's to edit on the Categories page, so it is seeded once, when the table is
+-- made: running this file again never brings back an item that was removed. An item's name is unique ignoring
+-- case. Removing an item unlinks it from the expenses that had it; renaming keeps the links.
+--   service_item          the list
+--   expense_service_item  which items an expense had
+--   expense_service       one row per expense and item, with what Grafana needs to chart or tabulate them
+DO $$
+BEGIN
+    IF to_regclass('garagebooks.service_item') IS NULL THEN
+        CREATE TABLE garagebooks.service_item (
+            id         smallserial PRIMARY KEY,
+            name       text NOT NULL CHECK (btrim(name) <> '' AND length(name) <= 60),
+            sort_order integer NOT NULL DEFAULT 100
+        );
+        INSERT INTO garagebooks.service_item (name, sort_order) VALUES
+            ('Fuel filter', 10), ('Oil filter', 20), ('Engine oil', 30), ('Tyre rotation', 40),
+            ('Windscreen washer fluid', 50), ('Windscreen wipers', 60), ('Brakes', 70), ('Brake fluid', 80),
+            ('Timing belt', 90), ('Air filter', 91), ('Coolant', 92), ('Cabin air filter', 93);
+    END IF;
+END $$;
+CREATE UNIQUE INDEX IF NOT EXISTS service_item_name_key ON garagebooks.service_item (lower(name));
+CREATE TABLE IF NOT EXISTS garagebooks.expense_service_item (
+    expense_id bigint   NOT NULL REFERENCES garagebooks.expense (id) ON DELETE CASCADE,
+    item_id    smallint NOT NULL REFERENCES garagebooks.service_item (id) ON DELETE CASCADE,
+    PRIMARY KEY (expense_id, item_id)
+);
+CREATE INDEX IF NOT EXISTS expense_service_item_item_idx ON garagebooks.expense_service_item (item_id);
+INSERT INTO garagebooks.category (name, kind, sort_order) VALUES ('Service', 'running', 85)
+ON CONFLICT (name) DO NOTHING;
+CREATE OR REPLACE VIEW garagebooks.expense_service AS
+    SELECT e.id AS expense_id, e.car_id, e.occurred_at, e.amount, e.vendor, e.odometer_km, i.id AS item_id, i.name AS item
+    FROM garagebooks.expense_service_item l
+    JOIN garagebooks.expense e ON e.id = l.expense_id
+    JOIN garagebooks.service_item i ON i.id = l.item_id;

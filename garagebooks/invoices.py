@@ -388,6 +388,21 @@ def _by_labels(text, field, labels):
     return ("one", next(iter(values))) if len(values) == 1 else ("many", None)
 
 
+def service_items_in(text, names):
+    """The service items (by name, in the order of `names`'s first appearance in the text) the text mentions.
+    Whole words, any case; the longest names are matched first and removed, so 'Cabin air filter' doesn't also
+    tick 'Air filter'."""
+    low = text.lower()
+    found = []
+    for name in sorted(names, key=len, reverse=True):
+        pattern = re.compile(r"\b" + re.escape(name.lower()) + r"\b")
+        m = pattern.search(low)
+        if m:
+            found.append((m.start(), name))
+            low = pattern.sub(lambda hit: " " * len(hit.group(0)), low)
+    return [name for _, name in sorted(found)]
+
+
 # ---- what a row can say beyond the basics: skip, notes, the period covered, the issuing authority -------
 
 # Words that make a document an invoice, receipt, notice or policy: without one (and without an amount) it

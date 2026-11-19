@@ -38,6 +38,16 @@
     PDF (never the value), and which category a vendor's invoices get. After {{ learn_after }} confirmations it uses them for
     later guesses. <a href="{{ url_for('learned_page') }}">See and remove what it has learned</a>.</small></p>
 </form>
+<dialog id="service-dialog" aria-labelledby="service-dialog-title" class="picker" data-service-url="{{ url_for('api_service_items') }}">
+  <h2 id="service-dialog-title">Add a service item</h2>
+  <form id="service-dialog-form" class="stack">
+    <label>Name <input name="name" maxlength="60" required autocomplete="off" placeholder="e.g. Spark plugs"></label>
+    <p id="service-dialog-status" role="status"></p>
+    <div class="row"><button type="submit" class="button">Add</button>
+      <button type="button" id="service-dialog-cancel" class="secondary">Cancel</button></div>
+  </form>
+  <p><small>The item is added to the list on every row below. Nothing else on this page changes.</small></p>
+</dialog>
 {% if skipped %}
 <form method="post" action="{{ url_for(kind ~ '_import_unskip', car_id=car.id) }}"><p><small>{{ skipped }} skipped file{{ '' if skipped == 1 else 's' }} not shown.
   <button type="submit" class="linklike">Offer {{ 'it' if skipped == 1 else 'them' }} again</button></small></p></form>

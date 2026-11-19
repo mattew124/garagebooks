@@ -89,10 +89,19 @@
   <label>Category
     <select name="category_id" required>
       <option value="">Choose…</option>
-      {% for c in categories %}<option value="{{ c.id }}" data-period="{{ 1 if c.has_period else 0 }}" {{ 'selected' if values.category_id|string == c.id|string }}>{{ c.name }}</option>{% endfor %}
+      {% for c in categories %}<option value="{{ c.id }}" data-period="{{ 1 if c.has_period else 0 }}" data-service="{{ 1 if c.name == 'Service' else 0 }}" {{ 'selected' if values.category_id|string == c.id|string }}>{{ c.name }}</option>{% endfor %}
     </select>{{ err('category_id') }}
     <small><a href="{{ url_for('categories') }}">Need another category?</a></small>
   </label>
+
+  {# What a service covered: shown by app.js while the category is Service. Items are edited on the Categories page. #}
+  {% set service_on = (categories|selectattr('id', 'equalto', values.get('category_id', 0)|int(0))|selectattr('name', 'equalto', 'Service')|list) %}
+  <fieldset class="service-items" id="service-fields" {{ '' if service_on else 'hidden' }}>
+    <legend>Service items</legend>
+    {% for i in service_items() %}<label class="inline"><input type="checkbox" name="service_item" value="{{ i.id }}" {{ 'checked' if i.id|string in values.get('service_item', []) }}> <span>{{ i.name }}</span></label>
+    {% endfor %}
+    <small><a href="{{ url_for('categories') }}">Add or rename items</a></small>
+  </fieldset>
 
   <div class="row">
     <label>Date <input type="date" name="date" value="{{ values.date }}" required>{{ err('date') }}</label>

@@ -323,6 +323,70 @@ def set_has_period(conn, category_id, has_period):
                         (bool(has_period), category_id)).rowcount == 1
 
 
+SERVICE_CATEGORY = "Service"
+
+
+def service_items(conn):
+    return conn.execute("SELECT id, name FROM garagebooks.service_item ORDER BY sort_order, lower(name)").fetchall()
+
+
+def service_item(conn, item_id):
+    return conn.execute("SELECT id, name FROM garagebooks.service_item WHERE id = %s", (item_id,)).fetchone()
+
+
+def service_item_named(conn, name):
+    return conn.execute("SELECT id, name FROM garagebooks.service_item WHERE lower(name) = lower(%s)", (name,)).fetchone()
+
+
+def add_service_item(conn, name):
+    """The new item, or None if the name exists (ignoring case)."""
+    return conn.execute("INSERT INTO garagebooks.service_item (name) VALUES (%s) ON CONFLICT DO NOTHING "
+                        "RETURNING id, name", (name,)).fetchone()
+
+
+def rename_service_item(conn, item_id, name):
+    """True when renamed; None if the name belongs to another item; False if there is no such item."""
+    clash = conn.execute("SELECT 1 FROM garagebooks.service_item WHERE lower(name) = lower(%s) AND id <> %s",
+                         (name, item_id)).fetchone()
+    if clash:
+        return None
+    return conn.execute("UPDATE garagebooks.service_item SET name = %s WHERE id = %s", (name, item_id)).rowcount == 1
+
+
+def delete_service_item(conn, item_id):
+    return conn.execute("DELETE FROM garagebooks.service_item WHERE id = %s", (item_id,)).rowcount == 1
+
+
+def set_expense_services(conn, expense_id, item_ids):
+    """Replace an expense's service items with `item_ids`."""
+    conn.execute("DELETE FROM garagebooks.expense_service_item WHERE expense_id = %s", (expense_id,))
+    for item_id in sorted(set(item_ids)):
+        conn.execute("INSERT INTO garagebooks.expense_service_item (expense_id, item_id) VALUES (%s, %s) "
+                     "ON CONFLICT DO NOTHING", (expense_id, item_id))
+
+
+def expense_services(conn, expense_ids=None):
+    """-> {expense_id: [item names in list order]}, for some expenses or all."""
+    got = {}
+    for r in conn.execute(
+            "SELECT l.expense_id, i.name FROM garagebooks.expense_service_item l "
+            "JOIN garagebooks.service_item i ON i.id = l.item_id "
+            "WHERE (%(ids)s::bigint[] IS NULL OR l.expense_id = ANY(%(ids)s)) ORDER BY i.sort_order, lower(i.name)",
+            {"ids": None if expense_ids is None else list(expense_ids)}):
+        got.setdefault(r["expense_id"], []).append(r["name"])
+    return got
+
+
+def service_category_id(conn):
+    row = conn.execute("SELECT id FROM garagebooks.category WHERE name = %s", (SERVICE_CATEGORY,)).fetchone()
+    return row["id"] if row else None
+
+
+def expense_service_ids(conn, expense_id):
+    return [r["item_id"] for r in conn.execute(
+        "SELECT item_id FROM garagebooks.expense_service_item WHERE expense_id = %s", (expense_id,))]
+
+
 def add_category(conn, name):
     """Returns the id, or None if the name already exists (case-insensitive)."""
     existing = conn.execute(

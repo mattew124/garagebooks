@@ -296,6 +296,33 @@ def parse_category_name(raw):
     return name
 
 
+MAX_SERVICE_ITEM_LEN = 60
+
+
+def parse_service_item_name(raw):
+    name = " ".join((raw or "").split())
+    if not name:
+        raise ValueError("Enter a name for the item.")
+    if "\x00" in name:
+        raise ValueError("The name can't contain that character.")
+    if len(name) > MAX_SERVICE_ITEM_LEN:
+        raise ValueError(f"The name is too long (max {MAX_SERVICE_ITEM_LEN} characters).")
+    return name
+
+
+def parse_service_ids(raw_ids, valid_ids):
+    """Item ids ticked on a form: those that are real items, once each. Anything else is ignored (a stale page)."""
+    got = []
+    for raw in raw_ids:
+        try:
+            number = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if number in valid_ids and number not in got:
+            got.append(number)
+    return got
+
+
 MAX_CAR_NAME_LEN = 100
 MAX_CAR_TEXT_LEN = 60
 
