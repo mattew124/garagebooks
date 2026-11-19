@@ -32,6 +32,10 @@ Grafana dashboard (`grafana/`). See README.md and `docs/`, the documentation sit
   `.garagebooks` marker is an unmounted share: read and write nothing in it.
 - No TeslaMate schema or code is committed (TeslaMate is AGPL-3.0, this repository MIT). Tests and the dev stack
   get its tables by running the real `teslamate/teslamate` image's migrations; never add a copy of its DDL.
+- Reuse before you build: a page that shows what another page shows renders that page's partial and query
+  (the expense list is `_expense_list.html` built by `list_context()`), and the shared code gains the feature, so
+  both places have it. Never copy a list, filter or table into a second template. See "Reuse before you build"
+  in `docs/development.md`.
 - Write the failing test first, then the fix. Australian English in docs and UI.
 - Linter findings: fix the code if a small change removes the finding (a clearer name, say). If it's
   a reviewed exception, excuse that one line and give the reason: `# nosec B603 - why` or

@@ -7,6 +7,39 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+**Signed requests to the claims connector.** Set `CLAIMS_CONNECTOR_KEY_FILE` to an Ed25519 private key (PEM) and
+every request to the claims connector carries a fresh, short-lived signed token instead of a shared secret, so only
+GarageBooks holds a secret and the connector keeps public keys. Nothing to do on upgrade: `CLAIMS_CONNECTOR_TOKEN`
+and `CLAIMS_CONNECTOR_TOKEN_FILE` still work while no key file is set, but are deprecated, and the app logs a
+warning at start while one is used. To switch, make a key pair, give the connector the public key, set the key file
+and remove the token settings. The token format is in [Claims connector](docs/claims-connector.md#authorising-requests)
+for anyone writing a connector. In the dev stack, `DEV_CLAIMS_CONNECTOR_KEY_FILE` replaces
+`DEV_CLAIMS_CONNECTOR_TOKEN`.
+
+**Claims page as a ledger.** Nothing to do on upgrade. The Claims page now reuses the All page's expense list,
+which gains car and date filters, and shows where each expense stands on claiming (or why it can't be claimed),
+with whether the provider has reimbursed a claim in full, including part payments. It also shows whether the
+provider is signed in (with a Sign in button) and keeps a copy of the provider's claim and transaction history
+(**Sync provider history**), tied to the expenses through claims. Needs a connector that answers
+`POST /v1/transactions` (protocol v1, [documented](docs/claims-connector.md)). Installers on the restricted
+database role re-run `scripts/provision-db.sh` first.
+
+**Claiming expenses from the salary packaging provider.** Nothing to do on upgrade: the app adds the new
+table itself, and the feature stays off until you set `CLAIMS_CONNECTOR_URL`. Installers on the
+restricted database role re-run `scripts/provision-db.sh` first. The container's web server timeout
+moves from 120 s to 180 s, and now comes from `gunicorn.conf.py` rather than the command line.
+
+- **Claims connector.** With `CLAIMS_CONNECTOR_URL` (and `CLAIMS_CONNECTOR_TOKEN` or
+  `CLAIMS_CONNECTOR_TOKEN_FILE`) set, an expense in one of the provider's claimable budget pools, on a car
+  with a lease covering its date, has a **Claim** link. The page asks a separate connector service what
+  would be claimed, shows it with any warnings, asks for what the provider needs (and the provider's
+  sign-in code when it has signed out), and submits when you confirm. The claim is kept against the
+  expense, shown as a badge with its reference and status, and listed on a new **Claims** page, where
+  **Refresh claim statuses** brings the provider's status, approved amount and paid date up to date. A
+  claimed expense can't be deleted until its claim record is removed. The protocol is on the new
+  [Claims connector](docs/claims-connector.md) page, so anyone can write a connector. This is the
+  "claimed" part of roadmap item L3.
+
 ## 0.4.0-rc3 - 2026-11-19
 
 **TeslaMate 4.5.0.** Tested with TeslaMate 4.5.0 (it was 4.4.0). Nothing to do on upgrade: pull the new image. A TeslaMate database up to that release no longer has its figures held back.

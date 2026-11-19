@@ -25,6 +25,12 @@ x-dev-app: &dev-app
       target: /invoices
       bind:
         create_host_path: false   # as in production: scripts/dev.sh makes it, Docker never does
+    - type: bind
+      source: ${DEV_CLAIMS_KEY_SOURCE:-./.dev/claims/stand-in.key}
+      target: /run/claims/connector.key
+      read_only: true
+      bind:
+        create_host_path: false
   depends_on:
     dev-db:
       condition: service_healthy
@@ -53,6 +59,12 @@ x-dev-environment: &dev-environment
   INVOICES_HOST_DIR: ${DEV_INVOICES_SHOWN:-}
   # As docker-compose.invoices.yml: stop rather than run without the invoice folder.
   INVOICES_REQUIRED: "1"
+  # Claiming is on in dev, against a stand-in connector with invented answers (tests/fake_connector.py,
+  # below); DEV_CLAIMS_CONNECTOR_URL in dev.env points it at a connector of your own instead.
+  CLAIMS_CONNECTOR_URL: ${DEV_CLAIMS_CONNECTOR_URL:-http://dev-claims-connector:8765}
+  # Every request is signed with this private key (scripts/dev.sh makes a new pair for the stand-in at each
+  # start; DEV_CLAIMS_CONNECTOR_KEY_FILE in dev.env supplies your own for a real connector).
+  CLAIMS_CONNECTOR_KEY_FILE: /run/claims/connector.key
 
 services:
   garagebooks-dev:
@@ -82,6 +94,29 @@ services:
       SCHEDULER: worker
     healthcheck:
       disable: true
+
+  # A stand-in claims connector: answers the protocol in docs/claims-connector.md from memory, with invented
+  # values, and never talks to a provider. It reuses the app's image (Python is all it needs), and the
+  # browser tests change what it answers through POST /_fake/config. Reachable only on this stack's network.
+  dev-claims-connector:
+    image: ${GARAGEBOOKS_IMAGE:-garagebooks:${DEV_TAG:-dev}}
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    user: "${DEV_UID:-10001}:${DEV_GID:-10001}"
+    entrypoint: ["python3", "/fake_connector.py", "8765"]
+    environment:
+      FAKE_CONNECTOR_KEYS_DIR: /claims-keys    # public keys only; it reads them again at each request
+    volumes:
+      - ./tests/fake_connector.py:/fake_connector.py:ro
+      - type: bind
+        source: ./.dev/claims/keys
+        target: /claims-keys
+        read_only: true
+        bind:
+          create_host_path: false
+    networks: [dev]
 
   # The dashboard volume belongs to whoever wrote it first (root when new, 10001 from an earlier
   # run), and the app replaces its dashboard file there on every start: hand it to the app's user.

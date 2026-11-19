@@ -81,7 +81,7 @@ The argument is the time zone that decides which lease covers an expense's date.
 ## Change history
 
 A trigger in the `garagebooks` schema writes a row to `garagebooks.change_log` for every insert, update
-and delete of an expense or a category, with the time, the whole row before and after (as JSON) and who
+and delete of an expense, a category or a recorded [claim](claims-connector.md#what-the-app-stores), with the time, the whole row before and after (as JSON) and who
 made the change. Because it is in the database, changes made by other tools straight in the database
 are recorded too. An update that changes nothing (saving a form untouched) is not recorded. The log is
 append-only: a second trigger refuses any update, delete or truncate of it, and the restricted database
@@ -99,6 +99,13 @@ Set it **only** when the proxy removes that header from requests it receives fro
 sets it itself, as the gates above do: otherwise anyone who can reach the app can put any name in the
 log. The value is trimmed to 200 characters, with control characters dropped. Changes made outside the
 app have no name either way.
+
+## Claims connector
+
+`CLAIMS_CONNECTOR_URL` (with `CLAIMS_CONNECTOR_KEY_FILE`, a private key file that signs each request; the
+shared `CLAIMS_CONNECTOR_TOKEN` and `CLAIMS_CONNECTOR_TOKEN_FILE` are deprecated) turns on claiming expenses from a salary packaging provider through a separate connector
+service. Unset, the feature is invisible and its addresses answer 404. The settings, what the connector
+is sent and the protocol it speaks are on the [Claims connector](claims-connector.md) page.
 
 ## Timezone
 

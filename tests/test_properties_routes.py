@@ -17,8 +17,9 @@ import pytest
 from hypothesis import given, settings, strategies as st
 from psycopg.rows import dict_row
 
-from garagebooks import create_app, validation as v
+from garagebooks import claims, create_app, validation as v
 from tests import test_onedrive as od
+from tests.fake_connector import TOKEN, Fake
 from tests.test_app import ORIGIN
 from tests.test_validation import PDF
 
@@ -110,13 +111,18 @@ def world(pg, tmp_path_factory):
         mp.setenv("APP_TZ", "Australia/Brisbane")
         mp.setenv("INVOICES_DIR", str(root))
         mp.setenv("GARAGEBOOKS_ENCRYPTION_KEY", od.KEY)
+        fake = Fake()          # the claims connector, so the claim routes are on
+        mp.setenv("CLAIMS_CONNECTOR_URL", fake.start())
+        mp.setenv("CLAIMS_CONNECTOR_TOKEN", TOKEN)
         app = create_app(connect=lambda: psycopg.connect(pg.app_url, row_factory=dict_row), onedrive_transport=ms,
                          notify_send=lambda *args, **kw: None)       # no request ever leaves a test
         app.testing = True
         w = World(pg, app, ms, root)
+        w.fake = fake
         try:
             yield w
         finally:
+            fake.stop()
             w.reset()           # leave the shared tables as the other modules expect them
             w.db.execute("TRUNCATE garagebooks.car_folder, garagebooks.onedrive_account")
             w.db.close()
@@ -490,3 +496,41 @@ def test_onedrive_connect_and_disconnect(world):
     client = world.prepare()
     assert client.post("/onedrive/connect", headers=ORIGIN).status_code in OK
     assert client.post("/onedrive/disconnect", headers=ORIGIN).status_code in OK
+
+
+# ---- claims -----------------------------------------------------------------------------------
+
+claim_value = st.one_of(text, st.sampled_from(["100.00", "12.345", "2026-11-07", "$1,000", "NaN", "1e400"]))
+claim_form = st.fixed_dictionaries({}, optional={f"field_{key}": claim_value for key in (*claims.FIELD_KEYS, "gst", "bogus")})
+
+
+@EXAMPLES
+@given(claim_form, st.sampled_from(["", "/submit"]))
+def test_the_claim_forms_send_the_connector_only_known_clean_fields(world, form, action):
+    client = world.prepare() if world.client is None else world.client
+    world.reset()
+    world.fake.reset()
+    world.db.execute("INSERT INTO garagebooks.lease (car_id, financier, start_date, end_date, term_months, pay_frequency)"
+                     " VALUES (1, 'Example Finance', '2026-01-01', '2029-01-01', 36, 'weekly')")
+    try:
+        expense_id = world.seed_expense(invoice_path="/Cars/Test car/a.pdf")
+        resp = client.post(f"/{expense_id}/claim{action}", data=form, headers=ORIGIN)
+        assert resp.status_code in OK
+        for _, path, _, body in world.fake.calls:
+            if path in ("/v1/preview", "/v1/submit"):
+                sent = body["expense"]["fields"]
+                assert set(sent) <= {*claims.FIELD_KEYS, "gst"}
+                assert all(isinstance(x, str) and 0 < len(x) <= claims.FIELD_LIMIT for x in sent.values())
+                assert "gst" not in sent or float(sent["gst"]) >= 0
+        assert world.db.execute("SELECT count(*) AS n FROM garagebooks.expense_claim").fetchone()["n"] <= 1
+    finally:
+        world.db.execute("DELETE FROM garagebooks.lease")
+
+
+@EXAMPLES
+@given(text, st.sampled_from(["/claims/signin/code", "/claims/signin", "/claims/refresh", "/claims"]), st.sampled_from(["GET", "POST"]))
+def test_the_claims_routes_answer_anything(world, value, path, method):
+    client = world.prepare() if world.client is None else world.client
+    world.fake.reset()
+    resp = client.open(path, method=method, data={"code": value}, headers=ORIGIN)
+    assert resp.status_code in OK | {405}

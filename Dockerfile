@@ -43,5 +43,5 @@ USER 10001:10001
 EXPOSE 8080
 # Root filesystem is read-only: heartbeat file goes to tmpfs, and the control
 # socket (unused, defaults to $HOME) is switched off.
-CMD ["gunicorn", "-c", "/srv/gunicorn.conf.py", "--bind", "0.0.0.0:8080", "--workers", "2", "--timeout", "120", "--worker-tmp-dir", "/dev/shm", "--no-control-socket", \
+CMD ["gunicorn", "-c", "/srv/gunicorn.conf.py", "--bind", "0.0.0.0:8080", "--workers", "2", "--worker-tmp-dir", "/dev/shm", "--no-control-socket", \
      "--access-logfile", "-", "garagebooks:create_app()"]
