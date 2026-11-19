@@ -129,6 +129,77 @@ def test_a_connector_error_on_sync_is_shown_and_keeps_the_cache(client, admin, f
     assert "site is down" in page and len(stored(admin)) == 1
 
 
+# ---- fetching only what is new, in the background -----------------------------------------------------------
+
+def asked_since(fake):
+    return last_call(fake, "/v1/transactions")[3].get("since")
+
+
+def wait_idle(admin, seconds=20):
+    import time
+    for _ in range(int(seconds * 20)):
+        row = admin.execute("SELECT state FROM garagebooks.provider_sync WHERE id = 1").fetchone()
+        if row["state"] == "idle":
+            return
+        time.sleep(0.05)
+    raise AssertionError("the sync never finished")
+
+
+def test_the_first_sync_goes_back_to_the_first_expense_then_only_the_last_months(client, admin, fake):
+    lease(admin)
+    expense(admin, at="2026-03-10 04:00+00")
+    sync(client, fake)
+    assert asked_since(fake) == "2026-02-08"                       # a month before the earliest expense
+    sync(client, fake, tx("T1", day="2026-11-07"), claims=[line(day="2026-11-01")])
+    sync(client, fake, tx("T1", day="2026-11-07"))
+    assert asked_since(fake) == "2026-08-09"                       # 90 days before the newest thing it holds
+    client.post("/claims/sync", data={"full": "1"}, headers=ORIGIN)
+    assert asked_since(fake) == "2026-02-08"                       # a full resync starts again
+
+
+def test_a_catch_up_sync_leaves_the_older_history_alone(client, admin, fake):
+    lease(admin)
+    expense(admin, at="2026-01-10 04:00+00")
+    sync(client, fake, tx("OLD", day="2026-01-15"), tx("NEW", day="2026-11-07"), claims=[line("P1", day="2026-01-12"), line("P2", line_id="L2", day="2026-11-01")])
+    sync(client, fake, tx("NEW", day="2026-11-07"), claims=[line("P2", line_id="L2", day="2026-11-01")])   # asked from 90 days back
+    assert {r["provider_id"] for r in stored(admin)} == {"OLD", "NEW"} and {c["provider_id"] for c in lines(admin)} == {"P1", "P2"}
+
+
+def test_the_real_app_syncs_in_the_background_and_the_page_shows_it(client, admin, fake, tyres):
+    client.application.testing = False
+    fake.config["transactions"] = [tx("T1")]
+    resp = client.post("/claims/sync", headers=ORIGIN)
+    assert resp.status_code == 303 and "msg=claims_sync_started" in resp.headers["Location"]
+    wait_idle(admin)
+    assert [r["provider_id"] for r in stored(admin)] == ["T1"]
+    state = client.get("/claims/sync/status").get_json()
+    assert state == {"running": False, "outcome": "synced", "message": None}
+
+
+def test_a_running_sync_shows_and_blocks_another(client, admin, fake):
+    admin.execute("UPDATE garagebooks.provider_sync SET state = 'running', started_at = now(), since = '2026-01-01'")
+    page = said(client.get("/claims"))
+    assert 'id="sync-running"' in page and "Syncing the provider's history from 01 Jan 2026" in page and "disabled" in page
+    assert client.get("/claims/sync/status").get_json()["running"] is True
+    assert "msg=claims_sync_running" in client.post("/claims/sync", headers=ORIGIN).headers["Location"]
+    assert not [c for c in fake.calls if c[1] == "/v1/transactions"]
+    admin.execute("UPDATE garagebooks.provider_sync SET started_at = now() - interval '1 hour'")   # it died with its worker
+    sync(client, fake, tx("T1"))
+    assert len(stored(admin)) == 1
+
+
+def test_a_background_sync_that_fails_says_so_and_a_signed_out_one_offers_the_sign_in(client, admin, fake):
+    client.application.testing = False
+    fake.config["override"] = {"transactions": (502, {"ok": False, "error": "The provider's site is down."})}
+    client.post("/claims/sync", headers=ORIGIN)
+    wait_idle(admin)
+    assert "The last sync didn't finish: The provider's site is down." in said(client.get("/claims"))
+    fake.config["override"] = {"transactions": (409, {"ok": False, "needs": "signin"})}
+    client.post("/claims/sync", headers=ORIGIN)
+    wait_idle(admin)
+    assert 'id="claim-signin"' in said(client.get("/claims"))
+
+
 # ---- claims to expenses, payments to claims -------------------------------------------------------------
 
 def test_a_claim_made_from_the_app_is_the_expenses_claim_and_its_payments_follow_it(client, admin, fake, tyres):
@@ -203,6 +274,61 @@ def test_removing_a_claim_record_rematches(client, admin, fake, tyres):
     client.post(f"/{tyres}/claim/forget", headers=ORIGIN)
     assert lines(admin)[0]["expense_id"] is None and stored(admin)[0]["expense_id"] is None
     assert f"/{tyres}/claim" in said(client.get("/claims"))
+
+
+# ---- the provider dates things its own way ------------------------------------------------------------------
+
+def test_a_claim_dated_a_few_days_off_still_matches_when_amount_and_car_are_unambiguous(client, admin, fake):
+    lease(admin)
+    a = expense(admin, amount="1556.00", at="2026-10-24 04:00+00")
+    sync(client, fake, claims=[line("P1", amount=1556.0, day="2026-10-22")])
+    assert lines(admin)[0]["expense_id"] == a
+
+
+def test_the_same_day_wins_and_look_alikes_are_left_unmatched(client, admin, fake):
+    lease(admin)
+    a = expense(admin, amount="80.00", at="2026-11-05 04:00+00")
+    b = expense(admin, amount="80.00", at="2026-11-08 04:00+00")
+    sync(client, fake, claims=[line("P1", amount=80.0, day="2026-11-05")])
+    assert lines(admin)[0]["expense_id"] == a                                  # the exact day first
+    admin.execute("DELETE FROM garagebooks.expense WHERE id = %s", (a,))
+    expense(admin, amount="80.00", at="2026-11-12 04:00+00")
+    sync(client, fake, claims=[line("P1", amount=80.0, day="2026-11-10")])
+    assert lines(admin)[0]["expense_id"] is None                               # two fit: no guessing
+    assert b                                                                   # (kept: the second expense exists)
+
+
+def test_a_claim_more_than_a_month_off_is_not_matched(client, admin, fake):
+    lease(admin)
+    expense(admin, amount="1556.00", at="2026-10-24 04:00+00")
+    sync(client, fake, claims=[line("P1", amount=1556.0, day="2026-11-25")])
+    assert lines(admin)[0]["expense_id"] is None
+
+
+def test_a_payment_the_provider_made_itself_matches_by_nearby_day_and_roughly_the_amount(client, admin, fake):
+    lease(admin)
+    rego = expense(admin, category="Registration", amount="716.00", at="2026-11-21 04:00+00")
+    sync(client, fake, tx("R1", kind="direct_payment", amount=772.93, day="2026-11-29", description="Registration Renewal Program"))
+    assert stored(admin)[0]["expense_id"] == rego
+    row = re.sub(r"\s+", " ", row_of(said(client.get("/claims")), "expense", str(rego)))
+    assert 'data-state="claimed"' in row and "Paid by the provider directly" in row and "Registration Renewal Program" in row
+    assert f"/{rego}/claim" not in row
+
+
+def test_a_direct_payment_too_far_off_in_time_or_amount_is_not_matched(client, admin, fake):
+    lease(admin)
+    expense(admin, category="Registration", amount="716.00", at="2026-11-21 04:00+00")
+    sync(client, fake, tx("R1", kind="direct_payment", amount=772.93, day="2026-12-20"), tx("R2", kind="direct_payment", amount=1100.0, day="2026-11-22"))
+    assert [r["expense_id"] for r in stored(admin)] == [None, None]
+
+
+def test_deductions_and_other_rows_are_not_flagged_and_stay_out_of_the_default_list(client, admin, fake):
+    sync(client, fake, tx("D1", kind="other", amount=253.3), tx("P9", amount=5.0))
+    page = said(client.get("/claims"))
+    assert row_of(page, "tx", "P9") and not row_of(page, "tx", "D1")
+    assert not row_of(said(client.get("/claims?tx=unmatched")), "tx", "D1")
+    other = said(client.get("/claims?tx=other"))
+    assert "Not a claim" in row_of(other, "tx", "D1") and "No matching expense" not in row_of(other, "tx", "D1")
 
 
 # ---- is the claim fully reimbursed? ---------------------------------------------------------------------

@@ -247,6 +247,12 @@ optional (`YYYY-MM-DD`), and a connector picks its own period, such as three yea
   tie to one claim has `null`.
 - `car_id` is one of the `cars` ids, or `null` when the connector can't tell.
 
+The provider's own site is slow (years of history take minutes), so GarageBooks asks from a `since` date, waits up
+to 15 minutes, and runs the sync in the background: the first one goes back to a month before your earliest expense,
+and later ones only fetch from 90 days before the newest thing it already holds (the **Full resync** button starts
+again from the beginning). A sync replaces its copy of that period only, so older history is kept. A connector should
+answer as quickly as it can, and may leave out `other` transactions it can't link to anything.
+
 Errors are as for preview (409 `needs: signin` offers the sign-in below). Each sync replaces GarageBooks's copy with the answer (a transaction or claim the connector no longer reports is dropped). GarageBooks keeps what it is told in its
 own database (`garagebooks.provider_claim` and `garagebooks.provider_transaction`), so its page can be filtered and
 still opens when the connector is down.

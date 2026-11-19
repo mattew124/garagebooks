@@ -8,6 +8,19 @@ document.addEventListener("DOMContentLoaded", () => {
       setTimeout(() => form.querySelectorAll("button[type=submit]").forEach((b) => (b.disabled = true)), 0);
     }));
 
+  // A sync running in the background: look every few seconds, and reload the page when it has finished.
+  const running = document.getElementById("sync-running");
+  if (running) {
+    const look = async () => {
+      try {
+        const state = await (await fetch(running.dataset.statusUrl)).json();
+        if (!state.running) { window.location.assign(window.location.pathname); return; }
+      } catch (e) { /* try again */ }
+      setTimeout(look, 4000);
+    };
+    setTimeout(look, 4000);
+  }
+
   const box = document.getElementById("claim-signin");
   if (!box) return;
   const message = box.querySelector("[data-signin-message]");

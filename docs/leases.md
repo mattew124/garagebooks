@@ -172,7 +172,9 @@ category has no claimable pool, it is a refund, or no lease covers its date). **
 provider's own transaction list says, with the expense each payment belongs to (through its claim, so part
 payments work), or **No matching expense**. The one exception is an electric car's per-kilometre charging
 reimbursement, which has no expense. **Sync provider history** fetches the claims and transactions through the
-connector and keeps a copy in the database; **Refresh claim statuses** asks the provider about each claim that
+connector and keeps a copy in the database. The provider's site is slow, so it runs in the background (the page shows
+it and updates itself), and after the first sync it only fetches what is new (**Full resync** goes back to your first
+expense). **Refresh claim statuses** asks the provider about each claim that
 isn't yet marked paid. A claimed expense can't be deleted by mistake: remove its claim record first (Edit, then
 **Remove claim record**), which doesn't cancel the claim at the provider.
 

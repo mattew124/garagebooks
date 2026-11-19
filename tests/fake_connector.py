@@ -121,7 +121,7 @@ class Fake:
                 return 409, {"ok": False, "error": "Not signed in to the provider.", "needs": "signin"}
             since, until = body.get("since") or "0000-00-00", body.get("to") or "9999-99-99"
             keep = [t for t in cfg["transactions"] if not isinstance(t, dict) or since <= str(t.get("date")) <= until]
-            return 200, {"ok": True, "provider": PROVIDER, "transactions": keep, "claims": cfg["claims"]}
+            return 200, {"ok": True, "provider": PROVIDER, "transactions": keep, "claims": [c for c in cfg["claims"] if not isinstance(c, dict) or str(c.get("date")) >= since]}
         if method == "POST" and path in ("/v1/preview", "/v1/submit"):
             return self.claim(path.rsplit("/", 1)[1], body)
         return 404, {"ok": False, "error": "no such call"}
