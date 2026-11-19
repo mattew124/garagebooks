@@ -71,7 +71,7 @@ see [Setup](https://mattew124.github.io/garagebooks/setup/).
 
 ## TeslaMate version
 
-Tested with TeslaMate 4.4.0. TeslaMate has no stable database schema, so on a database from a
+Tested with TeslaMate 4.5.0. TeslaMate has no stable database schema, so on a database from a
 newer TeslaMate than that the app leaves TeslaMate's odometer and charging figures out, and says
 so, rather than showing wrong numbers; everything you entered carries on
 (`ALLOW_UNTESTED_TESLAMATE=1` uses them anyway). A daily check tests each new TeslaMate release.
