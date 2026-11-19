@@ -885,10 +885,12 @@ def test_onedrive_page(page):
     page.goto(UI + "storage")
     expect(page.locator("h1")).to_have_text("Invoice storage")
     expect(page.locator("#onedrive h2")).to_have_text("OneDrive")
+    expect(page.locator("#microsoft h2")).to_have_text("Microsoft account")   # the registration OneDrive and the mailbox share
+    expect(page.locator("#mail h2")).to_have_text("Invoices by email")
     expect(page.locator("#cars h2")).to_have_text("Folder per car")       # one page for every storage
-    expect(page.locator("code.copy")).to_have_text(re.compile(re.escape(BASE) + r"/microsoft/callback$"))
-    if not page.locator("details[open]").count():
-        page.click("#onedrive summary")
+    expect(page.locator("#microsoft code.copy")).to_have_text(re.compile(re.escape(BASE) + r"/microsoft/callback$"))
+    if not page.locator("#microsoft details[open]").count():
+        page.click("#microsoft summary")
     page.fill("input[name=client_id]", "not-a-client-id")
     page.fill("input[name=client_secret]", "x")
     page.click("details button[type=submit]")
