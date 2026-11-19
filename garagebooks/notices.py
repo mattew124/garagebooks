@@ -12,6 +12,7 @@ Told so far:
     its date alone, never on a zero. A registration the provider renews is not pushed.
   * the OneDrive client secret 30 days and 7 days before its expiry date, and once it has passed
   * the OneDrive sign-in no longer working
+  * TeslaMate newer than this release was tested with (opt-in on Settings), once for each new migration
 Still to come, with the roadmap items that make them: new invoices waiting for review (item 13) and a
 lease budget heading for a shortfall (L3).
 """
@@ -115,6 +116,15 @@ def signin_notices(account, tz_now):
                    "Connect again on the Invoice storage page.", ("warning",))]
 
 
+def teslamate_notices(teslamate):
+    """TeslaMate has moved past what this release was tested with, so its figures are held back."""
+    if teslamate.state != "untested" or teslamate.migration is None:
+        return []
+    return [Notice(f"teslamate:{teslamate.migration}:untested", "TeslaMate is newer than GarageBooks has been tested with",
+                   "TeslaMate's odometer and charging figures are held back until GarageBooks is upgraded to a release "
+                   "that lists this TeslaMate. Everything you entered is unaffected.", ("warning",))]
+
+
 def forget_resolved(conn, open_ids):
     """Forget what was told about reminders that are no longer open (resolved or deleted), so one that is
     reopened is told again."""
@@ -143,6 +153,8 @@ def run(conn, send, teslamate, now, onedrive=False, signin_check=None):
             account = db.onedrive_account(conn)
         wanted += signin_notices(account, now)
         wanted += secret_notices(account, now.date())
+    if db.get_notify_teslamate(conn):
+        wanted += teslamate_notices(teslamate)
     found, open_ids = reminder_notices(conn, teslamate, now)
     wanted += found
     forget_resolved(conn, open_ids)

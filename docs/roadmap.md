@@ -73,7 +73,7 @@ Everything that was here has shipped (see Already in place). The next items are 
   *Depends on:* —
 
 - **16. PostgreSQL upgrade testing** (size S)
-  Extend the weekly TeslaMate compatibility check to run the test suite on each new PostgreSQL major version TeslaMate supports, so a database upgrade is known safe before you do it.
+  Extend the daily TeslaMate compatibility check to run the test suite on each new PostgreSQL major version TeslaMate supports, so a database upgrade is known safe before you do it.
   *Depends on:* —
 
 ## Later

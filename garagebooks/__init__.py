@@ -2189,6 +2189,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         """The Settings page. The notification address is a secret: the page is only told its host."""
         with connect() as conn:
             address, saved_format = db.get_notify(conn)
+            notify_teslamate = db.get_notify_teslamate(conn)
             job_list = scheduler.status(conn)
             ev_rates = db.ev_charging_rates(conn)
         return render_template("settings.html", values=values, errors=errors, aliases=validation.NAME_ALIASES,
@@ -2198,7 +2199,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                                multi_choices=validation.MULTI_AMOUNT_CHOICES, example=name_example(values),
                                message=MESSAGES.get(request.args.get("msg", "")),
                                notify={"host": notify.host_of(address) if address else None, "errors": notify_errors or {},
-                                       "format": notify_format or saved_format, "formats": notify.FORMATS, "test": test},
+                                       "format": notify_format or saved_format, "formats": notify.FORMATS, "test": test,
+                                       "teslamate": notify_teslamate},
                                ), status or (400 if errors or notify_errors else 200)
 
     @app.post("/settings/notifications")
@@ -2227,6 +2229,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             elif address is None:
                 address = db.get_notify(conn)[0]
             db.save_notify(conn, address, fmt)
+            db.save_notify_teslamate(conn, request.form.get("notify_teslamate"))
         log.info("notification settings saved: %s", "on (" + notify.host_of(address) + ")" if address else "off")
         return redirect(url_for("settings", msg="notify_saved"), 303)
 

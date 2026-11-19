@@ -17,8 +17,8 @@ import logging
 import psycopg
 from psycopg.rows import tuple_row
 
-TESTED_TESLAMATE = "4.4.0"
-TESTED_MIGRATION = 20261014120000
+TESTED_TESLAMATE = "4.5.0"
+TESTED_MIGRATION = 20261102130000
 
 log = logging.getLogger(__name__)
 

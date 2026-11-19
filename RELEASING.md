@@ -52,6 +52,15 @@ Rules of thumb:
    `scripts/teslamate-listing.sh propose` sends it, and only after you type yes at a terminal: it
    publishes under your GitHub account, so it never runs from CI or an agent session.
 
+### Candidates for a new TeslaMate release
+
+The daily *TeslaMate compatibility* workflow (`.github/workflows/teslamate-compat.yml`) makes these without you. When a
+newer TeslaMate release passes the test suite, it records it in a pull request, runs CI on it, merges it and tags the
+next candidate (`scripts/auto_rc.py` chooses the number, only when it is clear: the next `-rcN` of a version that has
+had only candidates, or `-rc1` of a PATCH after a stable release when nothing but the compatibility entry is
+unreleased). The Release workflow builds it as for any candidate. Test it as in step 3, then tag the stable release
+yourself (step 5): the workflow never does.
+
 ## Following a channel
 
 | Tag | Moves on | For |

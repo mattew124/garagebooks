@@ -765,5 +765,7 @@ CREATE TABLE IF NOT EXISTS garagebooks.notification (
     sent_at timestamptz NOT NULL DEFAULT now(),
     title   text NOT NULL CHECK (length(title) <= 300)
 );
+--   notify_teslamate  whether to tell the owner when TeslaMate is newer than this release was tested with.
+ALTER TABLE garagebooks.setting ADD COLUMN IF NOT EXISTS notify_teslamate boolean NOT NULL DEFAULT false;
 ALTER TABLE garagebooks.onedrive_account ADD COLUMN IF NOT EXISTS signin_lost_at timestamptz;
 ALTER TABLE garagebooks.onedrive_account ADD COLUMN IF NOT EXISTS signin_checked_at timestamptz;
