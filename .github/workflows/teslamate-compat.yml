@@ -42,16 +42,15 @@ jobs:
         id: compat
         run: |
           set +e
-          scripts/teslamate-compat.sh latest --if-new 2>&1 | tee compat.log
+          scripts/teslamate-compat.sh latest --if-new --record 2>&1 | tee compat.log
           echo "status=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
-      - name: Record the release, merge it and tag a candidate
+      - name: Merge the recorded release and tag a candidate
         if: steps.compat.outputs.status == '2'
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -e
-          scripts/teslamate-compat.sh latest --record
           version="$(.venv/bin/python -c 'from garagebooks import compat; print(compat.TESTED_TESLAMATE)')"
           branch="compat/teslamate-$version"
           tag="$(.venv/bin/python scripts/auto_rc.py prepare)"

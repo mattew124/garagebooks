@@ -143,29 +143,36 @@ def pg():
 def admin(pg):
     """Superuser connection with a clean slate of expenses + TeslaMate stub data."""
     with pg.admin() as conn:
-        conn.execute("TRUNCATE garagebooks.expense, garagebooks.car_folder, garagebooks.onedrive_account,"
-                     " garagebooks.learned_label, garagebooks.learned_vendor, garagebooks.import_skip,"
-                     " garagebooks.odometer_reading, garagebooks.reminder RESTART IDENTITY CASCADE")
+        # One round trip, not a dozen: this runs before every test. (No parameters, so psycopg sends it as one script.)
+        script = [
+            "TRUNCATE garagebooks.expense, garagebooks.car_folder, garagebooks.onedrive_account,"
+            " garagebooks.learned_label, garagebooks.learned_vendor, garagebooks.import_skip,"
+            " garagebooks.odometer_reading, garagebooks.reminder RESTART IDENTITY CASCADE",
+        ]
         if TESLAMATE:
-            conn.execute("TRUNCATE positions, charging_processes RESTART IDENTITY CASCADE")   # CASCADE: real TeslaMate tables (drives...) reference them
-        conn.execute("UPDATE garagebooks.provider_sync SET state = 'idle', started_at = NULL, finished_at = NULL,"
-                     " outcome = NULL, message = NULL, since = NULL")      # no sync from an earlier test
-        conn.execute("DELETE FROM garagebooks.lease")          # a test's lease on the first car; its budgets go with it
-        conn.execute("DELETE FROM garagebooks.car WHERE id <> 1")
+            # CASCADE: real TeslaMate tables (drives...) reference them
+            script.append("TRUNCATE positions, charging_processes RESTART IDENTITY CASCADE")
+        script += [
+            "UPDATE garagebooks.provider_sync SET state = 'idle', started_at = NULL, finished_at = NULL,"
+            " outcome = NULL, message = NULL, since = NULL",      # no sync from an earlier test
+            "DELETE FROM garagebooks.lease",          # a test's lease on the first car; its budgets go with it
+            "DELETE FROM garagebooks.car WHERE id <> 1",
+        ]
         if not TESLAMATE:
-            conn.execute(OWN_CAR)       # a test may have deleted it
-        conn.execute("UPDATE garagebooks.car SET name = 'Test car', kind = 'BEV', name_from_teslamate = %s WHERE id = 1",
-                     (TESLAMATE,))
-        conn.execute("SELECT garagebooks.build_ownership(true)")
-        conn.execute("DELETE FROM garagebooks.category WHERE sort_order = 100")
-        # The history is append-only, even for us: lift the guard just to start each test empty.
-        conn.execute("ALTER TABLE garagebooks.change_log DISABLE TRIGGER USER;"
-                     " TRUNCATE garagebooks.change_log RESTART IDENTITY;"
-                     " ALTER TABLE garagebooks.change_log ENABLE TRIGGER USER")
-        conn.execute("UPDATE garagebooks.setting SET invoice_date_format = NULL, invoice_name_format = NULL, multi_amount = NULL, lease_budgets = false,"
-                     " marginal_tax_rate = NULL,"
-                     " notify_url = NULL, notify_format = NULL")
-        conn.execute("TRUNCATE garagebooks.notification")
+            script.append(OWN_CAR)       # a test may have deleted it
+        script += [
+            f"UPDATE garagebooks.car SET name = 'Test car', kind = 'BEV', name_from_teslamate = {'true' if TESLAMATE else 'false'} WHERE id = 1",
+            "SELECT garagebooks.build_ownership(true)",
+            "DELETE FROM garagebooks.category WHERE sort_order = 100",
+            # The history is append-only, even for us: lift the guard just to start each test empty.
+            "ALTER TABLE garagebooks.change_log DISABLE TRIGGER USER",
+            "TRUNCATE garagebooks.change_log RESTART IDENTITY",
+            "ALTER TABLE garagebooks.change_log ENABLE TRIGGER USER",
+            "UPDATE garagebooks.setting SET invoice_date_format = NULL, invoice_name_format = NULL, multi_amount = NULL,"
+            " lease_budgets = false, marginal_tax_rate = NULL, notify_url = NULL, notify_format = NULL",
+            "TRUNCATE garagebooks.notification",
+        ]
+        conn.execute(";\n".join(s.rstrip().rstrip(";") for s in script))
         yield conn
 
 

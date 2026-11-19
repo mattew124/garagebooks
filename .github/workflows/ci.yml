@@ -45,7 +45,7 @@ jobs:
       - name: Tests, with coverage (the floor is fail_under in pyproject.toml)
         env:
           HYPOTHESIS_PROFILE: ci   # more examples per property than a local run (tests/conftest.py)
-        run: pytest -q --cov
+        run: pytest -q --cov -n auto
       - name: Coverage summary
         if: always()
         run: coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY" || true
@@ -65,7 +65,7 @@ jobs:
           python-version: "3.15"
       - run: pip install -r requirements-dev.txt
       - name: Tests on a database with no TeslaMate
-        run: pytest -q
+        run: pytest -q -n auto
         env:
           TEST_TESLAMATE: "0"
 

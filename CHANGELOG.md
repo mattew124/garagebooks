@@ -5,6 +5,13 @@ steps are in [RELEASING.md](RELEASING.md). Newest first.
 
 Each entry says what an installer must do to upgrade. Where nothing is said, pull the new image.
 
+## Unreleased
+
+- **Faster tests.** The suite runs in parallel (`pytest -n auto`, one throwaway Postgres per worker), about three times
+  faster on four cores, and the route property tests use 15 examples locally (40 in CI, as before). The `admin`
+  fixture makes one round trip instead of a dozen. CI and the TeslaMate compatibility check use `-n auto`, and the check
+  runs the suite once rather than twice (`--record` keeps exit status 2). Nothing changes for installers.
+
 ## 0.5.0-rc1 - 2026-11-19
 
 **Claiming expenses from your salary packaging provider.** GarageBooks can now send an expense to a separate

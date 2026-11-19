@@ -10,6 +10,7 @@ client on a clean slate; each property calls it once, and `world.reset()` betwee
 """
 
 import io
+import os
 from decimal import Decimal
 
 import psycopg
@@ -25,7 +26,9 @@ from tests.test_validation import PDF
 
 # Any answer but a crash. The app deliberately answers 502 when a storage (OneDrive, the folder) fails.
 OK = set(range(200, 500)) | {502}
-EXAMPLES = settings(max_examples=40)        # each example is a real request on a real database
+# Each example is a real request on a real database (about 0.5 s for the OneDrive ones): a local run uses 15,
+# CI (HYPOTHESIS_PROFILE=ci) 40.
+EXAMPLES = settings(max_examples=40 if os.environ.get("HYPOTHESIS_PROFILE") == "ci" else 15)
 
 
 # ---- the world under test ---------------------------------------------------------------------
