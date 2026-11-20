@@ -891,3 +891,25 @@ CREATE TABLE IF NOT EXISTS garagebooks.notification (
 ALTER TABLE garagebooks.setting ADD COLUMN IF NOT EXISTS notify_teslamate boolean NOT NULL DEFAULT false;
 ALTER TABLE garagebooks.onedrive_account ADD COLUMN IF NOT EXISTS signin_lost_at timestamptz;
 ALTER TABLE garagebooks.onedrive_account ADD COLUMN IF NOT EXISTS signin_checked_at timestamptz;
+
+-- Import rows and periods. Added to databases made before them; safe to run again.
+--   expense.period_start / period_end  the days an insurance policy or a registration covers (read from the
+--                                      document when imported). Either may be empty; if both are there the end
+--                                      is not before the start.
+--   category.has_period                the category's expenses have such a period (insurance and registration
+--                                      by default; the owner's later edits are never overwritten)
+ALTER TABLE garagebooks.expense ADD COLUMN IF NOT EXISTS period_start date;
+ALTER TABLE garagebooks.expense ADD COLUMN IF NOT EXISTS period_end date;
+ALTER TABLE garagebooks.expense DROP CONSTRAINT IF EXISTS expense_period_order;
+ALTER TABLE garagebooks.expense ADD CONSTRAINT expense_period_order
+    CHECK (period_start IS NULL OR period_end IS NULL OR period_end >= period_start);
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_schema = 'garagebooks' AND table_name = 'category' AND column_name = 'has_period') THEN
+        ALTER TABLE garagebooks.category ADD COLUMN has_period boolean NOT NULL DEFAULT false;
+        ALTER TABLE garagebooks.category DISABLE TRIGGER log_change;
+        UPDATE garagebooks.category SET has_period = true WHERE name IN ('Insurance', 'Registration');
+        ALTER TABLE garagebooks.category ENABLE TRIGGER log_change;
+    END IF;
+END $$;

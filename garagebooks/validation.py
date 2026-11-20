@@ -508,6 +508,11 @@ def parse_expense_form(form, tz, valid_car_ids, valid_category_ids):
     attempt("vendor", _text, form.get("vendor"), MAX_TEXT_LEN, "Vendor")
     attempt("notes", _text, form.get("notes"), MAX_NOTES_LEN, "Notes")
     attempt("packaged", parse_paid_from, form.get("packaged"))
+    attempt("period_start", parse_optional_date, form.get("period_start"))
+    attempt("period_end", parse_optional_date, form.get("period_end"))
+    start, end = values.get("period_start"), values.get("period_end")
+    if start and end and end < start:
+        errors["period_end"] = "The period's end can't be before its start."
 
     try:
         values["occurred_at"] = parse_local_datetime(form.get("date"), form.get("time"), tz)

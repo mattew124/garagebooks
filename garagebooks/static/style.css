@@ -442,3 +442,12 @@ td .muted { color: var(--muted); }
 /* Cost after tax: what a packaged expense costs, small beside its invoice amount. */
 small.after-tax { display: block; font-weight: 400; color: var(--muted); font-size: .8rem; white-space: nowrap; }
 #after-tax-total small { text-transform: none; letter-spacing: 0; }
+
+/* The import row's Notes cell holds several fields (notes, period, and more further up the stack): one block that
+   stacks them full width, also on a phone where the row is a tile and its cells are flex rows. */
+.import-table .row-extras { display: grid; gap: .4rem; width: 100%; min-width: 0; text-align: left; }
+.import-table .row-extras label { display: grid; gap: .15rem; margin: 0; }
+.import-table .row-extras label.inline { display: flex; }
+.import-table .row-extras .period { display: grid; gap: .4rem; }
+.import-table .row-extras input[type=date] { min-width: 0; }
+[data-view=tiles] .import-table td.extras { flex-direction: column; align-items: stretch; gap: .25rem; }

@@ -69,6 +69,7 @@ MESSAGES = {
     "reminder_reopened_kept": "Reminder reopened. The next one had been edited or resolved, so it was left as it is.",
     "category_pool": "Budget pool saved.",
     "category_gst_free": "GST-free setting saved.",
+    "category_has_period": "Period setting saved.",
     "settings": "Settings saved.",
     "folders": "Folders saved.",
     "connected": "OneDrive connected.",
@@ -645,7 +646,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         """Echo the raw submission back into the form after a validation error."""
         return {k: form.get(k, "") for k in (
             "car_id", "category_id", "date", "time", "amount", "odometer_km",
-            "vendor", "notes", "invoice_url", "invoice_path", "packaged")}
+            "vendor", "notes", "invoice_url", "invoice_path", "packaged", "period_start", "period_end")}
 
     # ---- routes ---------------------------------------------------------------
 
@@ -827,6 +828,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             "vendor": row["vendor"] or "", "notes": row["notes"] or "",
             "invoice_url": row["invoice_url"] or "", "invoice_path": row["invoice_path"] or "",
             "packaged": {None: "auto", True: "package", False: "personal"}[row["packaged"]],
+            "period_start": row["period_start"].isoformat() if row["period_start"] else "",
+            "period_end": row["period_end"].isoformat() if row["period_end"] else "",
         }
         with connect() as conn:
             offer = bool(db.stored_open_reminders(conn, row["car_id"]))
@@ -1838,15 +1841,26 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             if not db.set_gst_free(conn, category_id, request.form.get("gst_free") == "1"):
                 abort(404)
         return redirect(url_for("categories", msg="category_gst_free"), 303)
+
+    @app.post("/categories/<int:category_id>/has_period")
+    def category_has_period(category_id):
+        """Whether the category's expenses cover a period (insurance, registration): the add and edit form and the
+        import page then ask for its start and end."""
+        with connect() as conn:
+            if not db.set_has_period(conn, category_id, request.form.get("has_period") == "1"):
+                abort(404)
+        return redirect(url_for("categories", msg="category_has_period"), 303)
+
     # ---- change history ---------------------------------------------------------
 
     # Field -> label, in the order they are shown. id and the created/updated stamps are never shown.
     history_fields = {
         "expense": (("car_id", "Car"), ("category_id", "Category"), ("occurred_at", "Date and time"),
                     ("amount", "Amount"), ("odometer_km", "Odometer"), ("vendor", "Vendor"), ("notes", "Notes"),
-                    ("invoice_url", "Invoice link"), ("invoice_path", "Invoice file"), ("packaged", "Paid from")),
+                    ("invoice_url", "Invoice link"), ("invoice_path", "Invoice file"), ("packaged", "Paid from"),
+                    ("period_start", "Period start"), ("period_end", "Period end")),
         "category": (("name", "Name"), ("kind", "Kind"), ("sort_order", "Sort order"),
-                     ("upload_folder", "Invoice subfolder"), ("gst_free", "GST-free")),
+                     ("upload_folder", "Invoice subfolder"), ("gst_free", "GST-free"), ("has_period", "Has a period")),
         "expense_claim": (("provider", "Provider"), ("reference", "Reference"), ("status", "Status"),
                           ("amount", "Amount"), ("gst", "GST"), ("approved_amount", "Approved amount"),
                           ("paid_date", "Paid on")),
@@ -2147,7 +2161,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
     def import_row(n, **fields):
         return {"n": n, "include": False, "skip": False, "date": "", "category_id": "", "vendor": "",
                 "amount": "", "odometer_km": "", "url": "", "name": "", "folder": "",
-                "note": "", "id": "", "guess": {}, "new_name": "", "rename": False, "odo_note": "", "duplicates": [], **fields}
+                "note": "", "id": "", "notes": "", "period_start": "", "period_end": "", "guess": {}, "new_name": "", "rename": False, "odo_note": "", "duplicates": [], **fields}
 
     def import_page(store, car, **ctx):
         """The import page's template with what every version of it needs. A row's `url` is the file's
@@ -2203,9 +2217,14 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             category_id=str(by_name.get(guess["category"], "")),
             vendor=guess["vendor"] or "", odometer_km=guess["odometer_km"] or "",
             amount=f"{guess['amount']:.2f}" if guess["amount"] is not None else "",
-            include=not guess["missing"],
+            include=not guess["missing"], notes=guess["notes"],
+            period_start=guess["period_start"].isoformat() if guess["period_start"] else "",
+            period_end=guess["period_end"].isoformat() if guess["period_end"] else "",
             note=("Couldn't read the " + ", ".join(guess["missing"]) + ": fill in to import."
                   if guess["missing"] else ""))
+        if guess["suggest_skip"]:        # a brochure or letter: not offered again unless the owner un-ticks Skip
+            row.update(skip=True, include=False,
+                       note="Doesn't look like an invoice (no amount, no invoice words): skipped. Untick Skip to import it.")
         if guess["date"] and not row["odometer_km"]:
             with connect() as conn:
                 reading = sources.odometer_at(conn, teslamate(), car["id"],
@@ -2427,6 +2446,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
 
                 row = import_row(n, include=bool(f("include")), skip=bool(f("skip")), rename=bool(f("rename")), date=f("date"), category_id=f("category_id"),
                                  vendor=f("vendor"), amount=f("amount"), odometer_km=f("odometer_km"),
+                                 notes=f("notes"), period_start=f("period_start"), period_end=f("period_end"),
                                  url=f("url"), name=f("name"), folder=f("folder"), id=f("id"),
                                  guess={k: f(f"guess_{k}") for k in LEARN_FIELDS})
                 rows.append(row)
@@ -2438,6 +2458,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 values, row_errors = validation.parse_expense_form({
                     "car_id": car_id, "category_id": row["category_id"], "date": row["date"], "time": "12:00",
                     "amount": row["amount"], "odometer_km": row["odometer_km"], "vendor": row["vendor"],
+                    "notes": row["notes"], "period_start": row["period_start"], "period_end": row["period_end"],
                     ref_field: row["url"]}, tz, car_ids, cat_ids)
                 if not row["url"]:
                     row_errors[ref_field] = "Missing link to the PDF."
@@ -2706,7 +2727,9 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             date=guess["date"].isoformat() if guess["date"] else None,
             category_id=by_name.get(guess["category"]), vendor=guess["vendor"],
             amount=f"{guess['amount']:.2f}" if guess["amount"] is not None else None,
-            odometer_km=guess["odometer_km"])
+            odometer_km=guess["odometer_km"], notes=guess["notes"] or None,
+            period_start=guess["period_start"].isoformat() if guess["period_start"] else None,
+            period_end=guess["period_end"].isoformat() if guess["period_end"] else None)
 
     @app.get("/api/duplicates")
     def api_duplicates():

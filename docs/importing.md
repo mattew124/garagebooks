@@ -36,6 +36,28 @@ The same reading works on a single invoice: on **+ Add**, choosing the invoice P
 amount, vendor, category (when the file name or a learned vendor says) and odometer it can read,
 without touching anything you've already typed.
 
+## Skipping, notes and periods
+
+A file that has no amount **and** nothing that reads as an invoice, receipt, notice or policy (no
+`invoice`, `receipt`, `total`, `amount due`, `premium`, `renewal` or `policy` wording, in the text or the
+file name) starts with **Skip** ticked and **Import** unticked, with a note saying so: untick Skip to import it
+anyway. A file that does look like an invoice but is missing a field stays as before, unticked and not skipped.
+A scan with no readable text is never skipped by default, because nobody can tell what it is.
+
+Each row has a **Notes** field, saved to the expense's notes. It is filled in where it can be read easily: what an
+insurance endorsement changes (`Change of address`, `Additional premium`, `Refund of premium`, `Policy
+change`), a `Refund`, or the months a registration covers (`12 months registration`). Edit it freely.
+
+Insurance and registration cover a stretch of time, so their rows (and the Add and Edit form, and the list) show
+a **period**: the start and end dates, read from `Period of insurance: from … to …`, `Registration period`,
+`Registration expiry date` (with the months, when the notice gives them) or `Policy start` and `Policy end`. When
+a notice offers 6 and 12 months, Settings → When an invoice offers several amounts decides which one is read, as it does for the amount.
+Which categories have a period is the **Has a period** tick on the **Categories** page (Insurance and
+Registration are ticked to begin with), so a category you add, such as roadside assistance, can have one too.
+A period can't end before it starts.
+
+<!-- screenshot: import-row-period - An import row for an insurance policy, with its notes and period -->
+
 ## Possible duplicates
 
 Possible duplicates are flagged. Saving a new expense (the Add form) that has the same car and exactly
@@ -47,6 +69,9 @@ likely duplicate unticked with a link to the expense it resembles.
 <!-- screenshot: duplicate-warning - The question asked before saving a possible duplicate -->
 
 ## The vendor
+
+A **registration** notice's vendor is the authority that issues it (for example `Department of Transport and Main Roads`),
+not the CTP insurer the notice also names.
 
 The vendor is the name the document trades under: a line such as `Example Insurer Limited ABN … trading as
 Brand Cover` gives `Brand Cover`, not the legal company (only when the words before "trading as" read as a
