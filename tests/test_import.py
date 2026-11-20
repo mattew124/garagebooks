@@ -420,3 +420,15 @@ def test_skipped_files_stop_being_offered_until_restored(client, admin):
     assert rows(admin) == []
     client.post("/onedrive/import/1/unskip", headers=ORIGIN)
     assert len(client.get("/onedrive/import/1/scan").get_json()["files"]) == 3
+
+
+def test_an_attached_pdf_is_kept_as_a_document_of_one_expense(client, admin):
+    resp = client.post("/onedrive/import/1", data=post_rows(admin, attach_1="0"), headers=ORIGIN)
+    assert resp.status_code == 303
+    [expense] = rows(admin)
+    assert expense["invoice_url"] == "https://od.example/P3"
+    docs = admin.execute("SELECT expense_id, name, invoice_url, invoice_path FROM garagebooks.expense_document").fetchall()
+    assert [(d["expense_id"], d["name"], d["invoice_url"], d["invoice_path"]) for d in docs] == [
+        (expense["id"], "261024 - Tyres.pdf", "https://od.example/P1", None)]
+    page = client.get("/onedrive/import/1?sync=1").data.decode()
+    assert "Tyres.pdf" not in page                         # merged files are known: never offered again

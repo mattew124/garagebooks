@@ -58,6 +58,20 @@ A period can't end before it starts.
 
 <!-- screenshot: import-row-period - An import row for an insurance policy, with its notes and period -->
 
+## Several PDFs in one expense
+
+An invoice and its service report, or a receipt and its photos, are one expense. On the import page, choose **Attach
+to** on the extra PDF's row and pick the row they belong to (rows are listed by number and file name; the row above is
+marked). Pressing Import then creates one expense for the main row, with its PDF as the invoice, and keeps the others
+as **Attached documents** of that expense. The attached row is imported and skipped with the main row, not on its own,
+so the main row must be ticked. Attaching a row to one that is itself attached follows the chain to the main row.
+
+The expense's **Edit** page lists its attached documents with links, and **Remove** forgets one (the file stays
+where it is, and the import offers it again). Attached files count as known, so they are never offered for import
+again; deleting the expense deletes the list of its documents, never the files.
+
+<!-- screenshot: import-attach - An import row with the Attach to choice, and the Attached documents list on the Edit page -->
+
 ## The car's details, and a folder for a new car
 
 Importing the **initial purchase** invoice (any category of the purchase kind) offers to fill in the car's details:

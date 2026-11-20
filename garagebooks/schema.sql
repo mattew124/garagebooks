@@ -1019,3 +1019,20 @@ ALTER TABLE garagebooks.car ADD COLUMN IF NOT EXISTS model_year smallint
     CHECK (model_year IS NULL OR model_year BETWEEN 1900 AND 2100);
 ALTER TABLE garagebooks.car ADD COLUMN IF NOT EXISTS body_type text
     CHECK (body_type IS NULL OR (btrim(body_type) <> '' AND length(body_type) <= 40));
+
+-- Documents attached to an expense: the other PDFs merged into it on the import page (an invoice plus its service
+-- report, say). The expense's own invoice stays in expense.invoice_url / invoice_path; each document is a link
+-- (OneDrive) or a path in the invoice folder on the server, one or the other, as an invoice is, and counts as known
+-- so it is never offered for import again. Deleted with its expense; removing one only forgets it (the file stays).
+CREATE TABLE IF NOT EXISTS garagebooks.expense_document (
+    id           bigserial PRIMARY KEY,
+    expense_id   bigint NOT NULL REFERENCES garagebooks.expense (id) ON DELETE CASCADE,
+    name         text NOT NULL CHECK (btrim(name) <> '' AND length(name) <= 300),
+    invoice_url  text CHECK (invoice_url IS NULL OR invoice_url ~* '^https://[^[:space:]]+$'),
+    invoice_path text CHECK (invoice_path IS NULL OR (invoice_path LIKE '/_%' AND length(invoice_path) <= 1024)),
+    created_at   timestamptz NOT NULL DEFAULT now(),
+    CHECK ((invoice_url IS NULL) <> (invoice_path IS NULL))
+);
+CREATE INDEX IF NOT EXISTS expense_document_expense_idx ON garagebooks.expense_document (expense_id);
+CREATE UNIQUE INDEX IF NOT EXISTS expense_document_url_key ON garagebooks.expense_document (invoice_url) WHERE invoice_url IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS expense_document_path_key ON garagebooks.expense_document (invoice_path) WHERE invoice_path IS NOT NULL;

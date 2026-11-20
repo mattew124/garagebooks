@@ -48,6 +48,8 @@ GRANT SELECT, INSERT, UPDATE ON garagebooks.job TO :"app_role";
 -- OneDrive sign-in columns are covered by the grants on their tables above.)
 GRANT SELECT, INSERT, DELETE ON garagebooks.notification TO :"app_role";
 -- (The GST and payment reference columns of an expense are covered by the grant on the table.)
+-- The other PDFs merged into an expense on the import page.
+GRANT SELECT, INSERT, DELETE ON garagebooks.expense_document TO :"app_role";
 -- The items a service covered, and which expense had which.
 GRANT SELECT, INSERT, UPDATE, DELETE ON garagebooks.service_item, garagebooks.expense_service_item TO :"app_role";
 GRANT SELECT ON garagebooks.expense_service TO :"app_role";

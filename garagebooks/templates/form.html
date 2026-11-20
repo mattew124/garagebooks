@@ -94,7 +94,8 @@
     <small><a href="{{ url_for('categories') }}">Need another category?</a></small>
   </label>
 
-  <label>GST in the amount <small>(optional, as the document states it)</small>
+  {% set gst_on = (categories|selectattr('id', 'equalto', values.get('category_id', 0)|int(0))|selectattr('gst_free')|list) or values.gst_amount or errors.get('gst_amount') %}
+  <label id="gst-field" {{ '' if gst_on else 'hidden' }}>GST in the amount <small>(optional, as the document states it)</small>
     <span class="affix"><span>$</span>
       <input name="gst_amount" inputmode="decimal" autocomplete="off" value="{{ values.gst_amount }}"></span>{{ err('gst_amount') }}
     <small>Leave it empty to use the category's GST rule. A registration's GST is only on its CTP insurance part, so it is read from the notice and replaces that rule.</small>
@@ -235,6 +236,20 @@
   </div>
 </form>
 
+{% if expense_id and documents %}
+<section class="card stack" id="documents">
+  <h2 class="card-title">Attached documents</h2>
+  <ul class="plain">
+    {% for d in documents %}
+    <li><a href="{{ d.invoice_url if d.invoice_url else url_for('document', document_id=d.id) }}" target="_blank" rel="noopener noreferrer">{{ d.name }} ↗</a>
+      <form method="post" action="{{ url_for('document_remove', expense_id=expense_id, document_id=d.id, **view) }}" class="inline"
+            data-confirm="Remove this document from the expense? The file stays where it is and is offered for import again.">
+        <button type="submit" class="linklike">Remove</button></form></li>
+    {% endfor %}
+  </ul>
+  <small>PDFs merged into this expense when it was imported. Removing one only forgets it here; the file stays where it is.</small>
+</section>
+{% endif %}
 {% if expense_id %}
 <form method="post" action="{{ url_for('delete', expense_id=expense_id) }}" data-confirm="Delete this expense?">
   {% for name, value in view.items() %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}

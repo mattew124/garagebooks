@@ -7,6 +7,13 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+- **Several PDFs in one expense.** On the import page every row has an **Attach to** choice: pick another row and
+  its PDF is merged into that row's expense instead of becoming one of its own (an invoice plus its service
+  report, say). The main row's PDF stays the expense's invoice; the others are kept as **Attached documents**,
+  listed with links on the expense's Edit page (each can be removed there, which only forgets it). Merged files
+  count as known, so they are never offered for import again. Works for OneDrive and the folder on the server.
+  Upgrade: pull the new image (the schema gains `expense_document`; installers on the restricted database role
+  re-run `scripts/provision-db.sh`).
 - **The car's details from its purchase invoice, and a folder for a car that isn't in the list yet.** A car now has
   an optional VIN, year built, model year and body type (on the Cars page). Importing the initial purchase
   invoice offers to fill them in, with a tick on the row showing what it read: only where they are blank, and

@@ -606,9 +606,33 @@ def known_invoices(conn, refs):
     if not refs:
         return set()
     rows = conn.execute("SELECT invoice_url AS ref FROM garagebooks.expense WHERE invoice_url = ANY(%(refs)s) "
-                        "UNION SELECT invoice_path FROM garagebooks.expense WHERE invoice_path = ANY(%(refs)s)",
+                        "UNION SELECT invoice_path FROM garagebooks.expense WHERE invoice_path = ANY(%(refs)s) "
+                        "UNION SELECT invoice_url FROM garagebooks.expense_document WHERE invoice_url = ANY(%(refs)s) "
+                        "UNION SELECT invoice_path FROM garagebooks.expense_document WHERE invoice_path = ANY(%(refs)s)",
                         {"refs": list(refs)}).fetchall()
     return {r["ref"] for r in rows}
+
+
+def add_document(conn, expense_id, name, ref_field, ref):
+    """Attach a PDF to an expense. `ref_field` is 'invoice_url' or 'invoice_path'; one already attached is left alone."""
+    column = "invoice_path" if ref_field == "invoice_path" else "invoice_url"
+    conn.execute(f"INSERT INTO garagebooks.expense_document (expense_id, name, {column}) VALUES (%s, %s, %s) "
+                 "ON CONFLICT DO NOTHING", (expense_id, name[:300], ref))
+
+
+def documents(conn, expense_id):
+    return conn.execute("SELECT id, name, invoice_url, invoice_path FROM garagebooks.expense_document "
+                        "WHERE expense_id = %s ORDER BY id", (expense_id,)).fetchall()
+
+
+def get_document(conn, document_id):
+    return conn.execute("SELECT id, expense_id, name, invoice_url, invoice_path FROM garagebooks.expense_document "
+                        "WHERE id = %s", (document_id,)).fetchone()
+
+
+def delete_document(conn, expense_id, document_id):
+    return conn.execute("DELETE FROM garagebooks.expense_document WHERE id = %s AND expense_id = %s",
+                        (document_id, expense_id)).rowcount == 1
 
 
 def skipped_import_urls(conn, car_id):
