@@ -1,7 +1,7 @@
 """Uploading invoice PDFs to a personal OneDrive through Microsoft Graph.
 
 Sign-in is the standard web flow (OAuth 2.0 authorisation code with PKCE):
-Connect sends the browser to Microsoft, which sends it back to /onedrive/callback
+Connect sends the browser to Microsoft, which sends it back to /microsoft/callback (/onedrive/callback for a registration saved before it)
 with a code the app swaps for tokens. Microsoft only redirects to addresses
 registered on the app, and every installation has its own address, so each
 installer registers their own Entra app and enters its client ID and secret on
@@ -36,6 +36,9 @@ log = logging.getLogger("garagebooks.onedrive")
 AUTHORITY = "https://login.microsoftonline.com/consumers/oauth2/v2.0"
 GRAPH = "https://graph.microsoft.com/v1.0"
 SCOPES = "Files.ReadWrite offline_access"
+# The mailbox (outlook.py) is a second sign-in on the same app registration, asking only to read mail
+# (and the account's name, to show who is connected). It never shares a token with the drive.
+MAIL_SCOPES = "Mail.Read User.Read offline_access"
 BUSY_STATUSES = (429, 503)   # Microsoft throttling or a brief outage: worth a short wait
 RETRY_WAITS = (1, 3)         # seconds between tries; requests are bounded by gunicorn's timeout
 MAX_PAGES = 20   # of 200 children each, when listing a folder
@@ -52,8 +55,12 @@ class SignInExpired(OneDriveError):
 
 
 class NotConnected(OneDriveError):
-    def __init__(self):
-        super().__init__("Connect OneDrive first (Invoice storage page), then try again.")
+    def __init__(self, user_message="Connect OneDrive first (Invoice storage page), then try again."):
+        super().__init__(user_message)
+
+    @classmethod
+    def mailbox(cls):
+        return cls("Connect the mailbox first (Invoice storage page), then try again.")
 
 
 def http(method, url, data=None, headers=None, timeout=60, raw=False):
@@ -132,10 +139,10 @@ class OneDrive:
     # ---- sign-in --------------------------------------------------------------
 
     @staticmethod
-    def authorize_url(client_id, redirect_uri, state, challenge):
+    def authorize_url(client_id, redirect_uri, state, challenge, scopes=SCOPES):
         return f"{AUTHORITY}/authorize?" + urlencode({
             "client_id": client_id, "response_type": "code", "redirect_uri": redirect_uri,
-            "response_mode": "query", "scope": SCOPES, "state": state,
+            "response_mode": "query", "scope": scopes, "state": state,
             "code_challenge": challenge, "code_challenge_method": "S256",
             "prompt": "select_account",
         })
@@ -145,45 +152,50 @@ class OneDrive:
         return self.transport("POST", f"{AUTHORITY}/token", data,
                               {"Content-Type": "application/x-www-form-urlencoded"})
 
-    def redeem_code(self, client_id, secret, code, redirect_uri, verifier):
+    def redeem_code(self, client_id, secret, code, redirect_uri, verifier, scopes=SCOPES):
         status, body = self._token(client_id, secret, {
             "grant_type": "authorization_code", "code": code, "redirect_uri": redirect_uri,
-            "code_verifier": verifier, "scope": SCOPES,
+            "code_verifier": verifier, "scope": scopes,
         })
         if status == 200 and "refresh_token" in body:
             return body
         raise OneDriveError("Microsoft didn't complete the sign-in: "
                             + (body.get("error_description") or body.get("error") or f"HTTP {status}"))
 
-    def refresh(self, client_id, secret, refresh_token):
+    def refresh(self, client_id, secret, refresh_token, scopes=SCOPES, what="OneDrive"):
         """-> {access_token, refresh_token}. Microsoft rotates the refresh token:
-        the caller must store the new one."""
+        the caller must store the new one. `what` names the sign-in in messages (OneDrive, the mailbox)."""
         status, body = self._token(client_id, secret, {
-            "grant_type": "refresh_token", "refresh_token": refresh_token, "scope": SCOPES,
+            "grant_type": "refresh_token", "refresh_token": refresh_token, "scope": scopes,
         })
         if status == 200 and "access_token" in body:
             return body
         if body.get("error") in ("invalid_grant", "interaction_required"):
-            raise SignInExpired("The OneDrive sign-in has expired: sign in again on the Invoice storage page.")
+            raise SignInExpired(f"The {what} sign-in has expired: sign in again on the Invoice storage page.")
         if body.get("error") in ("invalid_client", "unauthorized_client"):
             raise SignInExpired("Microsoft refused the client secret (expired?): enter a new one "
                                 "on the Invoice storage page.")
-        raise OneDriveError("Couldn't refresh the OneDrive sign-in: "
+        raise OneDriveError(f"Couldn't refresh the {what} sign-in: "
                             + (body.get("error_description") or f"HTTP {status}"))
 
     # ---- Graph ----------------------------------------------------------------
 
-    def _get(self, access_token, url):
+    def _get(self, access_token, url, prefer=None, service="OneDrive"):
+        """GET from Graph, waiting a little if it is busy. `prefer` is a Prefer header (outlook.py
+        asks for immutable ids and plain-text bodies); `service` names it in messages."""
+        headers = {"Authorization": f"Bearer {access_token}"}
+        if prefer:
+            headers["Prefer"] = prefer
         for wait in (*RETRY_WAITS, None):
-            status, body = self.transport("GET", url, None, {"Authorization": f"Bearer {access_token}"})
+            status, body = self.transport("GET", url, None, headers)
             if status not in BUSY_STATUSES or wait is None:
                 break
-            log.warning("OneDrive busy (HTTP %d): trying again in %ds", status, wait)
+            log.warning("%s busy (HTTP %d): trying again in %ds", service, status, wait)
             time.sleep(wait)
         if status in BUSY_STATUSES:
-            raise OneDriveError("OneDrive is busy right now: try again in a few minutes.")
+            raise OneDriveError(f"{service} is busy right now: try again in a few minutes.")
         if status != 200:
-            raise OneDriveError("OneDrive said no: " + graph_error(status, body))
+            raise OneDriveError(f"{service} said no: " + graph_error(status, body))
         return body
 
     def account_name(self, access_token):

@@ -205,7 +205,7 @@ the share, so delete it yourself when you no longer need the test PDFs. `DEV_INV
 folder instead, for every stack. The demo stack never uses either.
 
 OneDrive is on in the dev stack with a throwaway token key in `.dev/env`. To sign in there,
-add the dev stack's callback address (shown in the OneDrive card of its Invoice storage page) as a second redirect URI on
+add the dev stack's callback address (shown in the Microsoft account card of its Invoice storage page) as a second redirect URI on
 your app registration. A sign-in writes to your real OneDrive, so give each car a test folder.
 
 The claims feature is on in the dev stack against a stand-in connector (`tests/fake_connector.py`, invented

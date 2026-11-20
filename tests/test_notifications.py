@@ -343,9 +343,9 @@ def test_the_secret_expiring_is_told_at_30_days_at_7_days_and_when_it_has_passed
     assert tell(url, sender, now=NOW + timedelta(days=35), onedrive=True) == "1 sent"      # 5 days left
     assert tell(url, sender, now=NOW + timedelta(days=41), onedrive=True) == "1 sent"      # passed
     assert tell(url, sender, now=NOW + timedelta(days=60), onedrive=True) == "nothing new"
-    assert [t for t in sender.titles()] == ["OneDrive client secret expires in 28 days",
-                                            "OneDrive client secret expires in 5 days",
-                                            "OneDrive client secret has expired"]
+    assert [t for t in sender.titles()] == ["Microsoft client secret expires in 28 days",
+                                            "Microsoft client secret expires in 5 days",
+                                            "Microsoft client secret has expired"]
     assert keys(url) == [f"onedrive_secret:{expiry}:30d", f"onedrive_secret:{expiry}:7d", f"onedrive_secret:{expiry}:expired"]
     assert "Invoice storage" in sender.sent[0]["message"]
 

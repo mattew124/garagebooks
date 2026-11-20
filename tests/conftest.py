@@ -145,7 +145,7 @@ def admin(pg):
     with pg.admin() as conn:
         # One round trip, not a dozen: this runs before every test. (No parameters, so psycopg sends it as one script.)
         script = [
-            "TRUNCATE garagebooks.expense, garagebooks.car_folder, garagebooks.onedrive_account,"
+            "TRUNCATE garagebooks.expense, garagebooks.car_folder, garagebooks.car_mail_folder, garagebooks.onedrive_account,"
             " garagebooks.learned_label, garagebooks.learned_vendor, garagebooks.import_skip,"
             " garagebooks.odometer_reading, garagebooks.reminder RESTART IDENTITY CASCADE",
         ]

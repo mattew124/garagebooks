@@ -13,6 +13,21 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
   runs the suite once rather than twice (`--record` keeps exit status 2). Nothing changes for installers.
 - The Claims page shows a sync's "Syncing the provider's history" notice once, not three times, and any other
   message on it once, not twice.
+**Invoices by email.** Each car can have an Outlook.com mailbox folder, and its emails are offered on the same
+import page as a folder of PDFs: each attached PDF is a row, and an email with no PDF (a refund notice) is read
+from its text, with a refund as a negative amount. An imported PDF is saved in the car's invoice storage. The
+mailbox uses the OneDrive app registration and redirect URI, with its own read-only sign-in (`Mail.Read`); a new
+`mail` job counts what is waiting every 30 minutes, and a notice says when new emails arrive. See
+[Invoices by email](docs/mailbox.md).
+
+**The app registration is now the Microsoft account.** It has a card of its own on the Invoice storage page, shared by
+OneDrive and the mailbox, and a registration saved from now on signs in at `…/microsoft/callback`. Nothing to do on
+upgrade: a registration saved before keeps `…/onedrive/callback`, and the card shows how to move (see
+[Microsoft account](docs/microsoft-account.md#an-older-registration)). The client secret notices now say
+"Microsoft client secret".
+
+**To upgrade:** pull the new image; the app adds its new tables itself. Installers on the restricted database role
+(`SKIP_MIGRATE=1`) re-run `scripts/provision-db.sh` first.
 
 ## 0.5.0-rc1 - 2026-11-19
 

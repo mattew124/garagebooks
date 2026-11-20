@@ -11,9 +11,11 @@ GarageBooks can push a notice to your phone when something needs you. You give i
 | **A reminder is due soon** | The first time a [reminder](reminders.md) comes inside its lead time (by date or by odometer). | No: once. |
 | **A reminder is overdue** | The first time it passes its date or odometer reading. | No: once. |
 | **Registration expires** and **Lease ends** | The same two reminders that a car's [lease](leases.md) creates. A registration the provider renews for you is not sent. | As for any reminder. |
-| **OneDrive client secret expires** | 30 days and again 7 days before the expiry date you entered on the Invoice storage page. | No: once for each. |
-| **OneDrive client secret has expired** | Once the date has passed. | No: once. |
+| **Microsoft client secret expires** | 30 days and again 7 days before the expiry date you entered on the Invoice storage page. | No: once for each. |
+| **Microsoft client secret has expired** | Once the date has passed. | No: once. |
 | **OneDrive sign-in lost** | When the app finds that Microsoft no longer accepts the saved sign-in. | Once each time it is lost. |
+| **Emails waiting to import** | When the `mail` job finds emails in a car's [mailbox folder](mailbox.md) that are not yet imported or skipped. | Once for each newest email: a new one arriving is told again. |
+| **Mailbox sign-in lost** | When Microsoft no longer accepts the saved mailbox sign-in. | Once each time it is lost. |
 | **TeslaMate is newer than tested** | Only if you tick the box on the Settings page (off by default). When the TeslaMate database moves past the release GarageBooks was tested with, so its figures are [held back](reference.md#teslamate-version). | Once for each new TeslaMate migration. |
 
 Each notice names the car, the reminder and what it is due on. A reminder with an odometer reading that
@@ -34,7 +36,7 @@ day (a normal token refresh, which also keeps the sign-in from going stale) whil
 Connecting again clears it.
 
 !!! note "Not yet"
-    Two more notices are planned with the features they report on: **new invoices waiting for review**
+    Two more notices are planned with the features they report on: **new invoices waiting for review** in a OneDrive or server folder
     (roadmap item 13, watching the invoice folder) and **a lease budget heading for a shortfall** (L3).
     They are not sent yet. See the [roadmap](roadmap.md).
 

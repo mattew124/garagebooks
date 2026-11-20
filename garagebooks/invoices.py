@@ -420,3 +420,38 @@ def propose(folder, name, text, categories, learned=None, multi_amount=None):
     out = {"date": when, "category": category, "vendor": vendor, "amount": amount, "odometer_km": odometer}
     out["missing"] = [f for f in ("date", "category", "amount") if out[f] is None]
     return out
+
+
+# ---- refunds (an email or credit note that gives money back) ---------------------
+
+# In a subject line: the email is about money coming back. "refund policy" is about something else.
+_REFUND_SUBJECT = re.compile(r"\b(?:refund(?:ed|s)?(?!\s+polic)|credit\s+(?:note|memo)|reversal|reimburse(?:d|ment)?)\b", re.I)
+# In the text: words that only a refund says, not the small print of an invoice ("our refund policy").
+_REFUND_TEXT = re.compile(
+    r"\bwe(?:'ve|\s+have)\s+(?:issued\s+a\s+)?refund(?:ed)?\b|\b(?:has|have)\s+been\s+refunded\b|\byour\s+refund\b"
+    r"|\brefund\s+(?:amount|total|of)\b|\btotal\s+refunded\b|^\W*credit\s+(?:note|memo)\b", re.I | re.M)
+REFUND_AMOUNT = re.compile(
+    r"\b(?:refund(?:ed)?|credit(?:ed)?)(?:\s+(?:amount|total|of))?\b[^\n$\d]{0,40}?\$\s*([\d,]+\.\d{2})", re.I)
+
+
+def is_refund(subject, text):
+    """Does this email (its subject and text) or document give money back rather than ask for it?"""
+    return bool(_REFUND_SUBJECT.search(subject or "") or _REFUND_TEXT.search(text or ""))
+
+
+# The figure on a line of its own with the word on the next ("$1,234.50" then "Refunded 12 Feb 2026"), as an
+# insurer's refund email lays it out. A blank line may come between them.
+REFUND_FIGURE_ABOVE = re.compile(r"\$\s*([\d,]+\.\d{2})[ \t]*\n(?:[ \t]*\n)?[ \t]*(?:refunded|refund\s+amount)\b", re.I)
+
+
+def refund_amount(text):
+    """The figure beside "refunded", "refund amount", "credited" and the like, or on the line above
+    "Refunded". -> Decimal or None."""
+    text = (text or "").replace("\r\n", "\n")
+    found = [m for pattern in (REFUND_AMOUNT, REFUND_FIGURE_ABOVE) for m in pattern.finditer(text)]
+    for m in sorted(found, key=lambda m: m.start()):
+        try:
+            return Decimal(m.group(1).replace(",", ""))
+        except InvalidOperation:
+            continue
+    return None

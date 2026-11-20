@@ -383,3 +383,8 @@ def test_dependabot_bumps_the_browser_tests_image_and_package_in_one_pull_reques
     assert "schedule" in config["multi-ecosystem-groups"]["playwright"]
     others = [u for u in config["updates"] if u not in browser]
     assert all("/tests/browser" not in (u.get("directories") or [u.get("directory")]) for u in others)
+
+
+def test_onedrive_link_signs_in_at_the_microsoft_address():
+    """The registration's redirect URI is /microsoft/callback; a linked stack must not ask for the older one."""
+    assert "callback = 'microsoft'" in function_body("onedrive_link")

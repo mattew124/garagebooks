@@ -507,7 +507,9 @@ def known_invoices(conn, refs):
     if not refs:
         return set()
     rows = conn.execute("SELECT invoice_url AS ref FROM garagebooks.expense WHERE invoice_url = ANY(%(refs)s) "
-                        "UNION SELECT invoice_path FROM garagebooks.expense WHERE invoice_path = ANY(%(refs)s)",
+                        "UNION SELECT invoice_path FROM garagebooks.expense WHERE invoice_path = ANY(%(refs)s) "
+                        # An email whose PDF was copied into the car's storage: its expense links the copy.
+                        "UNION SELECT ref FROM garagebooks.mail_import WHERE ref = ANY(%(refs)s)",
                         {"refs": list(refs)}).fetchall()
     return {r["ref"] for r in rows}
 
@@ -584,11 +586,42 @@ def save_onedrive_account(conn, **fields):
 
 
 
-def note_signin_lost(conn):
-    """Microsoft refused the saved sign-in: remember when it was first noticed (the notifications job tells
-    the owner once). Cleared by connecting again, new credentials, disconnecting or a refresh that works."""
-    conn.execute("UPDATE garagebooks.onedrive_account SET signin_lost_at = COALESCE(signin_lost_at, now()), "
-                 "signin_checked_at = now() WHERE refresh_token IS NOT NULL")
+def note_signin_lost(conn, mail=False):
+    """Microsoft refused the saved sign-in (the mailbox's, with mail=True): remember when it was first
+    noticed (the notifications job tells the owner once). Cleared by connecting again, new credentials,
+    disconnecting or a refresh that works."""
+    p = "mail_" if mail else ""
+    conn.execute(f"UPDATE garagebooks.onedrive_account SET {p}signin_lost_at = COALESCE({p}signin_lost_at, now()), "
+                 f"{p}signin_checked_at = now() WHERE {p}refresh_token IS NOT NULL")
+
+
+# ---- invoices by email -----------------------------------------------------------
+
+def car_mail_folders(conn):
+    """-> {car_id: {folder_id, folder_path, waiting, newest_at, checked_at}}."""
+    return {r["car_id"]: r for r in conn.execute("SELECT * FROM garagebooks.car_mail_folder")}
+
+
+def set_car_mail_folder(conn, car_id, folder_id, folder_path):
+    """A new folder starts with nothing counted: the mail job counts it on its next run."""
+    conn.execute(
+        "INSERT INTO garagebooks.car_mail_folder (car_id, folder_id, folder_path) VALUES (%s, %s, %s) "
+        "ON CONFLICT (car_id) DO UPDATE SET folder_id = EXCLUDED.folder_id, folder_path = EXCLUDED.folder_path, "
+        "waiting = NULL, newest_at = NULL, checked_at = NULL", (car_id, folder_id, folder_path))
+
+
+def clear_car_mail_folder(conn, car_id):
+    conn.execute("DELETE FROM garagebooks.car_mail_folder WHERE car_id = %s", (car_id,))
+
+
+def note_mail_waiting(conn, car_id, waiting, newest_at):
+    conn.execute("UPDATE garagebooks.car_mail_folder SET waiting = %s, newest_at = %s, checked_at = now() "
+                 "WHERE car_id = %s", (waiting, newest_at, car_id))
+
+
+def record_mail_import(conn, car_id, ref, expense_id):
+    conn.execute("INSERT INTO garagebooks.mail_import (ref, car_id, expense_id) VALUES (%s, %s, %s) "
+                 "ON CONFLICT (ref) DO NOTHING", (ref, car_id, expense_id))
 
 
 # ---- leases (roadmap L1) -------------------------------------------------------------

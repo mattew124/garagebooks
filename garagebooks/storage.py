@@ -83,6 +83,34 @@ class OneDriveStore:
         return ref
 
 
+class MailStore:
+    """An Outlook mailbox (outlook.Mailbox) as a source for the import page: it lists and reads, and never
+    writes. The access token is the mailbox's own sign-in, fetched when first needed."""
+
+    kind = "mail"
+    name = "the mailbox"
+    ref_field = "invoice_url"
+    _CALLS = ("folder", "subfolders", "pdfs", "download", "message", "attachment_name")
+
+    def __init__(self, mailbox, access_token):
+        self.mailbox, self._access_token, self._token = mailbox, access_token, None
+
+    def __getattr__(self, name):
+        if name not in self._CALLS:
+            raise AttributeError(name)
+        call = getattr(self.mailbox, name)
+
+        def with_token(*args, **kwargs):
+            if self._token is None:
+                self._token = self._access_token()
+            return call(self._token, *args, **kwargs)
+        return with_token
+
+    @staticmethod
+    def link(ref):
+        return ref
+
+
 def _plain_name(name):
     """One file or folder name: no path separators, no control characters, not hidden."""
     return (isinstance(name, str) and name not in ("", ".", "..") and not name.startswith(".")

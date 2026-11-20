@@ -2,7 +2,8 @@
 
 Invoices already in a car's folder (and its subfolders) can be turned into expenses in bulk, whether
 that folder is in OneDrive or is the [invoice folder on the server](local-folder.md): on the
-**Invoice storage** page, press **Import existing invoices** beside the car.
+**Invoice storage** page, press **Import existing invoices** beside the car. Invoices and refunds that arrive
+by email are imported on the same page from a car's Outlook mailbox folder: see [Invoices by email](mailbox.md).
 
 The page opens at once and shows its progress (looking in the folder, then "Reading 3 of 10" with the
 file's name) while it reads every PDF that isn't yet linked to an expense. It guesses each one's date,

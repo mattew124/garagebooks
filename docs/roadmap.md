@@ -61,7 +61,7 @@ Everything that was here has shipped (see Already in place). The next items are 
   *Depends on:* —
 
 - **13. Watch the invoice folder** (size L)
-  Check each car's OneDrive or server folder on a schedule. Each new PDF becomes a draft expense (read the way the import page already reads them), with its category taken from the subfolder it is in. Drafts wait in a review queue until you confirm or edit them, and a notice (item 8) says when new ones are waiting.
+  Check each car's OneDrive or server folder on a schedule. Each new PDF becomes a draft expense (read the way the import page already reads them), with its category taken from the subfolder it is in. Drafts wait in a review queue until you confirm or edit them, and a notice (item 8) says when new ones are waiting. A car's [mailbox folder](mailbox.md) is already watched this way, with the import page as its review step; this item brings the same to the invoice folders.
   *Depends on:* 7, 8
 
 - **14. Your own lists and fields** (size M)
