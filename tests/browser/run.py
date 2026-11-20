@@ -383,12 +383,52 @@ def local_folder_checks(page, pdf_page, car):
     expect(page.locator("input[name=invoice_path]")).to_have_value(re.compile(rf"^/{LOCAL_FOLDER}/Maintenance/.+\.pdf$"))
     expect(page.locator("#stored-invoice")).to_be_visible()
     expect(page.locator("#stored-invoice-link")).to_have_attribute("href", re.compile(r"local/file\?path=%2F"))
+    picked_path = page.locator("input[name=invoice_path]").input_value()
 
     # The import reads the folder; the PDF saved above already has its expense, so it isn't offered.
     page.goto(UI + f"local/import/{car}", wait_until="domcontentloaded")
     expect(page.locator("#import-status-text")).to_have_text(re.compile(r"^(Read \d+ PDF|Every PDF)"), timeout=120000)
     assert "418.27" not in page.content()
     shot(page, "local-import")
+    import_row_on_a_phone(page, car, picked_path)
+
+
+def import_row_on_a_phone(page, car, path):
+    """An import row on a phone: Notes, the period and the GST each sit on their own full-width line. The row is read
+    from the PDF already in the folder (the read doesn't care that it has an expense) and put into the page."""
+    size = page.viewport_size
+    page.set_viewport_size({"width": 390, "height": 900})
+    try:
+        page.goto(UI + f"local/import/{car}", wait_until="domcontentloaded")
+        expect(page.locator("#import-status-text")).to_have_text(re.compile(r"^(Read \d+ PDF|Every PDF)"), timeout=120000)
+        html = page.evaluate("""async ([url, path]) => {
+            const body = new FormData();
+            body.append("n", "0"); body.append("id", path); body.append("url", path);
+            body.append("name", path.split("/").pop()); body.append("folder", "");
+            return await (await fetch(url, {method: "POST", body})).text();
+        }""", [UI + f"local/import/{car}/read", path])
+        page.evaluate("""(html) => {
+            const form = document.getElementById("import-form");
+            form.hidden = false;
+            form.querySelector("tbody").insertAdjacentHTML("beforeend", html);
+        }""", html)
+        row = page.locator("#import-form tbody tr").last
+        row.locator("select[name^=category_id_]").select_option(label="Registration")     # shows the period (and GST)
+        boxes = {}
+        for name in ("notes_", "period_start_", "period_end_", "gst_amount_"):
+            box = row.locator(f"[name^={name}]").first
+            if box.count() and box.is_visible():
+                boxes[name] = box.bounding_box()
+        assert {"notes_", "period_start_", "period_end_"} <= set(boxes), boxes
+        tile = row.bounding_box()
+        for name, rect in boxes.items():
+            assert rect["width"] > tile["width"] * 0.6, (name, rect, tile)           # not squeezed beside another field
+        tops = [round(r["y"]) for r in boxes.values()]
+        assert len(set(tops)) == len(tops), f"fields share a line on a phone: {boxes}"
+        assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+        shot(page, "import-row-phone")
+    finally:
+        page.set_viewport_size(size)
 
 
 def remove_expenses(page):

@@ -24,7 +24,7 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
   and end dates) read from the document ("Period of insurance", "Registration period", the expiry date, the
   policy start and end), shown on the import row, the Add and Edit form and the list. A new **Has a period**
   setting on the Categories page chooses which categories have one (Insurance and Registration by default).
-  A registration notice's vendor is now the issuing authority, not the CTP insurer it names, and a dealer's
+  On a phone the notes and period sit on their own full-width lines. A registration notice's vendor is now the issuing authority, not the CTP insurer it names, and a dealer's
   invoice for the car itself is read by its "Drive away price", "Total payable" or "Balance payable" lines.
   Upgrade: pull the new image (the schema gains `expense.period_start`, `period_end` and `category.has_period`
   on start; installers on the restricted database role re-run `scripts/provision-db.sh`).
