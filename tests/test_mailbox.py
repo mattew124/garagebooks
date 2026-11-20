@@ -288,7 +288,8 @@ def test_email_vendor_falls_back_to_the_sender(mailbox, ms):
 def test_email_with_nothing_to_read_starts_unticked(mailbox):
     f = scan(mailbox)["files"][2]
     row = read_row(mailbox, 2, f)
-    assert 'name="include_2" checked' not in row and "read the category, amount" in row
+    assert 'name="include_2" checked' not in row
+    assert 'name="skip_2" checked' in row, "no amount and nothing invoice-like: skipped by default"
 
 
 def confirm(client, admin, files, **over):
