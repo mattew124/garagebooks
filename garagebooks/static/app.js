@@ -870,6 +870,11 @@ document.addEventListener("DOMContentLoaded", () => {
     periodFields.hidden = !((chosen && chosen.dataset.period === "1") || form.elements.period_start.value || form.elements.period_end.value);
   };
   if (periodFields) form.elements.category_id.addEventListener("change", periodShown);
+  const gstField = document.getElementById("gst-field");
+  if (gstField) form.elements.category_id.addEventListener("change", () => {
+    const chosen = form.elements.category_id.selectedOptions[0];
+    gstField.hidden = !(chosen && chosen.dataset.gstfree === "1") && !form.elements.gst_amount.value;
+  });
   const serviceFields = document.getElementById("service-fields");
   if (serviceFields) form.elements.category_id.addEventListener("change", () => {
     const chosen = form.elements.category_id.selectedOptions[0];
@@ -904,6 +909,7 @@ document.addEventListener("DOMContentLoaded", () => {
       set("period_start", "period start", data.period_start);
       set("period_end", "period end", data.period_end);
       if (periodFields) periodShown();
+      if (gstField && form.elements.gst_amount.value) gstField.hidden = false;
       if (data.odometer_km && filled.includes("odometer")) hint.textContent = "Read from the invoice.";
       else if (!data.odometer_km && !touched.has("odometer_km")) await fill(false);
       prefillHint.textContent = filled.length

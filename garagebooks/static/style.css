@@ -442,3 +442,11 @@ td .muted { color: var(--muted); }
 /* Cost after tax: what a packaged expense costs, small beside its invoice amount. */
 small.after-tax { display: block; font-weight: 400; color: var(--muted); font-size: .8rem; white-space: nowrap; }
 #after-tax-total small { text-transform: none; letter-spacing: 0; }
+
+/* Fields shown only for some categories (period, GST, service items, car details): `hidden` must win over their layout. */
+#period-fields[hidden], #gst-field[hidden], #service-fields[hidden], [data-period-fields][hidden], [data-gst-fields][hidden],
+[data-service-fields][hidden] { display: none; }
+.service-items { border: 0; padding: 0; margin: .25rem 0; }
+.service-items label.inline { display: inline-flex; margin-right: .6rem; }
+.payment-refs { margin-top: .5rem; }
+.period-note, .service-note { display: block; color: var(--muted, #667); }
