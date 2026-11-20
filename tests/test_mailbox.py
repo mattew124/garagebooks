@@ -266,7 +266,7 @@ def test_attachment_row_reads_the_pdf(mailbox, admin):
     f = scan(mailbox)["files"][0]
     row = read_row(mailbox, 0, f)
     assert 'value="2026-10-24"' in row and 'value="1234.50"' in row
-    assert f'<option value="{cat(admin, "Tyres")}" selected' in row
+    assert re.search(rf'<option value="{cat(admin, "Tyres")}"[^>]*selected>', row)
     assert 'name="include_0" checked' in row
     assert 'name="rename_0"' not in row, "an email's attachment isn't renamed in place"
 
