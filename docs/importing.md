@@ -37,6 +37,90 @@ The same reading works on a single invoice: on **+ Add**, choosing the invoice P
 amount, vendor, category (when the file name or a learned vendor says) and odometer it can read,
 without touching anything you've already typed.
 
+## Skipping, notes and periods
+
+A file that has no amount **and** nothing that reads as an invoice, receipt, notice or policy (no
+`invoice`, `receipt`, `total`, `amount due`, `premium`, `renewal` or `policy` wording, in the text or the
+file name) starts with **Skip** ticked and **Import** unticked, with a note saying so: untick Skip to import it
+anyway. A file that does look like an invoice but is missing a field stays as before, unticked and not skipped.
+A scan with no readable text is never skipped by default, because nobody can tell what it is.
+
+Each row has a **Notes** field, saved to the expense's notes. It is filled in where it can be read easily: what an
+insurance endorsement changes (`Change of address`, `Additional premium`, `Refund of premium`, `Policy
+change`), a `Refund`, or the months a registration covers (`12 months registration`). Edit it freely.
+
+Insurance and registration cover a stretch of time, so their rows (and the Add and Edit form, and the list) show
+a **period**: the start and end dates, read from `Period of insurance: from … to …`, `Registration period`,
+`Registration expiry date` (with the months, when the notice gives them) or `Policy start` and `Policy end`. When
+a notice offers 6 and 12 months, Settings → When an invoice offers several amounts decides which one is read, as it does for the amount.
+Which categories have a period is the **Has a period** tick on the **Categories** page (Insurance and
+Registration are ticked to begin with), so a category you add, such as roadside assistance, can have one too.
+A period can't end before it starts.
+
+<!-- screenshot: import-row-period - An import row for an insurance policy, with its notes and period -->
+
+## Several PDFs in one expense
+
+An invoice and its service report, or a receipt and its photos, are one expense. On the import page, choose **Attach
+to** on the extra PDF's row and pick the row they belong to (rows are listed by number and file name; the row above is
+marked). Pressing Import then creates one expense for the main row, with its PDF as the invoice, and keeps the others
+as **Attached documents** of that expense. The attached row is imported and skipped with the main row, not on its own,
+so the main row must be ticked. Attaching a row to one that is itself attached follows the chain to the main row.
+
+The expense's **Edit** page lists its attached documents with links, and **Remove** forgets one (the file stays
+where it is, and the import offers it again). Attached files count as known, so they are never offered for import
+again; deleting the expense deletes the list of its documents, never the files.
+
+<!-- screenshot: import-attach - An import row with the Attach to choice, and the Attached documents list on the Edit page -->
+
+## The car's details, and a folder for a new car
+
+Importing the **initial purchase** invoice (any category of the purchase kind) offers to fill in the car's details:
+VIN, year built, model year and body type, read from labels such as `VIN` or `Vehicle identification number`,
+`Year of manufacture` or `Build date` (year built), `Model year` or a plain `Year` (model year) and `Body type`. The
+row shows the values in a **Fill in the car's details from this invoice** box, ticked to begin with: correct them or untick
+it. Only details the car has no value for are offered and filled in; nothing it already has is replaced, and the
+name, make and model (which a TeslaMate car takes from TeslaMate) are never touched. The Cars page edits the same fields.
+
+A car that isn't in the list yet: on the **Invoice storage** page, **Folder for a new car** browses for its folder
+(in OneDrive or on the server) and opens the import of that folder. The car is made when you press Import, from the
+purchase invoice you ticked (its make and model name it, and its details are filled in; with neither, it is named
+after the folder, and its type starts as battery electric: change it on the Cars page). With no purchase invoice
+ticked, a dialog asks for the car's name, type and details first, and nothing is saved until you complete it. The folder
+becomes the car's invoice folder. None of this needs TeslaMate.
+
+<!-- screenshot: import-new-car-dialog - The dialog that asks for a new car's details when no purchase invoice is ticked -->
+
+## A registration's GST and payment references
+
+GST on a registration is only on its CTP insurance part, so it isn't a tenth of the total. When a **Registration**
+notice states its GST (a `GST` line with a dollar figure; the larger or smaller of two on one line, as the Settings
+choice for several amounts says), the row shows it in **GST in the amount** and the expense stores it. A stored GST
+replaces the category's GST rule in the [cost after tax](leases.md): the amount less that GST is what the GST-free
+share is worked out on. Leave it empty to use the rule (Registration starts as **GST-free** on the Categories page, only
+as the fallback for an expense whose notice stated no GST).
+
+The notice's **card payment reference**, **BPAY biller code** and **BPAY reference** are kept with the expense, in a
+**Payment references** section of the Edit form that starts closed. They are never shown in the expense list or tiles,
+on the dashboard, or in the change history's displayed values. When you
+[claim the expense](leases.md), the claim page starts with the stored GST in its GST field (empty it to leave the GST
+to the provider).
+
+## Service items
+
+An expense in the **Service** category records what the service covered: tick the items (fuel filter, oil filter,
+engine oil, tyre rotation, windscreen washer fluid, windscreen wipers, brakes, brake fluid, timing belt, air filter,
+coolant, cabin air filter) on its import row, or on the Add and Edit form. On an import row, the items whose names
+appear in the PDF (whole words, any case) are ticked for you. The items only show while the category is Service, and are
+dropped if you change the category. The Service category is in the maintenance lease budget pool to begin with.
+
+The list is yours: **Categories → Service items** adds, renames and removes items (removing one takes it off the
+expenses that had it; renaming keeps it on them). Missing one while importing? **Add an item…** on the row opens a
+dialog; the new item is added to every row's list and ticked on the row you were in, and nothing else on the
+page changes.
+
+<!-- screenshot: import-service-items - An import row in the Service category, with its service items and the Add an item dialog -->
+
 ## Possible duplicates
 
 Possible duplicates are flagged. Saving a new expense (the Add form) that has the same car and exactly
@@ -48,6 +132,9 @@ likely duplicate unticked with a link to the expense it resembles.
 <!-- screenshot: duplicate-warning - The question asked before saving a possible duplicate -->
 
 ## The vendor
+
+A **registration** notice's vendor is the authority that issues it (for example `Department of Transport and Main Roads`),
+not the CTP insurer the notice also names.
 
 The vendor is the name the document trades under: a line such as `Example Insurer Limited ABN … trading as
 Brand Cover` gives `Brand Cover`, not the legal company (only when the words before "trading as" read as a

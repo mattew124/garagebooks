@@ -36,9 +36,103 @@ document.addEventListener("DOMContentLoaded", () => {
     const button = importForm.querySelector("button[type=submit]");
     if (button && !button.disabled) button.textContent = importLabel();
   };
+  // "Attach to": the other rows, by number and file name, to merge a row's PDF into another row's expense.
+  const refreshAttach = () => {
+    importForm.querySelectorAll("select[data-attach]").forEach((select) => {
+      const own = Number(select.name.slice(7));
+      const keep = select.value || select.dataset.selected || "";
+      select.length = 1;
+      importForm.querySelectorAll("input[name^=name_]").forEach((input) => {
+        const k = Number(input.name.slice(5));
+        if (k === own) return;
+        const option = new Option(`${k === own - 1 ? "The row above" : "Row " + (k + 1)}: ${input.value}`, String(k));
+        select.add(option);
+      });
+      select.value = keep;
+      if (select.value !== keep) select.value = "";
+    });
+  };
+  if (importForm) {
+    refreshAttach();
+    // Attaching a row merges it into the other one's expense, so it isn't imported or skipped by itself.
+    importForm.addEventListener("change", (e) => {
+      const m = /^attach_(\d+)$/.exec(e.target.name || "");
+      if (!m) return;
+      const attached = e.target.value !== "";
+      ["include_", "skip_"].forEach((prefix) => {
+        const box = importForm.elements[prefix + m[1]];
+        if (box && attached) box.checked = false;
+        if (box) box.disabled = attached;
+      });
+    });
+  }
   if (importForm) {
     importForm.addEventListener("change", relabel);
     relabel();
+    // A category that has a period (insurance, registration) shows its start and end dates.
+    importForm.addEventListener("change", (e) => {
+      if (!/^category_id_\d+$/.test(e.target.name || "")) return;
+      const row = e.target.closest("tr");
+      const fields = row.querySelector("[data-period-fields]");
+      const services = row.querySelector("[data-service-fields]");
+      const gst = row.querySelector("[data-gst-fields]");
+      const chosen = e.target.selectedOptions[0];
+      if (gst) gst.hidden = !(chosen && chosen.dataset.gstfree === "1") && !gst.querySelector("input").value;
+      if (fields) fields.hidden = !(chosen && chosen.dataset.period === "1");
+      if (services) services.hidden = !(chosen && chosen.dataset.service === "1");
+    });
+  }
+
+  // "Add an item" on an import row: a dialog that posts to the server and adds the item to every row's list,
+  // so nothing typed on the page is lost.
+  const serviceDialog = document.getElementById("service-dialog");
+  if (importForm && serviceDialog) {
+    const dialogForm = document.getElementById("service-dialog-form");
+    const dialogStatus = document.getElementById("service-dialog-status");
+    let opener = null;
+    importForm.addEventListener("click", (e) => {
+      const button = e.target.closest("[data-add-service]");
+      if (!button) return;
+      opener = button.closest("[data-service-fields]");
+      dialogForm.reset();
+      dialogStatus.textContent = "";
+      serviceDialog.showModal();
+      dialogForm.elements.name.focus();
+    });
+    document.getElementById("service-dialog-cancel").addEventListener("click", () => serviceDialog.close());
+    const addToRow = (fields, item, tick) => {
+      const list = fields.querySelector("[data-service-list]");
+      let box = [...list.querySelectorAll("input")].find((i) => i.value === String(item.id));
+      if (!box) {
+        const label = document.createElement("label");
+        label.className = "inline";
+        box = document.createElement("input");
+        box.type = "checkbox";
+        box.name = "service_item_" + fields.dataset.n;
+        box.value = item.id;
+        const text = document.createElement("small");
+        text.textContent = " " + item.name;
+        label.append(box, text);
+        list.append(label);
+      }
+      if (tick) box.checked = true;
+    };
+    dialogForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      dialogStatus.textContent = "Adding…";
+      try {
+        const res = await fetch(serviceDialog.dataset.serviceUrl, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: dialogForm.elements.name.value }),
+        });
+        const item = await res.json();
+        if (!res.ok) { dialogStatus.textContent = item.error || "Couldn't add it."; return; }
+        importForm.querySelectorAll("[data-service-fields]").forEach((f) => addToRow(f, item, f === opener));
+        serviceDialog.close();
+      } catch (err) {
+        dialogStatus.textContent = "Couldn't add it. Try again.";
+      }
+    });
   }
 
   // Pressing Import with files left neither ticked to import nor to skip: offer to skip them, so they
@@ -55,6 +149,30 @@ document.addEventListener("DOMContentLoaded", () => {
       relabel();
     }
   });
+  // A new car's import with no purchase invoice ticked: ask what the car is, in a dialog, before saving. The
+  // dialog's fields belong to the import form, so everything typed on the page is kept.
+  const carDialog = document.getElementById("car-dialog");
+  if (importForm && carDialog) {
+    const purchaseTicked = () => [...importForm.querySelectorAll("input[name^=include_]:checked")].some((box) => {
+      const select = importForm.elements["category_id_" + box.name.slice(8)];
+      const chosen = select && select.selectedOptions[0];
+      return chosen && chosen.dataset.purchase === "1";
+    });
+    importForm.addEventListener("submit", (e) => {
+      if (purchaseTicked() || importForm.elements.new_car_name.value.trim()) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();          // the page's own submit handler would lock the button
+      carDialog.showModal();
+      importForm.elements.new_car_name.focus();
+    });
+    document.getElementById("car-dialog-go").addEventListener("click", () => {
+      if (!importForm.elements.new_car_name.value.trim()) { importForm.elements.new_car_name.focus(); return; }
+      carDialog.close();
+      importForm.requestSubmit();
+    });
+    document.getElementById("car-dialog-cancel").addEventListener("click", () => carDialog.close());
+    if (carDialog.dataset.needsCar) carDialog.showModal();
+  }
   if (importForm && importForm.dataset.scanUrl) runImport(importForm);
 
   async function runImport(f) {
@@ -129,12 +247,13 @@ document.addEventListener("DOMContentLoaded", () => {
       } catch (e) {
         const tr = rows.insertRow();
         const td = tr.insertCell();
-        td.colSpan = 8;
+        td.colSpan = 9;
         td.textContent = `Couldn't read ${file.name} (${e.message}). Reload the page to try again.`;
       }
       bar.value = i + 1;
     }
     f.elements.count.value = total;
+    refreshAttach();
     submit.disabled = false;
     f.dispatchEvent(new Event("change"));
     ticking = false;
@@ -739,10 +858,27 @@ document.addEventListener("DOMContentLoaded", () => {
   const pdfInput = form.elements.invoice_file;
   const prefillHint = document.getElementById("prefill-hint");
   const touched = new Set();
-  ["car_id", "category_id", "date", "time", "amount", "odometer_km", "vendor"].forEach((name) => {
+  ["car_id", "category_id", "date", "time", "amount", "odometer_km", "vendor", "notes", "period_start", "period_end", "gst_amount", "card_payment_ref", "bpay_biller_code", "bpay_ref"].forEach((name) => {
     const el = form.elements[name];
     if (!el) return;
     ["input", "change"].forEach((ev) => el.addEventListener(ev, () => touched.add(name)));
+  });
+  // The period fields follow the category: only insurance, registration and the like have one.
+  const periodFields = document.getElementById("period-fields");
+  const periodShown = () => {
+    const chosen = form.elements.category_id.selectedOptions[0];
+    periodFields.hidden = !((chosen && chosen.dataset.period === "1") || form.elements.period_start.value || form.elements.period_end.value);
+  };
+  if (periodFields) form.elements.category_id.addEventListener("change", periodShown);
+  const gstField = document.getElementById("gst-field");
+  if (gstField) form.elements.category_id.addEventListener("change", () => {
+    const chosen = form.elements.category_id.selectedOptions[0];
+    gstField.hidden = !(chosen && chosen.dataset.gstfree === "1") && !form.elements.gst_amount.value;
+  });
+  const serviceFields = document.getElementById("service-fields");
+  if (serviceFields) form.elements.category_id.addEventListener("change", () => {
+    const chosen = form.elements.category_id.selectedOptions[0];
+    serviceFields.hidden = !(chosen && chosen.dataset.service === "1");
   });
   // Fill the form from what /api/prefill read in a PDF; `body` is the form data to send it.
   async function prefillFrom(body) {
@@ -765,6 +901,15 @@ document.addEventListener("DOMContentLoaded", () => {
       set("amount", "amount", data.amount);
       set("vendor", "vendor", data.vendor);
       set("odometer_km", "odometer", data.odometer_km);
+      set("notes", "notes", data.notes);
+      set("gst_amount", "GST", data.gst_amount);
+      set("card_payment_ref", "payment reference", data.card_payment_ref);
+      set("bpay_biller_code", "BPAY biller code", data.bpay_biller_code);
+      set("bpay_ref", "BPAY reference", data.bpay_ref);
+      set("period_start", "period start", data.period_start);
+      set("period_end", "period end", data.period_end);
+      if (periodFields) periodShown();
+      if (gstField && form.elements.gst_amount.value) gstField.hidden = false;
       if (data.odometer_km && filled.includes("odometer")) hint.textContent = "Read from the invoice.";
       else if (!data.odometer_km && !touched.has("odometer_km")) await fill(false);
       prefillHint.textContent = filled.length

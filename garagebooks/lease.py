@@ -342,11 +342,13 @@ def is_packaged(choice, covered, pool, kind):
     return bool(covered) and pool is not None and kind != "purchase"
 
 
-def effective_cost(amount, packaged, gst_free, pretax, posttax, rate_percent):
+def effective_cost(amount, packaged, gst_free, pretax, posttax, rate_percent, gst_amount=None):
     """What an expense costs after tax, to the cent (half away from zero). `pretax` and `posttax` are the
     covering lease's payments (None with no lease; payments summing to nothing count as no post-tax share);
     `rate_percent` is the marginal rate as a percentage (None: not entered). An expense paid personally costs
-    its invoice. A packaged one with no rate has no after-tax cost: None, never the invoice standing in."""
+    its invoice. A packaged one with no rate has no after-tax cost: None, never the invoice standing in.
+    `gst_amount` is the GST the document states, when it was read: it replaces the GST rule (`gst_free`, or one
+    eleventh), so what is left is `amount - gst_amount`."""
     if not packaged:
         return amount
     if rate_percent is None:
@@ -356,6 +358,10 @@ def effective_cost(amount, packaged, gst_free, pretax, posttax, rate_percent):
         pretax, posttax = Decimal(1), Decimal(0)
     with localcontext() as ctx:
         ctx.prec = 60            # one division, at the end, so the only rounding is to the cent
+        if gst_amount is not None:
+            numerator = (amount - gst_amount) * (pretax * (100 - rate_percent) + 100 * posttax)
+            denominator = 100 * (pretax + posttax)
+            return (numerator / denominator).quantize(CENTS, ROUND_HALF_UP)
         numerator = amount * (1 if gst_free else 10) * (pretax * (100 - rate_percent) + 100 * posttax)
         denominator = (1 if gst_free else 11) * 100 * (pretax + posttax)
         return (numerator / denominator).quantize(CENTS, ROUND_HALF_UP)
@@ -400,7 +406,7 @@ def after_tax_lines(rows, key, rate_percent):
     for row in rows:
         packaged = is_packaged(row["packaged"], row["lease_id"] is not None, row["budget_pool"], row["kind"])
         cost = effective_cost(row["amount"], packaged, row["gst_free"], row["pretax_payment"], row["posttax_payment"],
-                              rate_percent)
+                              rate_percent, gst_amount=row["gst_amount"])
         line = lines.setdefault(key(row), {"invoice": Decimal(0), "effective": Decimal(0), "packaged": 0})
         line["invoice"] += row["amount"]
         line["packaged"] += 1 if packaged else 0

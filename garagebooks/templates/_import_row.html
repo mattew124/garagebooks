@@ -11,6 +11,8 @@
 {% if kind != 'mail' %}
 <br><label class="inline"><input type="checkbox" name="rename_{{ n }}" {{ 'checked' if r.rename }}>
           <small>Rename {{ 'in OneDrive' if kind == 'onedrive' else 'the file' }} to {% if r.new_name %}<em>{{ r.new_name }}</em> (from the values below){% else %}<em>yymmdd - category - vendor</em>{% endif %}</small></label>{% endif %}
+        <br><label class="inline"><small>Attach to</small>
+          <select name="attach_{{ n }}" data-attach data-selected="{{ r.attach }}"><option value="">Its own expense</option></select></label>
         {% for d in r.duplicates %}<br><small class="dup">Possible duplicate: <a href="{{ d.edit_url }}" target="_blank" rel="noopener noreferrer">{{ d.date }} · {{ d.category }}{% if d.vendor %} · {{ d.vendor }}{% endif %} · {{ d.amount_text }}</a></small>{% endfor %}
         {% if errors.get(n) %}<br><span class="error">{{ errors[n] }}</span>{% elif r.note %}<br><small>{{ r.note }}</small>{% endif %}
         <input type="hidden" name="url_{{ n }}" value="{{ r.url }}">
@@ -23,9 +25,37 @@
       <td data-label="Category">
         <select name="category_id_{{ n }}">
           <option value="">Choose…</option>
-          {% for c in categories %}<option value="{{ c.id }}" {{ 'selected' if c.id|string == r.category_id }}>{{ c.name }}</option>{% endfor %}
+          {% for c in categories %}<option value="{{ c.id }}" data-period="{{ 1 if c.has_period else 0 }}" data-service="{{ 1 if c.name == 'Service' else 0 }}" data-gstfree="{{ 1 if c.gst_free else 0 }}" data-purchase="{{ 1 if c.kind == 'purchase' else 0 }}" {{ 'selected' if c.id|string == r.category_id }}>{{ c.name }}</option>{% endfor %}
         </select></td>
       <td data-label="Vendor"><input name="vendor_{{ n }}" maxlength="500" value="{{ r.vendor }}"></td>
       <td class="num" data-label="Amount"><input name="amount_{{ n }}" inputmode="decimal" value="{{ r.amount }}"></td>
       <td class="num" data-label="Odometer"><input name="odometer_km_{{ n }}" inputmode="decimal" value="{{ r.odometer_km }}">{% if r.odo_note %}<small>{{ r.odo_note }}</small>{% endif %}</td>
+      {% set has_period = (categories|selectattr('id', 'equalto', r.category_id|int(0))|selectattr('has_period')|list) or r.period_start or r.period_end %}
+      <td data-label="Notes"><input name="notes_{{ n }}" maxlength="2000" value="{{ r.notes }}" aria-label="Notes" placeholder="Notes">
+        <span class="period" data-period-fields {{ '' if has_period else 'hidden' }}>
+          <label><small>Period from</small> <input type="date" name="period_start_{{ n }}" value="{{ r.period_start }}"></label>
+          <label><small>to</small> <input type="date" name="period_end_{{ n }}" value="{{ r.period_end }}"></label>
+        </span>
+        {% set gst_on = (categories|selectattr('id', 'equalto', r.category_id|int(0))|selectattr('gst_free')|list) or r.gst_amount %}
+        <label class="gst" data-gst-fields {{ '' if gst_on else 'hidden' }}><small>GST in the amount</small>
+          <input name="gst_amount_{{ n }}" inputmode="decimal" value="{{ r.gst_amount }}"></label>
+        <input type="hidden" name="card_payment_ref_{{ n }}" value="{{ r.card_payment_ref }}">
+        <input type="hidden" name="bpay_biller_code_{{ n }}" value="{{ r.bpay_biller_code }}">
+        <input type="hidden" name="bpay_ref_{{ n }}" value="{{ r.bpay_ref }}">
+        {% if r.car_fields %}
+        <fieldset class="car-details">
+          <label class="inline"><input type="checkbox" name="car_fill_{{ n }}" {{ 'checked' if r.car_fill }}>
+            <small>{{ 'Create the car from this invoice' if car.id == 0 else 'Fill in the car\'s details from this invoice' }}</small></label>
+          {% for key, label in (('make', 'Make'), ('model', 'Model'), ('vin', 'VIN'), ('build_year', 'Year built'), ('model_year', 'Model year'), ('body_type', 'Body type')) if key in r.car_fields %}
+          <label><small>{{ label }}</small> <input name="car_{{ key }}_{{ n }}" value="{{ r['car_' ~ key] }}" maxlength="40" autocomplete="off"></label>
+          {% endfor %}
+          <small>{{ 'Only blanks are filled in; nothing the car already has is replaced.' if car.id != 0 else 'The car is made when you press Import.' }}</small>
+        </fieldset>
+        {% endif %}
+        {% set is_service = categories|selectattr('id', 'equalto', r.category_id|int(0))|selectattr('name', 'equalto', 'Service')|list %}
+        <fieldset class="service-items" data-service-fields data-n="{{ n }}" {{ '' if is_service else 'hidden' }}>
+          <legend><small>Service items</small></legend>
+          <span data-service-list>{% for i in service_items() %}<label class="inline"><input type="checkbox" name="service_item_{{ n }}" value="{{ i.id }}" {{ 'checked' if i.id|string in r.services }}> <small>{{ i.name }}</small></label>{% endfor %}</span>
+          <button type="button" class="linklike" data-add-service>Add an item…</button>
+        </fieldset></td>
     </tr>

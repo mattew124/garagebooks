@@ -927,3 +927,148 @@ CREATE INDEX IF NOT EXISTS mail_import_expense_idx ON garagebooks.mail_import (e
 --                  /onedrive/callback, the address its installer registered. Saving the registration again moves it.
 ALTER TABLE garagebooks.onedrive_account ADD COLUMN IF NOT EXISTS callback text
     CHECK (callback IS NULL OR callback = 'microsoft');
+
+-- Import rows and periods. Added to databases made before them; safe to run again.
+--   expense.period_start / period_end  the days an insurance policy or a registration covers (read from the
+--                                      document when imported). Either may be empty; if both are there the end
+--                                      is not before the start.
+--   category.has_period                the category's expenses have such a period (insurance and registration
+--                                      by default; the owner's later edits are never overwritten)
+ALTER TABLE garagebooks.expense ADD COLUMN IF NOT EXISTS period_start date;
+ALTER TABLE garagebooks.expense ADD COLUMN IF NOT EXISTS period_end date;
+ALTER TABLE garagebooks.expense DROP CONSTRAINT IF EXISTS expense_period_order;
+ALTER TABLE garagebooks.expense ADD CONSTRAINT expense_period_order
+    CHECK (period_start IS NULL OR period_end IS NULL OR period_end >= period_start);
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_schema = 'garagebooks' AND table_name = 'category' AND column_name = 'has_period') THEN
+        ALTER TABLE garagebooks.category ADD COLUMN has_period boolean NOT NULL DEFAULT false;
+        ALTER TABLE garagebooks.category DISABLE TRIGGER log_change;
+        UPDATE garagebooks.category SET has_period = true WHERE name IN ('Insurance', 'Registration');
+        ALTER TABLE garagebooks.category ENABLE TRIGGER log_change;
+    END IF;
+END $$;
+
+-- Services: the Service category, and the items a service covered (fuel filter, brake fluid...), chosen per
+-- expense. The list is the owner's to edit on the Categories page, so it is seeded once, when the table is
+-- made: running this file again never brings back an item that was removed. An item's name is unique ignoring
+-- case. Removing an item unlinks it from the expenses that had it; renaming keeps the links.
+--   service_item          the list
+--   expense_service_item  which items an expense had
+--   expense_service       one row per expense and item, with what Grafana needs to chart or tabulate them
+DO $$
+BEGIN
+    IF to_regclass('garagebooks.service_item') IS NULL THEN
+        CREATE TABLE garagebooks.service_item (
+            id         smallserial PRIMARY KEY,
+            name       text NOT NULL CHECK (btrim(name) <> '' AND length(name) <= 60),
+            sort_order integer NOT NULL DEFAULT 100
+        );
+        INSERT INTO garagebooks.service_item (name, sort_order) VALUES
+            ('Fuel filter', 10), ('Oil filter', 20), ('Engine oil', 30), ('Tyre rotation', 40),
+            ('Windscreen washer fluid', 50), ('Windscreen wipers', 60), ('Brakes', 70), ('Brake fluid', 80),
+            ('Timing belt', 90), ('Air filter', 91), ('Coolant', 92), ('Cabin air filter', 93);
+    END IF;
+END $$;
+CREATE UNIQUE INDEX IF NOT EXISTS service_item_name_key ON garagebooks.service_item (lower(name));
+CREATE TABLE IF NOT EXISTS garagebooks.expense_service_item (
+    expense_id bigint   NOT NULL REFERENCES garagebooks.expense (id) ON DELETE CASCADE,
+    item_id    smallint NOT NULL REFERENCES garagebooks.service_item (id) ON DELETE CASCADE,
+    PRIMARY KEY (expense_id, item_id)
+);
+CREATE INDEX IF NOT EXISTS expense_service_item_item_idx ON garagebooks.expense_service_item (item_id);
+-- The Service category is added once, in the maintenance budget pool, and not as anyone's edit: kept out of the
+-- change history. An existing category of that name is left as it is.
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM garagebooks.category WHERE name = 'Service') THEN
+        ALTER TABLE garagebooks.category DISABLE TRIGGER log_change;
+        INSERT INTO garagebooks.category (name, kind, sort_order, budget_pool) VALUES ('Service', 'running', 85, 'maintenance');
+        ALTER TABLE garagebooks.category ENABLE TRIGGER log_change;
+    END IF;
+END $$;
+CREATE OR REPLACE VIEW garagebooks.expense_service AS
+    SELECT e.id AS expense_id, e.car_id, e.occurred_at, e.amount, e.vendor, e.odometer_km, i.id AS item_id, i.name AS item
+    FROM garagebooks.expense_service_item l
+    JOIN garagebooks.expense e ON e.id = l.expense_id
+    JOIN garagebooks.service_item i ON i.id = l.item_id;
+
+-- Registration's GST, and the payment references on a registration notice.
+--   expense.gst_amount        the GST in the amount, as the document states it. When there is one it replaces the
+--                             category's GST rule (category.gst_free, or one eleventh of the amount) in
+--                             expense_after_tax(): GST on a registration is only on its CTP insurance part, so
+--                             neither rule fits. Between 0 and the amount (the same sign as the amount).
+--   expense.card_payment_ref, bpay_biller_code, bpay_ref
+--                             how the notice says to pay it. Never listed or charted; the edit form keeps them in a
+--                             closed "Payment references" section, and the change history doesn't show them.
+ALTER TABLE garagebooks.expense ADD COLUMN IF NOT EXISTS gst_amount numeric(12, 2);
+ALTER TABLE garagebooks.expense DROP CONSTRAINT IF EXISTS expense_gst_amount_range;
+ALTER TABLE garagebooks.expense ADD CONSTRAINT expense_gst_amount_range
+    CHECK (gst_amount IS NULL OR (amount >= 0 AND gst_amount BETWEEN 0 AND amount)
+                              OR (amount < 0 AND gst_amount BETWEEN amount AND 0));
+ALTER TABLE garagebooks.expense ADD COLUMN IF NOT EXISTS card_payment_ref text
+    CHECK (card_payment_ref IS NULL OR length(card_payment_ref) <= 60);
+ALTER TABLE garagebooks.expense ADD COLUMN IF NOT EXISTS bpay_biller_code text
+    CHECK (bpay_biller_code IS NULL OR length(bpay_biller_code) <= 60);
+ALTER TABLE garagebooks.expense ADD COLUMN IF NOT EXISTS bpay_ref text
+    CHECK (bpay_ref IS NULL OR length(bpay_ref) <= 60);
+
+-- The after-tax function again, with the stored GST: ex_gst = amount - gst_amount when there is one.
+CREATE OR REPLACE FUNCTION garagebooks.expense_after_tax(tz text)
+RETURNS TABLE (expense_id bigint, car_id smallint, occurred_at timestamptz, amount numeric,
+               packaged boolean, effective_cost numeric)
+LANGUAGE sql STABLE
+AS $fn$
+    SELECT e.id, e.car_id, e.occurred_at, e.amount, p.packaged,
+           CASE WHEN NOT p.packaged THEN e.amount
+                WHEN r.rate IS NULL THEN NULL
+                WHEN e.gst_amount IS NOT NULL
+                    THEN round((e.amount - e.gst_amount) * (q.pre * (100 - r.rate) + 100 * q.post)
+                               / (100 * (q.pre + q.post)), 2)
+                ELSE round(e.amount * CASE WHEN k.gst_free THEN 1 ELSE 10 END
+                               * (q.pre * (100 - r.rate) + 100 * q.post)
+                               / ((CASE WHEN k.gst_free THEN 1 ELSE 11 END) * 100 * (q.pre + q.post)), 2) END
+    FROM garagebooks.expense e
+    JOIN garagebooks.category k ON k.id = e.category_id
+    LEFT JOIN LATERAL (SELECT l.pretax_payment, l.posttax_payment FROM garagebooks.lease l
+                       WHERE l.car_id = e.car_id
+                         AND (e.occurred_at AT TIME ZONE tz)::date BETWEEN l.start_date AND l.end_date
+                       ORDER BY l.start_date LIMIT 1) l ON true
+    CROSS JOIN LATERAL (SELECT COALESCE(e.packaged, l.pretax_payment IS NOT NULL AND k.budget_pool IS NOT NULL
+                                                    AND k.kind <> 'purchase') AS packaged) p
+    CROSS JOIN LATERAL (SELECT CASE WHEN COALESCE(l.pretax_payment, 0) + COALESCE(l.posttax_payment, 0) > 0
+                                    THEN l.pretax_payment ELSE 1 END AS pre,
+                                   CASE WHEN COALESCE(l.pretax_payment, 0) + COALESCE(l.posttax_payment, 0) > 0
+                                    THEN l.posttax_payment ELSE 0 END AS post) q
+    CROSS JOIN (SELECT (SELECT marginal_tax_rate FROM garagebooks.setting WHERE id = 1) AS rate) r
+$fn$;
+
+-- Car details read from the purchase invoice (all optional): the VIN (17 characters, without I, O and Q), the
+-- year it was built, its model year and its body type. Filled in from the import, only where blank; the Cars
+-- page edits them. None of them is a TeslaMate-sourced field, so a sync never touches them.
+ALTER TABLE garagebooks.car ADD COLUMN IF NOT EXISTS vin text
+    CHECK (vin IS NULL OR vin ~ '^[A-HJ-NPR-Z0-9]{17}$');
+ALTER TABLE garagebooks.car ADD COLUMN IF NOT EXISTS build_year smallint
+    CHECK (build_year IS NULL OR build_year BETWEEN 1900 AND 2100);
+ALTER TABLE garagebooks.car ADD COLUMN IF NOT EXISTS model_year smallint
+    CHECK (model_year IS NULL OR model_year BETWEEN 1900 AND 2100);
+ALTER TABLE garagebooks.car ADD COLUMN IF NOT EXISTS body_type text
+    CHECK (body_type IS NULL OR (btrim(body_type) <> '' AND length(body_type) <= 40));
+
+-- Documents attached to an expense: the other PDFs merged into it on the import page (an invoice plus its service
+-- report, say). The expense's own invoice stays in expense.invoice_url / invoice_path; each document is a link
+-- (OneDrive) or a path in the invoice folder on the server, one or the other, as an invoice is, and counts as known
+-- so it is never offered for import again. Deleted with its expense; removing one only forgets it (the file stays).
+CREATE TABLE IF NOT EXISTS garagebooks.expense_document (
+    id           bigserial PRIMARY KEY,
+    expense_id   bigint NOT NULL REFERENCES garagebooks.expense (id) ON DELETE CASCADE,
+    name         text NOT NULL CHECK (btrim(name) <> '' AND length(name) <= 300),
+    invoice_url  text CHECK (invoice_url IS NULL OR invoice_url ~* '^https://[^[:space:]]+$'),
+    invoice_path text CHECK (invoice_path IS NULL OR (invoice_path LIKE '/_%' AND length(invoice_path) <= 1024)),
+    created_at   timestamptz NOT NULL DEFAULT now(),
+    CHECK ((invoice_url IS NULL) <> (invoice_path IS NULL))
+);
+CREATE INDEX IF NOT EXISTS expense_document_expense_idx ON garagebooks.expense_document (expense_id);
+CREATE UNIQUE INDEX IF NOT EXISTS expense_document_url_key ON garagebooks.expense_document (invoice_url) WHERE invoice_url IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS expense_document_path_key ON garagebooks.expense_document (invoice_path) WHERE invoice_path IS NOT NULL;

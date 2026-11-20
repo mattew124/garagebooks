@@ -296,8 +296,64 @@ def parse_category_name(raw):
     return name
 
 
+MAX_SERVICE_ITEM_LEN = 60
+
+
+def parse_service_item_name(raw):
+    name = " ".join((raw or "").split())
+    if not name:
+        raise ValueError("Enter a name for the item.")
+    if "\x00" in name:
+        raise ValueError("The name can't contain that character.")
+    if len(name) > MAX_SERVICE_ITEM_LEN:
+        raise ValueError(f"The name is too long (max {MAX_SERVICE_ITEM_LEN} characters).")
+    return name
+
+
+def parse_service_ids(raw_ids, valid_ids):
+    """Item ids ticked on a form: those that are real items, once each. Anything else is ignored (a stale page)."""
+    got = []
+    for raw in raw_ids:
+        try:
+            number = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if number in valid_ids and number not in got:
+            got.append(number)
+    return got
+
+
 MAX_CAR_NAME_LEN = 100
 MAX_CAR_TEXT_LEN = 60
+
+
+_VIN = re.compile(r"[A-HJ-NPR-Z0-9]{17}")
+MAX_BODY_TYPE_LEN = 40
+
+
+def parse_car_extras(get):
+    """A car's VIN, build year, model year and body type, from `get(field)` (raw text or None) -> (values, errors).
+    All optional: blank is None. The VIN is upper case without spaces."""
+    values, errors = {}, {}
+    vin = re.sub(r"\s+", "", get("vin") or "").upper()
+    if vin and not _VIN.fullmatch(vin):
+        errors["vin"] = "A VIN is 17 letters and digits (no I, O or Q)."
+    values["vin"] = vin or None
+    for field, label in (("build_year", "The year built"), ("model_year", "The model year")):
+        raw = (get(field) or "").strip()
+        try:
+            year = int(raw) if raw else None
+            if year is not None and not 1900 <= year <= 2100:
+                raise ValueError
+        except ValueError:
+            errors[field] = f"{label} is a year such as 2025."
+            year = None
+        values[field] = year
+    body = " ".join((get("body_type") or "").split())
+    if len(body) > MAX_BODY_TYPE_LEN:
+        errors["body_type"] = f"The body type is too long (max {MAX_BODY_TYPE_LEN} characters)."
+    values["body_type"] = body or None
+    return values, errors
 
 
 def parse_car_form(form, kinds):
@@ -318,7 +374,8 @@ def parse_car_form(form, kinds):
     values["name"] = name or car_name(values["make"], values["model"])
     if not values["name"]:
         errors["name"] = "Enter the make and model, or a name for the car."
-    return values, errors
+    extras, more = parse_car_extras(form.get)
+    return {**values, **extras}, {**errors, **more}
 
 
 def car_name(make, model):
@@ -479,6 +536,32 @@ def parse_notify_format(raw):
     return choice
 
 
+MAX_PAYMENT_REF_LEN = 60
+_PAYMENT_REF = re.compile(r"[A-Za-z0-9][A-Za-z0-9 .\-/]*")
+
+
+def parse_payment_ref(raw, label):
+    """A card payment reference or BPAY code as printed: letters, digits and a few separators. Blank -> None."""
+    text = " ".join((raw or "").split())
+    if not text:
+        return None
+    if len(text) > MAX_PAYMENT_REF_LEN:
+        raise ValueError(f"{label} is too long (max {MAX_PAYMENT_REF_LEN} characters).")
+    if not _PAYMENT_REF.fullmatch(text):
+        raise ValueError(f"{label} can only hold letters, digits, spaces and . - /")
+    return text
+
+
+def parse_gst_amount(raw, amount):
+    """The GST the document states: blank -> None. Money between nothing and the amount (the amount's own sign)."""
+    if not (raw or "").strip():
+        return None
+    gst = parse_amount(raw)
+    if amount is not None and not (min(Decimal(0), amount) <= gst <= max(Decimal(0), amount)):
+        raise ValueError("GST must be between nothing and the amount.")
+    return gst
+
+
 def parse_expense_form(form, tz, valid_car_ids, valid_category_ids):
     """-> (values, errors). `values` is only meaningful when `errors` is empty."""
     values, errors = {}, {}
@@ -508,6 +591,15 @@ def parse_expense_form(form, tz, valid_car_ids, valid_category_ids):
     attempt("vendor", _text, form.get("vendor"), MAX_TEXT_LEN, "Vendor")
     attempt("notes", _text, form.get("notes"), MAX_NOTES_LEN, "Notes")
     attempt("packaged", parse_paid_from, form.get("packaged"))
+    attempt("period_start", parse_optional_date, form.get("period_start"))
+    attempt("period_end", parse_optional_date, form.get("period_end"))
+    attempt("gst_amount", parse_gst_amount, form.get("gst_amount"), values.get("amount"))
+    for field, label in (("card_payment_ref", "Card payment reference"), ("bpay_biller_code", "BPAY biller code"),
+                         ("bpay_ref", "BPAY reference")):
+        attempt(field, parse_payment_ref, form.get(field), label)
+    start, end = values.get("period_start"), values.get("period_end")
+    if start and end and end < start:
+        errors["period_end"] = "The period's end can't be before its start."
 
     try:
         values["occurred_at"] = parse_local_datetime(form.get("date"), form.get("time"), tz)

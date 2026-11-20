@@ -106,6 +106,13 @@ works with TeslaMate present, absent or held back (when its figures are held bac
 
 <!-- screenshot: dashboard-km-pace - The Kilometre pace panel on the dashboard -->
 
+## Service items in your own panels
+
+The items chosen on Service expenses are in the `garagebooks.expense_service` view: one row per expense and item,
+with `expense_id`, `car_id`, `occurred_at`, `amount`, `vendor`, `odometer_km`, `item_id` and `item`. A table panel
+such as `SELECT occurred_at, item, vendor FROM garagebooks.expense_service ORDER BY occurred_at DESC` lists
+when each item was last done. The shipped dashboard doesn't use it yet.
+
 ## Rebates and refunds
 
 A rebate or refund (a state EV rebate, an insurance refund for ending a policy early) is an expense

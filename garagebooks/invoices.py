@@ -12,7 +12,8 @@ import re
 import shutil
 import subprocess  # nosec B404 - runs poppler and tesseract, list arguments only
 import tempfile
-from datetime import date, datetime
+import calendar
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
@@ -203,6 +204,13 @@ def _option_figures(text):
     return options
 
 
+# A dealer's invoice for the car itself: "Drive away price", "Total payable", "Balance payable" (whole dollars
+# too). The largest wins, so a balance after a deposit never beats the price. A deposit line isn't one.
+PURCHASE_TOTAL = re.compile(
+    r"^\W*(?:total\s+(?:payable|price|vehicle\s+price|amount\s+payable)|drive[\s-]*away(?:\s+price)?|balance\s+(?:payable|due)"
+    r"|amount\s+payable)\b[^\d\n$]*(?:AUD\s*)?\$?\s*([\d,]+(?:\.\d{2})?)\s*$", re.I)
+
+
 def _amount(text, multi="max"):
     options = _option_figures(text)
     if options:      # the Settings choice decides, whatever other totals the document shows
@@ -211,6 +219,12 @@ def _amount(text, multi="max"):
     totals = []
     for line in text.splitlines():
         m = TOTAL_LINE.match(line.strip())
+        if m:
+            try:
+                totals.append(Decimal(m.group(1).replace(",", "")))
+            except InvalidOperation:
+                pass
+        m = PURCHASE_TOTAL.match(line.strip())
         if m:
             try:
                 totals.append(Decimal(m.group(1).replace(",", "")))
@@ -374,6 +388,199 @@ def _by_labels(text, field, labels):
     return ("one", next(iter(values))) if len(values) == 1 else ("many", None)
 
 
+def service_items_in(text, names):
+    """The service items (by name, in the order of `names`'s first appearance in the text) the text mentions.
+    Whole words, any case; the longest names are matched first and removed, so 'Cabin air filter' doesn't also
+    tick 'Air filter'."""
+    low = text.lower()
+    found = []
+    for name in sorted(names, key=len, reverse=True):
+        pattern = re.compile(r"\b" + re.escape(name.lower()) + r"\b")
+        m = pattern.search(low)
+        if m:
+            found.append((m.start(), name))
+            low = pattern.sub(lambda hit: " " * len(hit.group(0)), low)
+    return [name for _, name in sorted(found)]
+
+
+# ---- a registration notice: the GST on its CTP part, and how to pay it ---------------------------------------
+
+_GST_AFTER = re.compile(r"\bGST\b([^\n]{0,90})", re.I)
+_EX_GST = re.compile(r"excl|\bex\.?\s+gst|before\s+gst", re.I)
+CARD_REF = re.compile(r"card\s+payment\s+ref(?:erence)?(?:\s+(?:no|number)\.?)?\s*:?\s*(\d+(?: \d+){0,5}|[A-Za-z0-9]{6,30})", re.I)
+BILLER = re.compile(r"biller\s+code\s*:?\s*(\d{3,8})", re.I)
+BPAY_REF = re.compile(r"\bref(?:erence)?(?:\s+(?:no|number)\.?)?\s*:?\s*(\d+(?: \d+){0,5})", re.I)
+
+
+def _gst_stated(text, total, multi):
+    """The GST a notice states (the CTP insurance part's): the figure after a 'GST' label, one per line. Two
+    figures on one line are 6 and 12 month options, chosen as the amount is. Never more than the total."""
+    for m in _GST_AFTER.finditer(text):
+        if _EX_GST.search(m.group(0)):
+            continue
+        figures = [Decimal(f.replace(",", "")) for f in re.findall(r"\$\s*([\d,]+\.\d{2})", m.group(1))]
+        if not figures:
+            continue
+        gst = figures[0] if len(figures) == 1 else {"max": max, "min": min}[multi](figures) if multi in ("max", "min") else None
+        if gst is not None and (total is None or gst <= total):
+            return gst
+    return None
+
+
+def _payment_references(text):
+    """-> (card payment reference, BPAY biller code, BPAY reference), each None when the notice has none."""
+    card = CARD_REF.search(text)
+    bpay = re.search(r"\bBPAY\b", text)
+    after = text[bpay.end():bpay.end() + 120] if bpay else ""
+    biller, ref = BILLER.search(after), BPAY_REF.search(after)
+    return (card.group(1) if card else None, biller.group(1) if biller else None, ref.group(1) if ref else None)
+
+
+# ---- the car a purchase invoice describes ------------------------------------------------------------------
+
+_VIN_LABEL = re.compile(r"\b(?:VIN|chassis(?:\s+(?:no|number)\.?)?|vehicle\s+identification\s+number)\s*(?:/\s*chassis(?:\s+no\.?)?)?\s*[:#]?\s*"
+                        r"([A-HJ-NPR-Z0-9]{17})(?![A-Za-z0-9])", re.I)
+_BUILD_YEAR = re.compile(r"(?:year\s+of\s+manufacture|date\s+of\s+manufacture|manufactured|build\s+(?:date|year)|year\s+built)"
+                         r"\s*:?\s*(?:\d{1,2}[/ .-])?(\d{4})\b", re.I)
+_MODEL_YEAR = re.compile(r"\b(?:model\s+year|year)\s*:\s*(\d{4})\b", re.I)
+_BODY = re.compile(r"\bbody\s*(?:type|style)\s*:?\s*([A-Za-z][A-Za-z /-]{1,38}?)(?=\s{2,}|\n|$)", re.I)
+_MAKE = re.compile(r"\bmake\s*:\s*([A-Za-z][A-Za-z-]{1,29})", re.I)
+_MODEL = re.compile(r"\bmodel\s*:\s*(?!year)([A-Za-z0-9][A-Za-z0-9 -]{0,29}?)(?=\s{2,}|\n|$)", re.I)
+
+
+def _car_details(text):
+    """What a purchase invoice says about the car, as far as it says it: VIN, year built, model year, body
+    type, make and model. A plain 'Year' is the model year; manufacture and build dates are the year built."""
+    out = {}
+    for key, pattern, convert in (("vin", _VIN_LABEL, str.upper), ("build_year", _BUILD_YEAR, int), ("model_year", _MODEL_YEAR, int),
+                                  ("body_type", _BODY, str.strip), ("make", _MAKE, str.strip), ("model", _MODEL, str.strip)):
+        m = pattern.search(text)
+        if m:
+            out[key] = convert(m.group(1))
+    return out
+
+
+# ---- what a row can say beyond the basics: skip, notes, the period covered, the issuing authority -------
+
+# Words that make a document an invoice, receipt, notice or policy: without one (and without an amount) it
+# is probably a brochure or a covering letter, so the import row starts skipped.
+INVOICE_WORDS = re.compile(
+    r"\b(?:tax\s+invoice|invoice|receipt|total|amount\s+due|amount\s+payable|balance\s+(?:due|payable)|premium|renewal"
+    r"|notice|policy|certificate\s+of\s+insurance|statement|quote|payable)\b", re.I)
+
+
+def _looks_like_an_invoice(text, name):
+    return bool(INVOICE_WORDS.search(text) or INVOICE_WORDS.search(name))
+
+
+# What an insurer's endorsement or a refund says, as short notes: the first match of each, in this order.
+_NOTE_RULES = (
+    (re.compile(r"change\s+of\s+address", re.I), "Change of address"),
+    (re.compile(r"additional\s+premium", re.I), "Additional premium"),
+    (re.compile(r"(?:refund|return)\s+of\s+premium|premium\s+refund", re.I), "Refund of premium"),
+    (re.compile(r"policy\s+(?:change|amendment)|endorsement", re.I), "Policy change"),
+)
+_MONTHS = re.compile(r"\b(\d{1,2})\s+months?\b", re.I)
+_DATE_ANY = re.compile(_DATE_VALUE)
+
+
+def _find_dates(text, limit=2):
+    """Up to `limit` dates in `text`, in order."""
+    found = []
+    for m in _DATE_ANY.finditer(text):
+        got = (_valid(int(m.group(3)), int(m.group(2)), int(m.group(1))) if m.group(1)
+               else _parse_date(f"{m.group(4)} {m.group(5)} {m.group(6)}"))
+        if got:
+            found.append(got)
+        if len(found) == limit:
+            break
+    return found
+
+
+def _after(text, pattern, span=90):
+    """The text just after the first match of `pattern` (a few words and dates' worth), or ''."""
+    m = re.search(pattern, text, re.I)
+    return text[m.end():m.end() + span] if m else ""
+
+
+def _add_months(day, months):
+    index = day.year * 12 + day.month - 1 + months
+    year, month = divmod(index, 12)
+    return date(year, month + 1, min(day.day, calendar.monthrange(year, month + 1)[1]))
+
+
+def _registration_months(text, multi):
+    """The months a registration notice covers: its 'Registration period' line, or the 6 and 12 month options
+    on the 'Amount due' line (the Settings choice picks one, as it does for the amount)."""
+    for pattern in (r"registration\s+period\b", r"\bamount\s+due\b"):
+        figures = sorted({int(n) for n in _MONTHS.findall(_after(text, pattern, 70).split("\n")[0])})
+        if len(figures) == 1:
+            return figures[0]
+        if len(figures) > 1:
+            return {"max": figures[-1], "min": figures[0]}.get(multi)
+    return None
+
+
+def _period(text, category, multi):
+    """-> (start, end) of the insurance or registration period the document covers; either may be None."""
+    both = _find_dates(_after(text, r"period\s+of\s+insurance\s*:?\s*(?:from)?|(?:registration|policy)\s+period\s*:?\s*(?:from)?"))
+    start = end = None
+    if len(both) >= 2:
+        start, end = both[0], both[1]
+    else:
+        begins = _find_dates(_after(text, r"policy\s+(?:start|effective|commencement)(?:\s+date)?\s*:?", 40), 1)
+        ends = _find_dates(_after(text, r"policy\s+(?:end|expiry|finish)(?:\s+date)?\s*:?", 40), 1)
+        start, end = begins[0] if begins else None, ends[0] if ends else None
+    if end is None:
+        expiries = _find_dates(_after(text, r"(?:registration\s+)?expiry\s+date\s*:?", 70).split("\n")[0], 2)
+        if len(expiries) == 1:
+            end = expiries[0]
+        elif len(expiries) == 2 and multi in ("max", "min"):
+            end = max(expiries) if multi == "max" else min(expiries)
+    if start is None and end is not None and (category or "").lower() == "registration":
+        months = _registration_months(text, multi)
+        if months:
+            start = _add_months(end, -months) + timedelta(days=1)
+    if start and end and end < start:
+        return None, None
+    return start, end
+
+
+def _notes(text, category, multi):
+    """Short notes a row can fill in: what an insurance endorsement changes, a refund, the months a
+    registration covers. '' when nothing can be read easily."""
+    notes = [label for pattern, label in _NOTE_RULES if pattern.search(text)]
+    if re.search(r"\brefund\b", text, re.I) and not any("efund" in n for n in notes):
+        notes.append("Refund")
+    if (category or "").lower() == "registration":
+        months = _registration_months(text, multi)
+        if months:
+            notes.insert(0, f"{months} months registration")
+    return "; ".join(n if i == 0 else n[:1].lower() + n[1:] for i, n in enumerate(notes))
+
+
+# The authority that issues a registration notice: the vendor is that, not the CTP insurer the notice names.
+_AUTHORITY_WORDS = {"of", "and", "for", "the"}
+AUTHORITY = re.compile(r"\b(Department\s+of\s+[A-Z][\w&']*(?:\s+[\w&']+){0,6}|Transport\s+for\s+[A-Z][\w]*|VicRoads"
+                       r"|Service\s+NSW|Main\s+Roads\s+Western\s+Australia|Registration\s+Services)")
+
+
+def _authority(text):
+    for column in re.split(r"\s{2,}|\n", text):
+        m = AUTHORITY.match(column.strip())
+        if m:
+            words = []
+            for word in m.group(1).split():
+                if word[0].isupper() or word.lower() in _AUTHORITY_WORDS:
+                    words.append(word)
+                else:
+                    break
+            while words and words[-1].lower() in _AUTHORITY_WORDS:
+                words.pop()
+            return " ".join(words)[:100]
+    return None
+
+
 def propose(folder, name, text, categories, learned=None, multi_amount=None):
     """-> {date, category, vendor, amount, odometer_km, missing}. `missing` names the
     required fields (date, category, amount) that couldn't be worked out. `learned` is
@@ -417,7 +624,19 @@ def propose(folder, name, text, categories, learned=None, multi_amount=None):
     if vendor is None and named and category == named:
         vendor = _filename_vendor(name, named)
 
-    out = {"date": when, "category": category, "vendor": vendor, "amount": amount, "odometer_km": odometer}
+    registration = (category or "").lower() == "registration"
+    if registration:
+        vendor = _authority(text) or vendor
+    start, end = _period(text, category, multi_amount or "max")
+    gst = _gst_stated(text, amount, multi_amount or "max") if registration else None
+    card_ref, biller, bpay_ref = _payment_references(text) if registration else (None, None, None)
+    out = {"date": when, "category": category, "vendor": vendor, "amount": amount, "odometer_km": odometer,
+           "car_details": _car_details(text),
+           "gst_amount": gst, "card_payment_ref": card_ref, "bpay_biller_code": biller, "bpay_ref": bpay_ref,
+           "period_start": start, "period_end": end, "notes": _notes(text, category, multi_amount or "max"),
+           # Readable, yet no amount and nothing that reads as an invoice: a brochure, say. A scan with no text
+           # at all is not suggested for skipping: nobody can tell what it is.
+           "suggest_skip": bool(text.strip()) and amount is None and not _looks_like_an_invoice(text, name)}
     out["missing"] = [f for f in ("date", "category", "amount") if out[f] is None]
     return out
 

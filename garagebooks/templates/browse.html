@@ -3,7 +3,8 @@
 {% block title %}Choose folder{% endblock %}
 {% block main_attrs %} class="narrow"{% endblock %}
 {% block content %}
-<h1>{% if kind == 'onedrive' %}{{ mark() }} {% elif kind == 'mail' %}{{ brand('outlook') }} {% endif %}{% if kind == 'mail' %}Mailbox folder{% else %}Folder{% endif %} for {{ car.name or ('Car ' ~ car.id) }}</h1>
+<h1>{% if kind == 'onedrive' %}{{ mark() }} {% elif kind == 'mail' %}{{ brand('outlook') }} {% endif %}{% if kind == 'mail' %}Mailbox folder{% else %}Folder{% endif %} for {{ 'a new car' if car.id == 0 else (car.name or ('Car ' ~ car.id)) }}</h1>
+{% if car.id == 0 %}<p>Choose the folder that holds the car's invoices. The import of that folder then builds the car from its purchase invoice.</p>{% endif %}
 <p class="here"><code>{{ here.path }}</code></p>
 <ul class="plain folder-list">
   {% if not is_root %}
@@ -18,7 +19,7 @@
 <form method="post" action="{{ url_for(kind ~ '_choose_folder', car_id=car.id) }}" class="row">
   <input type="hidden" name="folder_id" value="{{ '' if is_root else here.id }}">
   {% if kind == 'mail' and is_root %}<small>Open the folder the car's invoice emails arrive in.</small>
-  {% else %}<button type="submit" class="button">Use {{ here.path }}</button>{% endif %}
+  {% else %}<button type="submit" class="button">{{ 'Import' if car.id == 0 else 'Use' }} {{ here.path }}</button>{% endif %}
   <a href="{{ url_for('storage_page') }}">Cancel</a>
 </form>
 {% if kind == 'mail' %}

@@ -7,6 +7,54 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+- **Several PDFs in one expense.** On the import page every row has an **Attach to** choice: pick another row and
+  its PDF is merged into that row's expense instead of becoming one of its own (an invoice plus its service
+  report, say). The main row's PDF stays the expense's invoice; the others are kept as **Attached documents**,
+  listed with links on the expense's Edit page (each can be removed there, which only forgets it). Merged files
+  count as known, so they are never offered for import again. Works for OneDrive and the folder on the server.
+  Upgrade: pull the new image (the schema gains `expense_document`; installers on the restricted database role
+  re-run `scripts/provision-db.sh`).
+- **The car's details from its purchase invoice, and a folder for a car that isn't in the list yet.** A car now has
+  an optional VIN, year built, model year and body type (on the Cars page). Importing the initial purchase
+  invoice offers to fill them in, with a tick on the row showing what it read: only where they are blank, and
+  never the name, make or model a TeslaMate car comes with. On the **Invoice storage** page, **Folder for a new
+  car** browses for a folder and opens its import, which builds the car from the purchase invoice you tick (its
+  make, model and details; a car with neither is named after its folder). With no purchase invoice ticked, a
+  dialog asks for the car's name, type and details before the import saves. Nothing needs TeslaMate. Upgrade:
+  pull the new image (the schema gains four optional columns on `car`; installers on the restricted database
+  role need no new grant).
+- **A registration's GST is read from the notice.** The GST on a registration is only on its CTP insurance part, not
+  a tenth of the total, so the import reads the GST figure printed on the notice and stores it on the expense (a
+  new optional **GST in the amount** field on the Add and Edit form and on the import row). A stored GST replaces
+  the category's GST rule when the cost after tax is worked out (the amount less that GST, instead of all of it for
+  a GST-free category or ten elevenths for the rest). Registration is still ticked GST-free on the Categories page,
+  now only as the fallback for an expense with no figure. The claim page offers the stored figure in the connector
+  protocol's existing `gst` field. The card payment reference and BPAY biller code and reference on the notice are
+  kept too, in a closed **Payment references** section of the Edit form: never in the list, the tiles, the
+  dashboard or the change history's displayed values. Upgrade: pull the new image (the schema gains columns on
+  `expense` and the after-tax function is replaced on start; installers on the restricted database role re-run
+  `scripts/provision-db.sh`).
+- **Service items.** A new **Service** category, and a list of what a service covered (fuel filter, oil filter,
+  engine oil, tyre rotation, windscreen washer fluid, windscreen wipers, brakes, brake fluid, timing belt, air
+  filter, coolant, cabin air filter). Choose the items on each Service expense (the Add and Edit form, and each
+  import row, where the items named in the PDF are ticked for you), and add, rename or remove them under **Service
+  items** on the Categories page. An item can also be added from the import page in a dialog, without losing
+  anything typed there. The items show under the vendor in the expense list, and the new `garagebooks.expense_service`
+  view has one row per expense and item for Grafana. Upgrade: pull the new image (the schema gains
+  `service_item`, `expense_service_item` and the view; installers on the restricted database role re-run
+  `scripts/provision-db.sh`).
+- **Import rows read more.** On the import page (every source), a file with no amount and nothing that reads
+  as an invoice (no invoice, receipt, total, premium, renewal, policy or notice wording) starts with **Skip**
+  ticked, so a brochure stops being offered. Each row has a **Notes** field, filled in where it can be read
+  easily (an insurance endorsement such as a change of address or additional premium, a refund, "12 months
+  registration"), and saved to the expense. Insurance and registration expenses now have a **period** (start
+  and end dates) read from the document ("Period of insurance", "Registration period", the expiry date, the
+  policy start and end), shown on the import row, the Add and Edit form and the list. A new **Has a period**
+  setting on the Categories page chooses which categories have one (Insurance and Registration by default).
+  A registration notice's vendor is now the issuing authority, not the CTP insurer it names, and a dealer's
+  invoice for the car itself is read by its "Drive away price", "Total payable" or "Balance payable" lines.
+  Upgrade: pull the new image (the schema gains `expense.period_start`, `period_end` and `category.has_period`
+  on start; installers on the restricted database role re-run `scripts/provision-db.sh`).
 - **Faster tests.** The suite runs in parallel (`pytest -n auto`, one throwaway Postgres per worker), about three times
   faster on four cores, and the route property tests use 15 examples locally (40 in CI, as before). The `admin`
   fixture makes one round trip instead of a dozen. CI and the TeslaMate compatibility check use `-n auto`, and the check

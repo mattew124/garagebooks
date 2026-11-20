@@ -89,10 +89,26 @@
   <label>Category
     <select name="category_id" required>
       <option value="">Choose…</option>
-      {% for c in categories %}<option value="{{ c.id }}" {{ 'selected' if values.category_id|string == c.id|string }}>{{ c.name }}</option>{% endfor %}
+      {% for c in categories %}<option value="{{ c.id }}" data-period="{{ 1 if c.has_period else 0 }}" data-service="{{ 1 if c.name == 'Service' else 0 }}" data-gstfree="{{ 1 if c.gst_free else 0 }}" {{ 'selected' if values.category_id|string == c.id|string }}>{{ c.name }}</option>{% endfor %}
     </select>{{ err('category_id') }}
     <small><a href="{{ url_for('categories') }}">Need another category?</a></small>
   </label>
+
+  {% set gst_on = (categories|selectattr('id', 'equalto', values.get('category_id', 0)|int(0))|selectattr('gst_free')|list) or values.gst_amount or errors.get('gst_amount') %}
+  <label id="gst-field" {{ '' if gst_on else 'hidden' }}>GST in the amount <small>(optional, as the document states it)</small>
+    <span class="affix"><span>$</span>
+      <input name="gst_amount" inputmode="decimal" autocomplete="off" value="{{ values.gst_amount }}"></span>{{ err('gst_amount') }}
+    <small>Leave it empty to use the category's GST rule. A registration's GST is only on its CTP insurance part, so it is read from the notice and replaces that rule.</small>
+  </label>
+
+  {# What a service covered: shown by app.js while the category is Service. Items are edited on the Categories page. #}
+  {% set service_on = (categories|selectattr('id', 'equalto', values.get('category_id', 0)|int(0))|selectattr('name', 'equalto', 'Service')|list) %}
+  <fieldset class="service-items" id="service-fields" {{ '' if service_on else 'hidden' }}>
+    <legend>Service items</legend>
+    {% for i in service_items() %}<label class="inline"><input type="checkbox" name="service_item" value="{{ i.id }}" {{ 'checked' if i.id|string in values.get('service_item', []) }}> <span>{{ i.name }}</span></label>
+    {% endfor %}
+    <small><a href="{{ url_for('categories') }}">Add or rename items</a></small>
+  </fieldset>
 
   <div class="row">
     <label>Date <input type="date" name="date" value="{{ values.date }}" required>{{ err('date') }}</label>
@@ -170,6 +186,13 @@
   </label>
 
   <label>Vendor / shop <input name="vendor" maxlength="500" value="{{ values.vendor }}">{{ err('vendor') }}</label>
+
+  {# Insurance and registration cover a stretch of time; app.js shows these for a category that has one. #}
+  {% set period_on = (categories|selectattr('id', 'equalto', values.get('category_id', 0)|int(0))|selectattr('has_period')|list) or values.period_start or values.period_end or errors.get('period_end') %}
+  <div class="row" id="period-fields" {{ '' if period_on else 'hidden' }}>
+    <label>Period from <input type="date" name="period_start" value="{{ values.period_start }}">{{ err('period_start') }}</label>
+    <label>to <input type="date" name="period_end" value="{{ values.period_end }}">{{ err('period_end') }}</label>
+  </div>
   </section>
 
   <section class="card stack">
@@ -195,6 +218,16 @@
   {% endif %}
 
   <label>Notes <textarea name="notes" rows="3" maxlength="2000">{{ values.notes }}</textarea>{{ err('notes') }}</label>
+
+  {# How a notice says to pay it: kept, never listed or charted, and closed until asked for. #}
+  <details class="payment-refs"{{ ' open' if errors.get('card_payment_ref') or errors.get('bpay_biller_code') or errors.get('bpay_ref') }}>
+    <summary>Payment references</summary>
+    <label>Card payment reference <input name="card_payment_ref" maxlength="60" autocomplete="off" value="{{ values.card_payment_ref }}">{{ err('card_payment_ref') }}</label>
+    <div class="row">
+      <label>BPAY biller code <input name="bpay_biller_code" maxlength="60" autocomplete="off" value="{{ values.bpay_biller_code }}">{{ err('bpay_biller_code') }}</label>
+      <label>BPAY reference <input name="bpay_ref" maxlength="60" autocomplete="off" value="{{ values.bpay_ref }}">{{ err('bpay_ref') }}</label>
+    </div>
+  </details>
   </section>
 
   <div class="row">
@@ -203,6 +236,20 @@
   </div>
 </form>
 
+{% if expense_id and documents %}
+<section class="card stack" id="documents">
+  <h2 class="card-title">Attached documents</h2>
+  <ul class="plain">
+    {% for d in documents %}
+    <li><a href="{{ d.invoice_url if d.invoice_url else url_for('document', document_id=d.id) }}" target="_blank" rel="noopener noreferrer">{{ d.name }} ↗</a>
+      <form method="post" action="{{ url_for('document_remove', expense_id=expense_id, document_id=d.id, **view) }}" class="inline"
+            data-confirm="Remove this document from the expense? The file stays where it is and is offered for import again.">
+        <button type="submit" class="linklike">Remove</button></form></li>
+    {% endfor %}
+  </ul>
+  <small>PDFs merged into this expense when it was imported. Removing one only forgets it here; the file stays where it is.</small>
+</section>
+{% endif %}
 {% if expense_id %}
 <form method="post" action="{{ url_for('delete', expense_id=expense_id) }}" data-confirm="Delete this expense?">
   {% for name, value in view.items() %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}

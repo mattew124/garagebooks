@@ -21,6 +21,11 @@
         <span>GST-free <small>(this category's invoices carry no GST)</small></span></label>
       <button type="submit" class="secondary">Save</button>
     </form>
+    <form method="post" action="{{ url_for('category_has_period', category_id=c.id) }}" class="row">
+      <label class="check"><input type="checkbox" name="has_period" value="1" {{ 'checked' if c.has_period }}>
+        <span>Has a period <small>(insurance or registration: it covers a start and an end date)</small></span></label>
+      <button type="submit" class="secondary">Save</button>
+    </form>
     {% if budgets_on %}
     <form method="post" action="{{ url_for('category_pool', category_id=c.id) }}" class="row">
       <label><small>Lease budget pool</small>
@@ -37,7 +42,31 @@
 {% if uploads_enabled %}<p><small>Uploaded invoices go into this subfolder of the car's {{ 'folder' if local_enabled else 'OneDrive folder' }}, made when first
   needed. Leave it blank to use a folder named after the category, e.g. Tyres and Wheel alignment can both use “Maintenance”.</small></p>{% endif %}
 <p><small>Tick GST-free for a category whose invoices carry no GST, such as registration and CTP. It only changes what an expense paid from a lease package is shown to cost after tax: the GST on an invoice that isn't GST-free is taken to be a flat 1/11 of it.</small></p>
+<p><small>Tick Has a period for a category whose expenses cover a stretch of time, such as insurance and registration: the Add and Edit form and the import page then ask for the period's start and end dates, and read them from the document when they can.</small></p>
 {% if budgets_on %}<p><small>A car on a novated lease has a yearly budget for each pool. Choose the pool each category's expenses are paid from, or None when the category isn't part of the package.</small></p>{% endif %}
+<h2 id="service-items">Service items</h2>
+<p><small>What a service covered, chosen on each expense in the Service category (and on the import page).
+  Renaming an item keeps it on the expenses that had it; removing one takes it off them.</small></p>
+<ul class="plain category-list">
+  {% for i in service_items() %}
+  <li>
+    <form method="post" action="{{ url_for('service_item_rename', item_id=i.id) }}" class="row">
+      <label><small class="visually-hidden">Name</small>
+        <input name="name" maxlength="60" value="{{ i.name }}" required autocomplete="off"></label>
+      <button type="submit" class="secondary">Rename</button>
+      {% if service_error and service_error[0] == i.id %}<span class="error">{{ service_error[1] }}</span>{% endif %}
+    </form>
+    <form method="post" action="{{ url_for('service_item_delete', item_id=i.id) }}" data-confirm="Remove {{ i.name }} from the list and from the expenses that have it?">
+      <button type="submit" class="danger">Remove</button>
+    </form>
+  </li>
+  {% endfor %}
+</ul>
+<form method="post" action="{{ url_for('service_item_add') }}" class="card stack">
+  <label>New service item <input name="name" maxlength="60" required placeholder="e.g. Spark plugs">
+    {% if service_error and service_error[0] is none %}<span class="error">{{ service_error[1] }}</span>{% endif %}</label>
+  <button type="submit" class="button">Add item</button>
+</form>
 <form method="post" class="card stack">
   <label>New category <input name="name" maxlength="60" required placeholder="e.g. Servicing">
     {% if error %}<span class="error">{{ error }}</span>{% endif %}</label>

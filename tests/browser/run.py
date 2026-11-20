@@ -705,7 +705,8 @@ def test_payment_calculator(page):
     posted = "".join(sent)
     names = set(re.findall(r'name="([^"]+)"', posted))
     assert {"amount", "vendor", "category_id"} <= names, names
-    assert not any(re.search(r"face|part|pay|mode|discount", n) for n in names), names
+    refs = {"card_payment_ref", "bpay_biller_code", "bpay_ref"}      # the payment references are not the calculator's
+    assert not any(re.search(r"face|part|pay|mode|discount", n) for n in names - refs), names
     assert "137.50" in posted and "42.50" not in posted, posted
     expect(page.locator(f"tr:has-text('{MARKER}')")).to_contain_text("$137.50")
     remove_marked(page)

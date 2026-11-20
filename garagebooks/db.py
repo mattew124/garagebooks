@@ -139,6 +139,7 @@ def car_details(conn):
     and the final odometer entered with its sale."""
     return conn.execute(
         "SELECT c.id, c.name, c.kind, c.make, c.model, c.teslamate_car_id, c.sold_at, c.sale_price,"
+        " c.vin, c.build_year, c.model_year, c.body_type,"
         " (SELECT count(*) FROM garagebooks.expense e WHERE e.car_id = c.id) AS expenses,"
         " (SELECT count(*) FROM garagebooks.lease l WHERE l.car_id = c.id) AS leases,"
         " p.purchases, p.purchase_price, p.purchased_at, p.purchase_km,"
@@ -180,16 +181,40 @@ def set_purchase(conn, car_id, v):
 def add_car(conn, v):
     """A car entered by hand. Returns its id."""
     return conn.execute(
-        "INSERT INTO garagebooks.car (name, kind, make, model) VALUES (%(name)s, %(kind)s, %(make)s, %(model)s) "
+        "INSERT INTO garagebooks.car (name, kind, make, model, vin, build_year, model_year, body_type) "
+        "VALUES (%(name)s, %(kind)s, %(make)s, %(model)s, %(vin)s, %(build_year)s, %(model_year)s, %(body_type)s) "
         "RETURNING id", v).fetchone()["id"]
 
 
 def update_car(conn, car_id, v):
     """Returns False when there is no such car. A TeslaMate car renamed here keeps the new name."""
     return conn.execute(
-        "UPDATE garagebooks.car SET kind = %(kind)s, make = %(make)s, model = %(model)s, "
+        "UPDATE garagebooks.car SET kind = %(kind)s, make = %(make)s, model = %(model)s, vin = %(vin)s, "
+        "build_year = %(build_year)s, model_year = %(model_year)s, body_type = %(body_type)s, "
         "name_from_teslamate = name_from_teslamate AND name = %(name)s, name = %(name)s WHERE id = %(id)s",
         {**v, "id": car_id}).rowcount == 1
+
+
+CAR_DETAIL_FIELDS = ("vin", "build_year", "model_year", "body_type")
+
+
+def car_blank_details(conn, car_id):
+    """Which of the car's own details (CAR_DETAIL_FIELDS) are still empty, for the import to offer. A car that
+    doesn't exist yet (id 0) has all of them blank."""
+    if car_id == 0:
+        return list(CAR_DETAIL_FIELDS)
+    row = conn.execute("SELECT vin, build_year, model_year, body_type FROM garagebooks.car WHERE id = %s",
+                       (car_id,)).fetchone()
+    return [f for f in CAR_DETAIL_FIELDS if row and row[f] is None]
+
+
+def fill_car_details(conn, car_id, v):
+    """Put `v`'s details on the car where it has none. Nothing it already has is replaced, and nothing TeslaMate
+    supplies (the name, make and model) is touched."""
+    conn.execute(
+        "UPDATE garagebooks.car SET vin = COALESCE(vin, %(vin)s), build_year = COALESCE(build_year, %(build_year)s), "
+        "model_year = COALESCE(model_year, %(model_year)s), body_type = COALESCE(body_type, %(body_type)s) "
+        "WHERE id = %(id)s", {"vin": None, "build_year": None, "model_year": None, "body_type": None, **v, "id": car_id})
 
 
 def set_sale(conn, car_id, sold_at, sale_price, sale_km=None):
@@ -307,7 +332,7 @@ def set_ev_charging_rate(conn, year, cents_per_km):
 
 def categories(conn):
     return conn.execute(
-        "SELECT id, name, kind, upload_folder, budget_pool, gst_free FROM garagebooks.category ORDER BY sort_order, name"
+        "SELECT id, name, kind, upload_folder, budget_pool, gst_free, has_period FROM garagebooks.category ORDER BY sort_order, name"
     ).fetchall()
 
 
@@ -315,6 +340,76 @@ def set_gst_free(conn, category_id, gst_free):
     """Whether a category's invoices carry no GST. False if no such category."""
     return conn.execute("UPDATE garagebooks.category SET gst_free = %s WHERE id = %s",
                         (bool(gst_free), category_id)).rowcount == 1
+
+
+def set_has_period(conn, category_id, has_period):
+    """Whether a category's expenses cover a period (insurance, registration). False if no such category."""
+    return conn.execute("UPDATE garagebooks.category SET has_period = %s WHERE id = %s",
+                        (bool(has_period), category_id)).rowcount == 1
+
+
+SERVICE_CATEGORY = "Service"
+
+
+def service_items(conn):
+    return conn.execute("SELECT id, name FROM garagebooks.service_item ORDER BY sort_order, lower(name)").fetchall()
+
+
+def service_item(conn, item_id):
+    return conn.execute("SELECT id, name FROM garagebooks.service_item WHERE id = %s", (item_id,)).fetchone()
+
+
+def service_item_named(conn, name):
+    return conn.execute("SELECT id, name FROM garagebooks.service_item WHERE lower(name) = lower(%s)", (name,)).fetchone()
+
+
+def add_service_item(conn, name):
+    """The new item, or None if the name exists (ignoring case)."""
+    return conn.execute("INSERT INTO garagebooks.service_item (name) VALUES (%s) ON CONFLICT DO NOTHING "
+                        "RETURNING id, name", (name,)).fetchone()
+
+
+def rename_service_item(conn, item_id, name):
+    """True when renamed; None if the name belongs to another item; False if there is no such item."""
+    clash = conn.execute("SELECT 1 FROM garagebooks.service_item WHERE lower(name) = lower(%s) AND id <> %s",
+                         (name, item_id)).fetchone()
+    if clash:
+        return None
+    return conn.execute("UPDATE garagebooks.service_item SET name = %s WHERE id = %s", (name, item_id)).rowcount == 1
+
+
+def delete_service_item(conn, item_id):
+    return conn.execute("DELETE FROM garagebooks.service_item WHERE id = %s", (item_id,)).rowcount == 1
+
+
+def set_expense_services(conn, expense_id, item_ids):
+    """Replace an expense's service items with `item_ids`."""
+    conn.execute("DELETE FROM garagebooks.expense_service_item WHERE expense_id = %s", (expense_id,))
+    for item_id in sorted(set(item_ids)):
+        conn.execute("INSERT INTO garagebooks.expense_service_item (expense_id, item_id) VALUES (%s, %s) "
+                     "ON CONFLICT DO NOTHING", (expense_id, item_id))
+
+
+def expense_services(conn, expense_ids=None):
+    """-> {expense_id: [item names in list order]}, for some expenses or all."""
+    got = {}
+    for r in conn.execute(
+            "SELECT l.expense_id, i.name FROM garagebooks.expense_service_item l "
+            "JOIN garagebooks.service_item i ON i.id = l.item_id "
+            "WHERE (%(ids)s::bigint[] IS NULL OR l.expense_id = ANY(%(ids)s)) ORDER BY i.sort_order, lower(i.name)",
+            {"ids": None if expense_ids is None else list(expense_ids)}):
+        got.setdefault(r["expense_id"], []).append(r["name"])
+    return got
+
+
+def service_category_id(conn):
+    row = conn.execute("SELECT id FROM garagebooks.category WHERE name = %s", (SERVICE_CATEGORY,)).fetchone()
+    return row["id"] if row else None
+
+
+def expense_service_ids(conn, expense_id):
+    return [r["item_id"] for r in conn.execute(
+        "SELECT item_id FROM garagebooks.expense_service_item WHERE expense_id = %s", (expense_id,))]
 
 
 def add_category(conn, name):
@@ -340,8 +435,8 @@ def set_upload_folder(conn, category_id, folder):
 _SELECT = """
     SELECT e.id, e.car_id, c.name AS car_name, e.category_id, cat.name AS category,
            cat.kind, e.occurred_at, e.amount, e.odometer_km, e.vendor, e.notes,
-           e.invoice_url, e.invoice_path, e.packaged,
-           c.make AS car_make, c.model AS car_model, cat.budget_pool,
+           e.invoice_url, e.invoice_path, e.packaged, e.period_start, e.period_end,
+           e.gst_amount, e.card_payment_ref, e.bpay_biller_code, e.bpay_ref, cat.has_period, c.make AS car_make, c.model AS car_model, cat.budget_pool,
            cl.provider AS claim_provider, cl.provider_id AS claim_provider_id, cl.reference AS claim_reference,
            cl.status AS claim_status, cl.paid_date AS claim_paid_date, cl.approved_amount AS claim_approved,
            (EXISTS (SELECT 1 FROM garagebooks.provider_claim pc WHERE pc.expense_id = e.id)
@@ -356,7 +451,7 @@ _SELECT = """
 # category's pool, kind and GST status, and the payments of the lease covering its date in time zone %(tz)s.
 _AFTER_TAX_SELECT = """
     SELECT e.id, e.car_id, e.category_id, cat.name AS category, cat.kind, cat.budget_pool, cat.gst_free, e.amount,
-           e.occurred_at, e.packaged, l.id AS lease_id, l.pretax_payment, l.posttax_payment
+           e.gst_amount, e.occurred_at, e.packaged, l.id AS lease_id, l.pretax_payment, l.posttax_payment
     FROM garagebooks.expense e
     JOIN garagebooks.category cat ON cat.id = e.category_id
     LEFT JOIN LATERAL (SELECT * FROM garagebooks.lease l WHERE l.car_id = e.car_id
@@ -430,14 +525,18 @@ def get_expense(conn, expense_id):
 
 
 _FIELDS = ("car_id", "category_id", "occurred_at", "amount", "odometer_km",
-           "vendor", "notes", "invoice_url", "invoice_path", "packaged")
+           "vendor", "notes", "invoice_url", "invoice_path", "packaged", "period_start", "period_end",
+           "gst_amount", "card_payment_ref", "bpay_biller_code", "bpay_ref")
+
+_DEFAULTS = {"invoice_path": None, "packaged": None, "period_start": None, "period_end": None, "gst_amount": None,
+             "card_payment_ref": None, "bpay_biller_code": None, "bpay_ref": None}
 
 
 def insert_expense(conn, v):
     return conn.execute(
         f"INSERT INTO garagebooks.expense ({', '.join(_FIELDS)}) "
         f"VALUES ({', '.join('%(' + f + ')s' for f in _FIELDS)}) RETURNING id",
-        {"invoice_path": None, "packaged": None, **v},
+        {**_DEFAULTS, **v},
     ).fetchone()["id"]
 
 
@@ -509,9 +608,33 @@ def known_invoices(conn, refs):
     rows = conn.execute("SELECT invoice_url AS ref FROM garagebooks.expense WHERE invoice_url = ANY(%(refs)s) "
                         "UNION SELECT invoice_path FROM garagebooks.expense WHERE invoice_path = ANY(%(refs)s) "
                         # An email whose PDF was copied into the car's storage: its expense links the copy.
-                        "UNION SELECT ref FROM garagebooks.mail_import WHERE ref = ANY(%(refs)s)",
+                        "UNION SELECT ref FROM garagebooks.mail_import WHERE ref = ANY(%(refs)s) "
+                        "UNION SELECT invoice_url FROM garagebooks.expense_document WHERE invoice_url = ANY(%(refs)s) "
+                        "UNION SELECT invoice_path FROM garagebooks.expense_document WHERE invoice_path = ANY(%(refs)s)",
                         {"refs": list(refs)}).fetchall()
     return {r["ref"] for r in rows}
+
+
+def add_document(conn, expense_id, name, ref_field, ref):
+    """Attach a PDF to an expense. `ref_field` is 'invoice_url' or 'invoice_path'; one already attached is left alone."""
+    column = "invoice_path" if ref_field == "invoice_path" else "invoice_url"
+    conn.execute(f"INSERT INTO garagebooks.expense_document (expense_id, name, {column}) VALUES (%s, %s, %s) "
+                 "ON CONFLICT DO NOTHING", (expense_id, name[:300], ref))
+
+
+def documents(conn, expense_id):
+    return conn.execute("SELECT id, name, invoice_url, invoice_path FROM garagebooks.expense_document "
+                        "WHERE expense_id = %s ORDER BY id", (expense_id,)).fetchall()
+
+
+def get_document(conn, document_id):
+    return conn.execute("SELECT id, expense_id, name, invoice_url, invoice_path FROM garagebooks.expense_document "
+                        "WHERE id = %s", (document_id,)).fetchone()
+
+
+def delete_document(conn, expense_id, document_id):
+    return conn.execute("DELETE FROM garagebooks.expense_document WHERE id = %s AND expense_id = %s",
+                        (document_id, expense_id)).rowcount == 1
 
 
 def skipped_import_urls(conn, car_id):
@@ -532,7 +655,7 @@ def update_expense(conn, expense_id, v):
     sets = ", ".join(f"{f} = %({f})s" for f in _FIELDS)
     cur = conn.execute(
         f"UPDATE garagebooks.expense SET {sets}, updated_at = now() WHERE id = %(id)s",
-        {"invoice_path": None, "packaged": None, **v, "id": expense_id},
+        {**_DEFAULTS, **v, "id": expense_id},
     )
     return cur.rowcount == 1
 

@@ -37,6 +37,11 @@
     </li>
     {% endfor %}
   </ul>
+  {% if ready %}
+  <p class="new-car-folder"><strong>A car that isn't in the list yet?</strong>
+    {% for p in ready %}<a href="{{ url_for(p.kind ~ '_browse', car_id=0) }}">Folder for a new car{% if ready|length > 1 %} in a {{ p.short }}{% endif %}</a>{% if not loop.last %} · {% endif %}{% endfor %}
+    <br><small>Choose its invoice folder: the import of that folder then builds the car from its purchase invoice, or asks you for its details.</small></p>
+  {% endif %}
   <small>Uploaded invoices are named from the template under <a href="{{ url_for('settings') }}">Settings</a>,
     e.g. “{{ name_example }}”, and go into the <a href="{{ url_for('categories') }}">category's subfolder</a>.
     A OneDrive folder can be renamed or moved in OneDrive later without breaking uploads.

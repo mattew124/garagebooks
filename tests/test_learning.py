@@ -1,5 +1,7 @@
 """The importer learns labels from what the owner types, and trusts them after two confirmations."""
 
+import re
+
 import pytest
 
 from garagebooks import invoices
@@ -79,7 +81,7 @@ def test_a_learned_vendor_preselects_the_category(client, admin):
     admin.execute("UPDATE garagebooks.learned_vendor SET hits = %s", (invoices.LEARN_AFTER,))
     page = client.get("/onedrive/import/1?sync=1").data.decode()
     select = page.split('name="category_id_1"')[1].split("</select>")[0]
-    assert f'<option value="{cat(admin, "Tyres")}" selected>' in select
+    assert re.search(rf'<option value="{cat(admin, "Tyres")}"[^>]*selected>', select)
 
 
 def test_a_failure_while_learning_never_blocks_the_import(client, admin, monkeypatch):

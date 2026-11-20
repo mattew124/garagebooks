@@ -2,7 +2,9 @@
 {% from "_provider.html" import mark, brand with context %}
 {% block title %}Import invoices{% endblock %}
 {% block content %}
-<h1>{% if kind == 'onedrive' %}{{ mark() }} {% elif kind == 'mail' %}{{ brand('outlook') }} {% endif %}Import invoices for {{ car.name or ('Car ' ~ car.id) }}</h1>
+<h1>{% if kind == 'onedrive' %}{{ mark() }} {% elif kind == 'mail' %}{{ brand('outlook') }} {% endif %}Import invoices for {{ 'a new car' if car.id == 0 else (car.name or ('Car ' ~ car.id)) }}</h1>
+{% if car.id == 0 %}<p>This folder has no car yet. The car is made from the purchase invoice you tick (its make, model, VIN, year and body
+  type), or by hand if there isn't one, when you press Import, and the folder becomes its invoice folder.</p>{% endif %}
 {% if notice %}<p class="notice bad">{{ notice }}</p>{% endif %}
 {% if rows or scanning %}
 {% if kind == 'mail' %}
@@ -22,15 +24,15 @@
   <p id="import-status-text">Looking in the folder…</p>
 </div>
 <noscript><p class="notice bad">This page reads your invoices as it opens, which needs JavaScript.
-  <a href="{{ url_for(kind ~ '_import', car_id=car.id, sync=1) }}">Load it the slow way instead</a>: the page stays blank until every file has been read.</p></noscript>
+  <a href="{{ url_for(kind ~ '_import', car_id=car.id, sync=1, **link_args) }}">Load it the slow way instead</a>: the page stays blank until every file has been read.</p></noscript>
 {% endif %}
-<form method="post" action="{{ url_for(kind ~ '_import_confirm', car_id=car.id) }}" class="import" id="import-form"
-      {% if scanning %}data-scan-url="{{ url_for(kind ~ '_import_scan', car_id=car.id) }}" data-row-url="{{ url_for(kind ~ '_import_read', car_id=car.id) }}" data-setup-label="Invoice storage page" hidden{% endif %}>
+<form method="post" action="{{ url_for(kind ~ '_import_confirm', car_id=car.id, **link_args) }}" class="import" id="import-form"
+      {% if scanning %}data-scan-url="{{ url_for(kind ~ '_import_scan', car_id=car.id, **link_args) }}" data-row-url="{{ url_for(kind ~ '_import_read', car_id=car.id, **link_args) }}" data-setup-label="Invoice storage page" hidden{% endif %}>
   <input type="hidden" name="count" value="{{ rows|length }}">
   <div class="table-wrap">
   <table class="import-table">
     <thead><tr><th>Import</th><th>Skip</th><th>{{ 'Email' if kind == 'mail' else 'File' }}</th><th>Date</th><th>Category</th><th>Vendor</th>
-      <th class="num">Amount</th><th class="num">Odometer (km)</th></tr></thead>
+      <th class="num">Amount</th><th class="num">Odometer (km)</th><th>Notes</th></tr></thead>
     <tbody>
     {% for r in rows %}{% set n = r.n %}{% include "_import_row.html" %}{% endfor %}
     </tbody>
@@ -45,6 +47,49 @@
     PDF (never the value), and which category a vendor's invoices get. After {{ learn_after }} confirmations it uses them for
     later guesses. <a href="{{ url_for('learned_page') }}">See and remove what it has learned</a>.</small></p>
 </form>
+{% if car.id == 0 %}
+{# The fields belong to the import form (form="import-form") although the dialog sits outside it. #}
+<dialog id="car-dialog" aria-labelledby="car-dialog-title" class="picker"{% if needs_car %} data-needs-car="1"{% endif %}>
+  <h2 id="car-dialog-title">Create the car</h2>
+  <p>No purchase invoice is ticked, so say what the car is. It is made when the import is saved.</p>
+  <div class="stack">
+    <input type="hidden" form="import-form" name="new_car_asked" value="1">
+    {% set new_car = new_car or {} %}{% set car_errors = car_errors or {} %}
+    <label>Name <input form="import-form" name="new_car_name" maxlength="100" autocomplete="off" value="{{ new_car.get('new_car_name', '') }}">
+      {% if car_errors.name %}<span class="error">{{ car_errors.name }}</span>{% endif %}</label>
+    <label>Type
+      <select form="import-form" name="new_car_kind">
+        {% for code, label in kinds.items() %}<option value="{{ code }}" {{ 'selected' if new_car.get('new_car_kind', 'BEV') == code }}>{{ label }}</option>{% endfor %}
+      </select></label>
+    <div class="row">
+      <label>Make <input form="import-form" name="new_car_make" maxlength="60" autocomplete="off" value="{{ new_car.get('new_car_make', '') }}"></label>
+      <label>Model <input form="import-form" name="new_car_model" maxlength="60" autocomplete="off" value="{{ new_car.get('new_car_model', '') }}"></label>
+    </div>
+    <label>VIN <input form="import-form" name="new_car_vin" maxlength="20" autocomplete="off" value="{{ new_car.get('new_car_vin', '') }}">
+      {% if car_errors.vin %}<span class="error">{{ car_errors.vin }}</span>{% endif %}</label>
+    <div class="row">
+      <label>Year built <input form="import-form" name="new_car_build_year" inputmode="numeric" maxlength="4" value="{{ new_car.get('new_car_build_year', '') }}">
+        {% if car_errors.build_year %}<span class="error">{{ car_errors.build_year }}</span>{% endif %}</label>
+      <label>Model year <input form="import-form" name="new_car_model_year" inputmode="numeric" maxlength="4" value="{{ new_car.get('new_car_model_year', '') }}">
+        {% if car_errors.model_year %}<span class="error">{{ car_errors.model_year }}</span>{% endif %}</label>
+    </div>
+    <label>Body type <input form="import-form" name="new_car_body_type" maxlength="40" autocomplete="off" value="{{ new_car.get('new_car_body_type', '') }}">
+      {% if car_errors.body_type %}<span class="error">{{ car_errors.body_type }}</span>{% endif %}</label>
+    <div class="row"><button type="button" id="car-dialog-go" class="button">Create the car and import</button>
+      <button type="button" id="car-dialog-cancel" class="secondary">Cancel</button></div>
+  </div>
+</dialog>
+{% endif %}
+<dialog id="service-dialog" aria-labelledby="service-dialog-title" class="picker" data-service-url="{{ url_for('api_service_items') }}">
+  <h2 id="service-dialog-title">Add a service item</h2>
+  <form id="service-dialog-form" class="stack">
+    <label>Name <input name="name" maxlength="60" required autocomplete="off" placeholder="e.g. Spark plugs"></label>
+    <p id="service-dialog-status" role="status"></p>
+    <div class="row"><button type="submit" class="button">Add</button>
+      <button type="button" id="service-dialog-cancel" class="secondary">Cancel</button></div>
+  </form>
+  <p><small>The item is added to the list on every row below. Nothing else on this page changes.</small></p>
+</dialog>
 {% if skipped %}
 <form method="post" action="{{ url_for(kind ~ '_import_unskip', car_id=car.id) }}"><p><small>{{ skipped }} skipped file{{ '' if skipped == 1 else 's' }} not shown.
   <button type="submit" class="linklike">Offer {{ 'it' if skipped == 1 else 'them' }} again</button></small></p></form>

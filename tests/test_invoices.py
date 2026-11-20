@@ -393,3 +393,183 @@ def test_a_filename_the_pdf_agrees_with_still_supplies_the_vendor():
     got = invoices.propose("", "261030 - Wheel Alignment - Tesla.pdf", "Wheel alignment report\nWheel alignment done\nWheel alignment\n", CATS)
     assert got["category"] == "Wheel alignment" and got["vendor"] == "Tesla"
     assert invoices.propose("", "261030 - Wheel Alignment - Tesla.pdf", "", CATS)["vendor"] == "Tesla"
+
+
+# ---- import rows: skipping non-invoices, notes, periods, authorities, purchases -----------
+
+BROCHURE = "Our new range\nCome and see the showroom\nOpen seven days\n"
+
+
+def test_a_document_with_no_amount_and_no_invoice_words_suggests_skipping():
+    assert invoices.propose("", "brochure.pdf", BROCHURE, CATS)["suggest_skip"] is True
+
+
+def test_a_document_that_looks_like_an_invoice_is_not_skipped_when_a_field_is_missing():
+    text = "TAX INVOICE\nExample Tyres Pty Ltd\nThank you for your business\n"      # no total
+    got = invoices.propose("", "scan.pdf", text, CATS)
+    assert got["amount"] is None and got["suggest_skip"] is False
+    for word in ("Receipt", "Amount due", "Premium", "Renewal", "Policy"):
+        assert invoices.propose("", "x.pdf", f"{word}\nnothing else\n", CATS)["suggest_skip"] is False, word
+
+
+def test_a_document_with_an_amount_or_no_text_at_all_is_never_suggested_for_skipping():
+    assert invoices.propose("", "x.pdf", TYRES, CATS)["suggest_skip"] is False
+    assert invoices.propose("", "scan.pdf", "", CATS)["suggest_skip"] is False       # unreadable: the owner decides
+
+
+def test_the_file_name_can_say_it_is_an_invoice():
+    assert invoices.propose("", "Invoice 1234.pdf", BROCHURE, CATS)["suggest_skip"] is False
+
+
+ENDORSEMENT = """
+   ENDORSEMENT NOTICE                            Example Insurer Limited
+   Policy change: change of address
+   Period of insurance: from 24/10/2026 to 24/10/2027
+   Additional premium                            $20.00
+   Total    $20.00
+"""
+REFUND = "Example Insurer Limited\nRefund of premium   $35.00\nTotal  $35.00\n"
+
+
+def test_an_insurance_endorsement_says_what_changed_in_the_notes():
+    notes = invoices.propose("Insurance", "x.pdf", ENDORSEMENT, CATS)["notes"]
+    assert notes == "Change of address; additional premium; policy change"
+
+
+def test_a_refund_is_noted():
+    assert invoices.propose("Insurance", "x.pdf", REFUND, CATS)["notes"] == "Refund of premium"
+    assert invoices.propose("", "x.pdf", "Refund\nTotal $5.00\n", CATS)["notes"] == "Refund"
+
+
+def test_an_ordinary_invoice_has_no_notes():
+    assert invoices.propose("", "x.pdf", TYRES, CATS)["notes"] == ""
+
+
+# An invented notice laid out like a Queensland renewal: the issuing authority first, the CTP insurer named later.
+QLD = """
+   Department of Transport and Main Roads                           Queensland Government
+   VEHICLE REGISTRATION RENEWAL NOTICE
+   Registration number     ABC123                  Registration expiry date     30/06/2027
+   Registration period     12 months
+   Due date                01/06/2027
+   Amount due                         $300.00
+   Total Due     $300.00
+   Compulsory third party (CTP) insurance
+   Example Insurer Limited ABN 11 111 111 111 trading as Example Cover
+   Example Cover is your CTP insurer. Registration includes CTP insurance of $200.00 including GST $18.18.
+"""
+
+
+def test_a_registration_notices_vendor_is_the_issuing_authority_not_the_ctp_insurer():
+    got = invoices.propose("", "x.pdf", QLD, CATS)
+    assert got["category"] == "Registration"
+    assert got["vendor"] == "Department of Transport and Main Roads"
+
+
+def test_an_insurance_policy_still_gets_the_insurers_name():
+    assert invoices.propose("", "Policy.pdf", SCHEDULE, CATS)["vendor"] == "Example Insurer Australia Limited"
+
+
+def test_registration_dates_and_months_are_read_from_the_notice():
+    got = invoices.propose("", "x.pdf", QLD, CATS)
+    assert (got["period_start"], got["period_end"]) == (_date(2026, 7, 1), _date(2027, 6, 30))
+    assert got["notes"] == "12 months registration"
+
+
+def test_a_registration_period_given_as_two_dates_is_read_as_is():
+    text = "VEHICLE REGISTRATION\nRegistration period:  01/01/2026 to 30/06/2026\nTotal Due  $301.00\n"
+    got = invoices.propose("", "x.pdf", text, CATS)
+    assert (got["period_start"], got["period_end"]) == (_date(2026, 1, 1), _date(2026, 6, 30))
+
+
+def test_two_expiry_options_follow_the_settings_choice():
+    biggest = invoices.propose("", "x.pdf", RENEWAL, CATS, multi_amount="max")
+    smallest = invoices.propose("", "x.pdf", RENEWAL, CATS, multi_amount="min")
+    assert biggest["period_end"] == _date(2026, 7, 1) and smallest["period_end"] == _date(2026, 1, 1)
+    assert biggest["notes"] == "12 months registration" and smallest["notes"] == "6 months registration"
+    assert invoices.propose("", "x.pdf", RENEWAL, CATS, multi_amount="blank")["period_end"] is None
+
+
+def test_the_period_of_insurance_is_read_in_either_date_style():
+    for text in ("Period of insurance: from 24/10/2026 to 24/10/2027\nTotal $1.00\n",
+                 "Period of Insurance   from 24 Oct 2026   to   24 October 2027\nTotal $1.00\n"):
+        got = invoices.propose("Insurance", "x.pdf", text, CATS)
+        assert (got["period_start"], got["period_end"]) == (_date(2026, 10, 24), _date(2027, 10, 24)), text
+
+
+def test_policy_start_and_end_dates_are_read():
+    text = "Policy start date:  01/02/2026\nPolicy end date:  01/02/2027\nPremium $1,000.00\n"
+    got = invoices.propose("Insurance", "x.pdf", text, CATS)
+    assert (got["period_start"], got["period_end"]) == (_date(2026, 2, 1), _date(2027, 2, 1))
+
+
+def test_no_period_is_none():
+    got = invoices.propose("", "x.pdf", TYRES, CATS)
+    assert got["period_start"] is None and got["period_end"] is None
+
+
+DEALER = """
+   TAX INVOICE                                       Example Motors Pty Ltd
+   Invoice date: 15/03/2026                           ABN 11 111 111 111
+   Vehicle price                          $50,000.00
+   Stamp duty and on-road costs            $2,000.00
+   Drive away price                       $52,000.00
+   Less deposit paid                       $1,000.00
+   Balance payable                        $51,000.00
+"""
+
+
+def test_a_dealers_invoice_gives_the_drive_away_price():
+    got = invoices.propose("Initial purchase", "x.pdf", DEALER, CATS)
+    assert got["amount"] == Decimal("52000.00")
+
+
+def test_a_balance_payable_is_found_when_it_is_all_there_is():
+    text = "TAX INVOICE\nExample Motors Pty Ltd\nBalance payable          $51,000.00\n"
+    assert invoices.propose("Initial purchase", "x.pdf", text, CATS)["amount"] == Decimal("51000.00")
+
+
+def test_payable_totals_without_cents_are_read():
+    for label in ("Total payable", "Total payable (inc GST)", "Total price", "Amount payable"):
+        text = f"TAX INVOICE\n{label}        $52,000\n"
+        assert invoices.propose("Initial purchase", "x.pdf", text, CATS)["amount"] == Decimal("52000"), label
+
+
+def test_a_deposit_line_is_not_the_amount():
+    text = "TAX INVOICE\nDeposit paid        $1,000.00\n"
+    assert invoices.propose("Initial purchase", "x.pdf", text, CATS)["amount"] is None
+
+
+# ---- a purchase invoice names the car -------------------------------------------------------------
+
+DEALER_CAR = """
+   TAX INVOICE                                       Example Motors Pty Ltd
+   Invoice date: 15/03/2026                           ABN 11 111 111 111
+   Make: Example          Model: Roadster
+   VIN: 1ABCD23EFGH456789          Body type:  Hatchback
+   Year of manufacture: 2025        Model year: 2026
+   Drive away price   $52,000.00
+"""
+
+
+def test_the_cars_details_are_read_from_a_purchase_invoice():
+    got = invoices.propose("Initial purchase", "x.pdf", DEALER_CAR, CATS)["car_details"]
+    assert got == {"vin": "1ABCD23EFGH456789", "build_year": 2025, "model_year": 2026, "body_type": "Hatchback",
+                   "make": "Example", "model": "Roadster"}
+
+
+def test_only_what_is_there_is_read():
+    got = invoices.propose("Initial purchase", "x.pdf", "TAX INVOICE\nVehicle identification number: 1abcd23efgh456789\nTotal $1.00\n",
+                           CATS)["car_details"]
+    assert got == {"vin": "1ABCD23EFGH456789"}
+    assert invoices.propose("", "x.pdf", TYRES, CATS)["car_details"] == {}
+
+
+def test_a_vin_with_the_wrong_letters_or_length_is_not_one():
+    for vin in ("1ABCD23EFGH45678", "1ABCD23EFGH4567890", "1ABCO23EFGH456789"):      # 16, 18, and an O
+        assert invoices.propose("", "x.pdf", f"TAX INVOICE\nVIN: {vin}\nTotal $1.00\n", CATS)["car_details"] == {}
+
+
+def test_a_plain_year_is_the_model_year_and_manufacture_dates_are_the_build_year():
+    got = invoices.propose("", "x.pdf", "TAX INVOICE\nYear: 2024\nBuild date: 03/2023\nTotal $1.00\n", CATS)["car_details"]
+    assert got == {"model_year": 2024, "build_year": 2023}

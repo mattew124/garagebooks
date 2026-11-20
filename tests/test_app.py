@@ -279,7 +279,7 @@ def test_provision_is_idempotent(pg, admin):
     assert pg.provision().returncode == 0
     assert pg.provision().returncode == 0
     n = admin.execute("SELECT count(*) AS n FROM garagebooks.category WHERE sort_order < 100").fetchone()["n"]
-    assert n == 10   # the starter categories, with Charging and Fuel
+    assert n == 11   # the starter categories, with Charging, Fuel and Service
 
 
 def test_provision_rejects_weak_or_missing_password(pg):
@@ -423,7 +423,7 @@ def test_restart_keeps_data_and_is_idempotent(blank_db, monkeypatch):
     with psycopg.connect(blank_db) as conn:
         assert conn.execute("SELECT count(*) FROM garagebooks.category WHERE name = 'Car wash'").fetchone()[0] == 1
         assert conn.execute("SELECT grafana_url FROM garagebooks.setting").fetchone()[0] == "https://g.example.test/"
-        assert conn.execute("SELECT count(*) FROM garagebooks.category WHERE sort_order < 100").fetchone()[0] == 10
+        assert conn.execute("SELECT count(*) FROM garagebooks.category WHERE sort_order < 100").fetchone()[0] == 11
 
 
 def test_skip_migrate_for_a_restricted_role(blank_db, monkeypatch):
