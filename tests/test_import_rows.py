@@ -121,3 +121,14 @@ def test_the_list_shows_the_period(client, admin):  # noqa: F811
                 headers=ORIGIN)
     page = client.get("/").data.decode()
     assert "01 Nov 2026" in page and "01 Nov 2027" in page
+
+
+def test_the_notes_and_period_stack_on_a_phone(stocked):
+    """On a phone each import row is a tile whose cells are flex rows: the extras must be one block that stacks its
+    fields full width, not several flex items squeezed side by side."""
+    import re
+    from pathlib import Path
+    row = read(stocked, "policy.pdf")
+    assert re.search(r'<td data-label="Notes" class="extras">\s*<div class="row-extras">', row) and row.rstrip().endswith("</div></td>\n    </tr>".strip()) or '</div></td>' in row
+    css = (Path(__file__).parent.parent / "garagebooks" / "static" / "style.css").read_text()
+    assert ".row-extras" in css and "td.extras" in css
