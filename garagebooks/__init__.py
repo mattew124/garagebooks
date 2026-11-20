@@ -80,7 +80,6 @@ MESSAGES = {
     "claim_forgotten": "Claim record removed. The provider still has the claim, if one was made there.",
     "claims_refreshed": "Claim statuses refreshed.",
     "claims_synced": "Provider history synced.",
-    "claims_sync_started": "Syncing the provider's history. This can take a few minutes; this page updates itself.",
     "claims_sync_running": "A sync is already running.",
     "claims_signin": "Sign in to the provider first, then sync again.",
     "claims_none": "No claims are waiting on the provider: nothing to refresh.",
@@ -1740,7 +1739,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 return redirect(url_for("claims_page", msg="claims_signin"), 303)
             return redirect(url_for("claims_page", msg="claims_problem", problem=message), 303)
         threading.Thread(target=finish_sync, args=(since, cars), daemon=True, name="claims-sync").start()
-        return redirect(url_for("claims_page", msg="claims_sync_started"), 303)
+        return redirect(url_for("claims_page", msg="claims_sync_started"), 303)   # no message: the running notice says it
 
     @app.get("/claims/sync/status")
     def claims_sync_status():
