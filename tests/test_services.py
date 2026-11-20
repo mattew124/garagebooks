@@ -9,7 +9,7 @@ from tests.test_dev_stack import ROOT
 from tests.test_local import app_for, choose, client, root  # noqa: F401  (fixtures)
 
 SEED = ["Fuel filter", "Oil filter", "Engine oil", "Tyre rotation", "Windscreen washer fluid", "Windscreen wipers",
-        "Brakes", "Brake fluid", "Timing belt", "Air filter", "Coolant", "Cabin air filter"]
+        "Brakes", "Brake fluid", "Timing belt", "Air filter", "Coolant", "Cabin air filter", "Wheel alignment"]
 
 
 def items(admin):
