@@ -24,9 +24,10 @@
       <td class="num" data-label="Amount"><input name="amount_{{ n }}" inputmode="decimal" value="{{ r.amount }}"></td>
       <td class="num" data-label="Odometer"><input name="odometer_km_{{ n }}" inputmode="decimal" value="{{ r.odometer_km }}">{% if r.odo_note %}<small>{{ r.odo_note }}</small>{% endif %}</td>
       {% set has_period = (categories|selectattr('id', 'equalto', r.category_id|int(0))|selectattr('has_period')|list) or r.period_start or r.period_end %}
-      <td data-label="Notes"><input name="notes_{{ n }}" maxlength="2000" value="{{ r.notes }}" aria-label="Notes" placeholder="Notes">
+      <td data-label="Notes" class="extras"><div class="row-extras">
+        <input name="notes_{{ n }}" maxlength="2000" value="{{ r.notes }}" aria-label="Notes" placeholder="Notes">
         <span class="period" data-period-fields {{ '' if has_period else 'hidden' }}>
           <label><small>Period from</small> <input type="date" name="period_start_{{ n }}" value="{{ r.period_start }}"></label>
           <label><small>to</small> <input type="date" name="period_end_{{ n }}" value="{{ r.period_end }}"></label>
-        </span></td>
+        </span></div></td>
     </tr>
