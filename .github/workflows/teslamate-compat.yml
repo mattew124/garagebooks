@@ -32,6 +32,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # main, not the default branch (develop): this branches from it into a pull request for main and can tag
+          # a candidate, so it must hold only what is released. The recorded release reaches develop when main is
+          # merged into it, as for any fix to a release.
+          ref: main
           persist-credentials: true   # the release step pushes a branch and a tag
           fetch-depth: 0              # the tags decide the next candidate
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
