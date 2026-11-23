@@ -168,7 +168,7 @@ def test_the_next_reminder_carries_everything_over_and_follows_the_resolution():
     r = reminder(id=7, car_id=3, title="Tyre rotation", category_id=5, due_date=date(2026, 11, 1), due_km=40_000,
                  lead_days=14, lead_km=500, every_months=6, every_km=10_000, notes="Front to back")
     nxt = rm.next_reminder(r, date(2026, 11, 20), 40_250)
-    assert nxt == {"car_id": 3, "title": "Tyre rotation", "category_id": 5, "due_date": date(2027, 5, 20),
+    assert nxt == {"car_id": 3, "title": "Tyre rotation", "category_id": 5, "service_item_id": None, "due_date": date(2027, 5, 20),
                    "due_km": 50_250, "lead_days": 14, "lead_km": 500, "every_months": 6, "every_km": 10_000,
                    "notes": "Front to back", "previous_id": 7}
 

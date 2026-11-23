@@ -113,9 +113,9 @@ server: with an [invoice folder](local-folder.md) mounted (a NAS share, say), th
 there, per car and category, and shows them itself behind your login. Invoices already in either can be
 [imported](importing.md) in bulk.
 
-Starter categories: Initial purchase, Insurance, Registration, Tyres, Cabin air filter,
-Air filter, Wheel alignment, Tyre rotation. Add more on the **Categories** page
-(new ones count as running costs).
+Starter categories: Initial purchase, Insurance, Registration, Tyres, Service, Charging and Fuel. What a service
+covered (filters, fluids, wipers, brakes, a wheel alignment...) is a list of **service items** chosen on each Service
+expense, not a category each. Add more categories on the **Categories** page (new ones count as running costs).
 
 ## Change history
 
