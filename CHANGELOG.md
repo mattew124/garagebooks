@@ -22,11 +22,23 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
   the category's GST rule when the cost after tax is worked out (the amount less that GST, instead of all of it for
   a GST-free category or ten elevenths for the rest). Registration is still ticked GST-free on the Categories page,
   now only as the fallback for an expense with no figure. The claim page offers the stored figure in the connector
-  protocol's existing `gst` field. The card payment reference and BPAY biller code and reference on the notice are
+  protocol's existing `gst` field. The GST is read from the CTP breakdown on the notice's last page (`incl GST of`), not the CTP premium beside it. The card payment reference and BPAY biller code and reference on the notice are
   kept too, in a closed **Payment references** section of the Edit form: never in the list, the tiles, the
   dashboard or the change history's displayed values. Upgrade: pull the new image (the schema gains columns on
   `expense` and the after-tax function is replaced on start; installers on the restricted database role re-run
   `scripts/provision-db.sh`).
+- **The service-type categories are now service items, and reminders can be for an item.** The categories Cabin air
+  filter, Air filter, Wheel alignment and Tyre rotation are gone: on the first start of this release each one
+  that exists is moved into Service. Its expenses move to Service with that item ticked (Wheel alignment is added
+  to the item list), its reminders move to Service and to that item, what the importer learned about vendors is
+  merged, Service takes its invoice subfolder if it has none, and the category is deleted once nothing refers to it.
+  Tyres stays a category (tyres are bought, not serviced). Nothing is lost, and it happens once: a category of that
+  name you add afterwards is yours. Expenses that were in Wheel alignment or Tyre rotation (the tyres budget pool)
+  are now in Service (maintenance pool), so a lease's budget report moves them between pools. A **reminder can be for
+  a service item**: an expense with the item ticked is offered it, already ticked, when saved, and a repeating one
+  keeps its item. The dashboard's category colours use one for Service. Back up the database before upgrading as
+  usual; installers on the restricted database role re-run `scripts/provision-db.sh` (the schema adds a reminder
+  column and replaces a view).
 - **Service items.** A new **Service** category, and a list of what a service covered (fuel filter, oil filter,
   engine oil, tyre rotation, windscreen washer fluid, windscreen wipers, brakes, brake fluid, timing belt, air
   filter, coolant, cabin air filter). Choose the items on each Service expense (the Add and Edit form, and each
@@ -44,7 +56,7 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
   and end dates) read from the document ("Period of insurance", "Registration period", the expiry date, the
   policy start and end), shown on the import row, the Add and Edit form and the list. A new **Has a period**
   setting on the Categories page chooses which categories have one (Insurance and Registration by default).
-  A registration notice's vendor is now the issuing authority, not the CTP insurer it names, and a dealer's
+  On a phone the notes and period sit on their own full-width lines. A registration notice's vendor is now the issuing authority, not the CTP insurer it names, and a dealer's
   invoice for the car itself is read by its "Drive away price", "Total payable" or "Balance payable" lines.
   Upgrade: pull the new image (the schema gains `expense.period_start`, `period_end` and `category.has_period`
   on start; installers on the restricted database role re-run `scripts/provision-db.sh`).

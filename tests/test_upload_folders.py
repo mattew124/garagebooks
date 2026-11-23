@@ -36,7 +36,7 @@ def set_folder(admin, category, folder):
 def test_standard_categories_ship_with_a_sensible_mapping(admin):
     got = {r["name"]: r["upload_folder"] for r in admin.execute(
         "SELECT name, upload_folder FROM garagebooks.category WHERE sort_order < 100")}
-    assert got["Tyres"] == got["Wheel alignment"] == got["Air filter"] == "Maintenance"
+    assert got["Tyres"] == got["Service"] == "Maintenance"
     assert got["Insurance"] == "Insurance" and got["Registration"] == "Registration"
     assert got["Initial purchase"] is None
 
@@ -57,7 +57,7 @@ def test_existing_subfolder_is_reused_whatever_its_case(client, ms, admin):
     client.post("/onedrive/browse/1/new-folder", data={"parent_id": "INV", "name": "maintenance"}, headers=ORIGIN)
     ms.created.clear()
     upload(client, admin)
-    upload(client, admin, category="Wheel alignment", amount="999.00")      # not a duplicate of the first
+    upload(client, admin, category="Service", amount="999.00")      # not a duplicate of the first
     assert ms.created == []
     assert len(ms.uploads()) == 2
 

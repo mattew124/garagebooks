@@ -79,13 +79,13 @@ becomes the car's invoice folder. None of this needs TeslaMate.
 ## A registration's GST and payment references
 
 GST on a registration is only on its CTP insurance part, so it isn't a tenth of the total. When a **Registration**
-notice states its GST (a `GST` line with a dollar figure; the larger or smaller of two on one line, as the Settings
+notice states its GST (the `incl GST of $x` figures on the CTP breakdown's `Total CTP insurance premium` line, on the notice's last page, or else a `GST` line with a dollar figure; the larger or smaller of two on one line, as the Settings
 choice for several amounts says), the row shows it in **GST in the amount** and the expense stores it. A stored GST
 replaces the category's GST rule in the [cost after tax](leases.md): the amount less that GST is what the GST-free
 share is worked out on. Leave it empty to use the rule (Registration starts as **GST-free** on the Categories page, only
 as the fallback for an expense whose notice stated no GST).
 
-The notice's **card payment reference**, **BPAY biller code** and **BPAY reference** are kept with the expense, in a
+The notice's **card payment reference** (the `Ref:` under `Enter Payment Reference Number`), **BPAY biller code** and **BPAY reference** are kept with the expense, in a
 **Payment references** section of the Edit form that starts closed. They are never shown in the expense list or tiles,
 on the dashboard, or in the change history's displayed values. When you
 [claim the expense](leases.md), the claim page starts with the stored GST in its GST field (empty it to leave the GST

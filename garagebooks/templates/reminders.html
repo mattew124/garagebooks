@@ -16,7 +16,7 @@
     <p class="due">
       {% if i.due_date %}{{ i.due_date.strftime('%d %b %Y') }}{% endif %}{% if i.due_date and i.due_km is not none %} or {% endif %}{% if i.due_km is not none %}at {{ i.due_km|km }}{% endif %}
       <span class="left">· {{ st.describe|join(', ') }}</span></p>
-    <p class="meta"><small>{{ i.car_name }}{% if i.category %} · {{ i.category }}{% endif %}
+    <p class="meta"><small>{{ i.car_name }}{% if i.category %} · {{ i.category }}{% endif %}{% if i.service_item %} · {{ i.service_item }}{% endif %}
       · Odometer: {% if i.odometer %}{{ i.odometer.km|km }}
         {% if i.odometer.source == 'teslamate' %}(from TeslaMate){% else %}(entered {{ i.odometer.at|day }}){% endif %}{% else %}not recorded{% endif %}
       {% if i.every_months or i.every_km %}· Repeats every {% if i.every_months %}{{ i.every_months }} month{{ '' if i.every_months == 1 else 's' }}{% endif %}{% if i.every_months and i.every_km %} or {% endif %}{% if i.every_km %}{{ i.every_km|km }}{% endif %}{% endif %}</small></p>
@@ -58,7 +58,7 @@
 
 <form method="post" action="{{ url_for('reminder_add') }}" class="card stack" id="add-reminder">
   <h2 class="card-title">Add a reminder</h2>
-  {{ fields(values.get('new', {}), errors.get('new', {}), cars, categories, lead_days, lead_km, standard=standard, odometers=odometers, today=today_iso) }}
+  {{ fields(values.get('new', {}), errors.get('new', {}), cars, categories, lead_days, lead_km, standard=standard, odometers=odometers, today=today_iso, items=item_choices) }}
   <button type="submit" class="button">Add reminder</button>
 </form>
 

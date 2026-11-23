@@ -1370,7 +1370,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         state = teslamate(conn)
         # Each car's odometer now, so a standard reminder's first due reading can be worked out on the page.
         odometers = {c["id"]: sources.odometer_at(conn, state, c["id"], now) for c in cars}
-        return dict(cars=cars, categories=db.categories(conn), lead_days=reminders.DEFAULT_LEAD_DAYS,
+        return dict(cars=cars, categories=db.categories(conn), item_choices=db.service_items(conn), lead_days=reminders.DEFAULT_LEAD_DAYS,
                     lead_km=reminders.DEFAULT_LEAD_KM, standard=reminders.STANDARD,
                     odometers={k: v.km for k, v in odometers.items() if v}, today_iso=now.date().isoformat())
 
@@ -1394,7 +1394,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         with connect() as conn:
             car_ids = {c["id"] for c in db.cars(conn)}
             category_ids = {c["id"] for c in db.categories(conn)}
-        return validation.parse_reminder_form(request.form, car_ids, category_ids, car_id)
+            item_ids = {i["id"] for i in db.service_items(conn)}
+        return validation.parse_reminder_form(request.form, car_ids, category_ids, car_id, item_ids)
 
     @app.post("/reminders")
     def reminder_add():
@@ -1485,7 +1486,9 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         with connect() as conn:
             expense = load_or_404(conn, expense_id)
             open_ones = db.stored_open_reminders(conn, expense["car_id"])
+            items = set(db.expense_service_ids(conn, expense_id))
         return render_template("expense_reminders.html", expense=expense, open_ones=open_ones, errors=errors or {},
+                               expense_items=items,
                                message=MESSAGES.get(request.args.get("msg", ""))), status
 
     @app.get("/<int:expense_id>/reminders")

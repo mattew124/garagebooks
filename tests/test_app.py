@@ -37,8 +37,7 @@ def rows(admin):
 
 def test_seeded_categories(admin):
     names = [r["name"] for r in admin.execute("SELECT name FROM garagebooks.category ORDER BY sort_order")]
-    assert names[:8] == ["Initial purchase", "Insurance", "Registration", "Tyres",
-                         "Cabin air filter", "Air filter", "Wheel alignment", "Tyre rotation"]
+    assert names == ["Initial purchase", "Insurance", "Registration", "Tyres", "Service", "Charging", "Fuel"]
 
 
 def test_refund_or_rebate_is_stored_as_a_negative_amount(client, admin):
@@ -279,7 +278,7 @@ def test_provision_is_idempotent(pg, admin):
     assert pg.provision().returncode == 0
     assert pg.provision().returncode == 0
     n = admin.execute("SELECT count(*) AS n FROM garagebooks.category WHERE sort_order < 100").fetchone()["n"]
-    assert n == 11   # the starter categories, with Charging, Fuel and Service
+    assert n == 7    # the starter categories
 
 
 def test_provision_rejects_weak_or_missing_password(pg):
@@ -423,7 +422,7 @@ def test_restart_keeps_data_and_is_idempotent(blank_db, monkeypatch):
     with psycopg.connect(blank_db) as conn:
         assert conn.execute("SELECT count(*) FROM garagebooks.category WHERE name = 'Car wash'").fetchone()[0] == 1
         assert conn.execute("SELECT grafana_url FROM garagebooks.setting").fetchone()[0] == "https://g.example.test/"
-        assert conn.execute("SELECT count(*) FROM garagebooks.category WHERE sort_order < 100").fetchone()[0] == 11
+        assert conn.execute("SELECT count(*) FROM garagebooks.category WHERE sort_order < 100").fetchone()[0] == 7
 
 
 def test_skip_migrate_for_a_restricted_role(blank_db, monkeypatch):
