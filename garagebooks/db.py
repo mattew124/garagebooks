@@ -835,7 +835,7 @@ def set_budget_pool(conn, category_id, pool):
 
 # ---- reminders (roadmap item 4) --------------------------------------------------------
 
-REMINDER_FIELDS = ("car_id", "title", "category_id", "due_date", "due_km", "lead_days", "lead_km",
+REMINDER_FIELDS = ("car_id", "title", "category_id", "service_item_id", "due_date", "due_km", "lead_days", "lead_km",
                    "every_months", "every_km", "notes")
 
 
@@ -843,10 +843,11 @@ def open_reminders(conn, car_id=None):
     """Every open reminder, stored and derived from a lease (see the reminder_due view), with the car's
     name, the category's name and, for a stored one, its notes and recurrence. Not sorted."""
     return conn.execute(
-        "SELECT d.*, c.name AS car_name, cat.name AS category, r.notes, r.every_months, r.every_km, "
-        "       r.edited_at, NULL::timestamptz AS resolved_at "
+        "SELECT d.*, c.name AS car_name, cat.name AS category, si.name AS service_item, r.notes, r.every_months, "
+        "       r.every_km, r.edited_at, NULL::timestamptz AS resolved_at "
         "FROM garagebooks.reminder_due d JOIN garagebooks.car c ON c.id = d.car_id "
         "LEFT JOIN garagebooks.category cat ON cat.id = d.category_id "
+        "LEFT JOIN garagebooks.service_item si ON si.id = d.service_item_id "
         "LEFT JOIN garagebooks.reminder r ON r.id = d.reminder_id "
         "WHERE (%(car)s::bigint IS NULL OR d.car_id = %(car)s)", {"car": car_id}).fetchall()
 
@@ -909,7 +910,7 @@ def resolved_reminders(conn, limit, offset=0):
 
 def stored_open_reminders(conn, car_id):
     """A car's open reminders that can be resolved (not the ones derived from its lease)."""
-    return conn.execute("SELECT r.id, r.title, r.category_id, r.due_date, r.due_km FROM garagebooks.reminder r "
+    return conn.execute("SELECT r.id, r.title, r.category_id, r.service_item_id, r.due_date, r.due_km FROM garagebooks.reminder r "
                         "WHERE r.car_id = %s AND r.resolved_at IS NULL ORDER BY r.due_date NULLS LAST, r.id",
                         (car_id,)).fetchall()
 

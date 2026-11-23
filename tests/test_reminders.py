@@ -66,7 +66,7 @@ def category(url, name):
         return conn.execute("SELECT id FROM garagebooks.category WHERE name = %s", (name,)).fetchone()["id"]
 
 
-def expense(url, car_id, cat="Tyre rotation", when="2026-10-05 10:00+10", km=None, vendor="Tyre shop"):
+def expense(url, car_id, cat="Service", when="2026-10-05 10:00+10", km=None, vendor="Tyre shop"):
     with connect(url) as conn:
         return conn.execute(
             "INSERT INTO garagebooks.expense (car_id, category_id, occurred_at, amount, odometer_km, vendor) "
@@ -351,7 +351,7 @@ def test_resolving_without_an_expense_needs_a_date_and_takes_an_optional_odomete
 
 def recurring(client, url, car_id, **over):
     return add(client, url, car_id, title="Tyre rotation", due_date=day(-5), due_km="40000", every_km="10000",
-               every_months="6", lead_days="14", lead_km="500", category_id=str(category(url, "Tyre rotation")),
+               every_months="6", lead_days="14", lead_km="500", category_id=str(category(url, "Service")),
                notes="Front to back", **over)
 
 
@@ -368,7 +368,7 @@ def test_resolving_a_recurring_reminder_makes_the_next_one_from_the_expenses_dat
     assert (nxt["due_date"], nxt["due_km"], nxt["title"], nxt["lead_days"], nxt["lead_km"], nxt["every_km"],
             nxt["every_months"], nxt["notes"], nxt["resolved_at"]) == (
         date(2027, 4, 30), 50_250, "Tyre rotation", 14, 500, 10_000, 6, "Front to back", None)    # 31 Oct + 6 months: month end
-    assert nxt["category_id"] == category(url, "Tyre rotation") and nxt["car_id"] == car_id
+    assert nxt["category_id"] == category(url, "Service") and nxt["car_id"] == car_id
 
 
 def test_the_next_one_chains_on_so_the_history_can_be_traced(app):
@@ -461,9 +461,9 @@ def test_unresolving_leaves_a_next_one_that_was_edited_or_resolved_and_says_so(a
 
 def test_saving_an_expense_offers_the_cars_open_reminders_with_the_matching_category_ticked(app):
     client, url, car_id = app
-    match = add(client, url, car_id, title="Rotation due", category_id=str(category(url, "Tyre rotation")))
+    match = add(client, url, car_id, title="Rotation due", category_id=str(category(url, "Service")))
     other = add(client, url, car_id, title="Insurance renewal", category_id=str(category(url, "Insurance")))
-    data = {"car_id": str(car_id), "category_id": str(category(url, "Tyre rotation")), "date": day(0), "time": "09:00",
+    data = {"car_id": str(car_id), "category_id": str(category(url, "Service")), "date": day(0), "time": "09:00",
             "amount": "90", "odometer_km": "41000", "vendor": "Tyre shop", "invoice_url": "", "notes": ""}
     saved = client.post("/new", data=data, headers=ORIGIN)
     assert saved.status_code == 303
@@ -645,7 +645,7 @@ def test_the_form_offers_the_standard_reminders_with_the_car_types_they_apply_to
     by_key = {o[0]: o for o in options}
     assert by_key["engine_oil"][1:] == ("Engine oil", "12", "10000", "ICE PHEV HEV")
     assert by_key["tyre_rotation"][1:] == ("Tyre rotation", "", "10000", "")           # every car: no kinds
-    assert 'data-category="Tyre rotation"' in block
+    assert 'data-category="Service"' in block and 'data-item="Tyre rotation"' in block
     assert f'<option value="{car_id}" data-kind="BEV"' in page
 
 
@@ -659,3 +659,67 @@ def test_each_car_option_carries_its_type_and_current_odometer(empty_db, monkeyp
     page = client.get("/reminders").data.decode()
     assert re.search(rf'<option value="{ute}" data-kind="ICE" data-odometer="12345', page)
     assert re.search(rf'<option value="{bike}" data-kind="HEV" ', page) and f'<option value="{bike}" data-kind="HEV" data-odometer' not in page
+
+
+# ---- reminders at the service-item level --------------------------------------------------------------
+
+def item(url, name):
+    with connect(url) as conn:
+        return conn.execute("SELECT id FROM garagebooks.service_item WHERE name = %s", (name,)).fetchone()["id"]
+
+
+def test_a_reminder_can_be_for_a_service_item(app):
+    client, url, car_id = app
+    cabin = item(url, "Cabin air filter")
+    rid = add(client, url, car_id, title="Cabin air filter", category_id=str(category(url, "Service")),
+              service_item_id=str(cabin), every_months="24", every_km="20000", due_km="60000")
+    assert one(url, "SELECT service_item_id, category_id FROM garagebooks.reminder WHERE id = %s", rid) == {
+        "service_item_id": cabin, "category_id": category(url, "Service")}
+    assert one(url, "SELECT service_item_id FROM garagebooks.reminder_due WHERE reminder_id = %s", rid)["service_item_id"] == cabin
+    assert "Cabin air filter" in client.get("/reminders").data.decode()
+    page = client.get(f"/reminders/{rid}/edit").data.decode()
+    assert re.search(rf'<option value="{cabin}"\s+selected', page) or f'value="{cabin}" selected' in page
+
+
+def test_the_form_offers_the_items_and_refuses_one_that_isnt_real(app):
+    client, url, car_id = app
+    assert 'name="service_item_id"' in client.get("/reminders").data.decode()
+    bad = client.post("/reminders", data=form(car_id, service_item_id="99999"), headers=ORIGIN)
+    assert bad.status_code == 400 and "Choose a service item from the list." in bad.data.decode().replace("&#39;", "'")
+
+
+def test_an_expense_with_the_item_ticked_is_offered_that_reminder_ticked(app):
+    client, url, car_id = app
+    cabin, brakes = item(url, "Cabin air filter"), item(url, "Brakes")
+    service = category(url, "Service")
+    mine = add(client, url, car_id, title="Cabin filter", category_id=str(service), service_item_id=str(cabin))
+    other = add(client, url, car_id, title="Brakes", category_id=str(service), service_item_id=str(brakes))
+    by_category = add(client, url, car_id, title="Any service", category_id=str(service))
+    data = {"car_id": str(car_id), "category_id": str(service), "date": day(0), "time": "09:00", "amount": "90",
+            "odometer_km": "41000", "vendor": "Garage", "invoice_url": "", "notes": "", "service_item": [str(cabin)]}
+    saved = client.post("/new", data=data, headers=ORIGIN)
+    page = client.get(saved.location).data.decode()
+    assert re.search(rf'value="{mine}"[^>]*checked', page)
+    assert not re.search(rf'value="{other}"[^>]*checked', page)         # an item the expense doesn't have
+    assert re.search(rf'value="{by_category}"[^>]*checked', page)       # no item: the category rule, as before
+    eid = one(url, "SELECT max(id) AS id FROM garagebooks.expense")["id"]
+    assert client.post(f"/{eid}/reminders", data={"reminder_id": [str(mine)]}, headers=ORIGIN).status_code == 303
+    assert one(url, "SELECT resolved_expense_id FROM garagebooks.reminder WHERE id = %s", mine)["resolved_expense_id"] == eid
+
+
+def test_a_repeating_item_reminder_keeps_its_item_when_resolved(app):
+    client, url, car_id = app
+    cabin = item(url, "Cabin air filter")
+    rid = add(client, url, car_id, title="Cabin air filter", service_item_id=str(cabin), every_months="24")
+    eid = expense(url, car_id)
+    assert client.post(f"/{eid}/reminders", data={"reminder_id": [str(rid)]}, headers=ORIGIN).status_code == 303
+    nxt = one(url, "SELECT service_item_id FROM garagebooks.reminder WHERE previous_id = %s", rid)
+    assert nxt["service_item_id"] == cabin
+
+
+def test_deleting_an_item_leaves_its_reminder_in_place(app):
+    client, url, car_id = app
+    spare = client.post("/api/service-items", json={"name": "Spare part"}, headers=ORIGIN).get_json()["id"]
+    rid = add(client, url, car_id, title="Spare", service_item_id=str(spare))
+    assert client.post(f"/categories/services/{spare}/delete", headers=ORIGIN).status_code == 303
+    assert one(url, "SELECT service_item_id FROM garagebooks.reminder WHERE id = %s", rid)["service_item_id"] is None

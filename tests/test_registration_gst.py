@@ -206,3 +206,88 @@ def test_the_import_row_shows_the_gst_hides_the_references_and_saves_them(stocke
     saved = rows(admin)[0]
     assert (saved["gst_amount"], saved["card_payment_ref"], saved["bpay_biller_code"], saved["bpay_ref"]) == (
         D("18.18"), "1234 5678 9012", "12345", "9876 5432 1098")
+
+
+# An invented notice laid out like a Queensland renewal in the real thing: the payment page first (BPAY and an online
+# reference, 6 and 12 month options in columns), a fee breakdown, and on the LAST page the CTP breakdown whose
+# "Total CTP insurance premium" line carries the GST as "incl GST of $x" once per option, after the premium itself.
+LAYOUT = """
+      VEHICLE REGISTRATION                                                    Due date:                          1 December 2026
+
+      RENEWAL NOTICE                                                          Amount due:                                       $880.00
+      Department of Transport and Main Roads
+      ABN 11 111 111 111                                                      Registration number:                       ABC123
+                                                                              Customer reference number:                     111111111
+                                                                              (not for payment)
+
+                                       Payment due
+                                Due Date: 1 December 2026
+
+               Amount due                                       6 months                      12 months
+
+               ON or BEFORE due date                            $450.00                           $880.00
+               AFTER due date                                   $520.00                           $950.00
+
+                                                     YOU CAN PAY BY
+BPAY - Telephone and Internet Banking                                      Online - credit card only
+Contact your bank or financial institution to make this                    Pay online using an accepted card at
+payment from your cheque, savings, debit or transaction                    www.example.test/payregoonline
+account. More info: www.example.test/bpay
+                                                                           Enter Payment Reference Number
+
+You can only pay the FULL 6 or 12 month amount by BPAY.                    Ref: 1111 2222 33
+Transport and Main Roads CANNOT accept part payments.
+
+                  6 months                     12 months
+          Biller Code: 12345             Biller Code: 12345
+          Ref: 1111 2222 33              Ref: 1111 2222 33
+
+ Fee breakdown                                                                                               6 months               12 months
+ Next registration expiry date                                                                               01/06/2027              01/12/2027
+ CTP Insurance for Example Insurer Limited (ACN 111 111 111) T/A Example Cover                                  200.00 Dr               400.00 Dr
+ Registration Fee                                                                                               190.00 Dr               380.00 Dr
+ Traffic Improvement Fee                                                                                         50.00 Dr               100.00 Dr
+ Surcharge for shorter registration term payable to cover                                                        10.00 Dr
+ extra processing costs for renewals less than 12 months
+
+                                                                                            Total Due          $450.00                  $880.00
+
+  Your current CTP Insurance details
+  Vehicle insured by:              Example Insurer Limited (ACN 111 111 111) T/A Example Cover
+  GST ITCE*:                       NO
+  *GST Input Tax Credit Entitlement.
+
+What makes up the cost of your CTP insurance?
+                                                                        6 months                          12 months
+Fee breakdown
+                                                                Price                 GST         Price            GST
+Insurers Premium                                               130.00 Dr             10.00 Dr     260.00 Dr            20.00 Dr
+Administration Fee                                               70.00 Dr                           140.00 Dr
+
+Total CTP insurance premium                                     $200.00    incl GST of $10.00     $400.00     incl GST of $20.00
+"""
+
+
+def test_the_gst_is_the_one_on_the_ctp_totals_line_not_the_ctp_premium_itself():
+    got = invoices.propose("", "Registration_Renewal_Notice_ABC123_261101.pdf", LAYOUT, CATS)
+    assert got["category"] == "Registration" and got["amount"] == D("880.00")
+    assert got["gst_amount"] == D("20.00")                              # 12 months, the larger option, as the amount is
+    assert invoices.propose("", "x.pdf", LAYOUT, CATS, multi_amount="min")["gst_amount"] == D("10.00")
+    assert invoices.propose("", "x.pdf", LAYOUT, CATS, multi_amount="blank")["gst_amount"] is None
+
+
+def test_the_payment_references_are_found_on_that_layout():
+    got = invoices.propose("", "x.pdf", LAYOUT, CATS)
+    assert got["card_payment_ref"] == "1111 2222 33"                    # "Enter Payment Reference Number ... Ref:"
+    assert (got["bpay_biller_code"], got["bpay_ref"]) == ("12345", "1111 2222 33")
+
+
+def test_no_online_reference_means_none_not_the_customer_or_bpay_reference():
+    got = invoices.propose("", "x.pdf", LAYOUT.replace("by BPAY.                    Ref: 1111 2222 33", "by BPAY."), CATS)
+    assert got["card_payment_ref"] is None
+
+
+def test_a_gst_of_the_whole_ctp_premium_is_never_taken():
+    text = LAYOUT.replace("incl GST of $20.00", "").replace("incl GST of $10.00", "")
+    assert invoices.propose("", "x.pdf", text, CATS)["gst_amount"] in (None, D("10.00"), D("20.00"))
+    assert invoices.propose("", "x.pdf", text, CATS)["gst_amount"] not in (D("400.00"), D("200.00"))

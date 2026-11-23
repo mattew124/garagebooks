@@ -39,10 +39,6 @@ INSERT INTO garagebooks.category (name, kind, sort_order) VALUES
     ('Insurance',         'running',   20),
     ('Registration',      'running',   30),
     ('Tyres',             'running',   40),
-    ('Cabin air filter',  'running',   50),
-    ('Air filter',        'running',   60),
-    ('Wheel alignment',   'running',   70),
-    ('Tyre rotation',     'running',   80),
     ('Charging',          'energy',    90),
     ('Fuel',              'energy',    95)
 ON CONFLICT (name) DO NOTHING;
@@ -514,6 +510,7 @@ CREATE TABLE IF NOT EXISTS garagebooks.reminder (
 CREATE INDEX IF NOT EXISTS reminder_car_idx ON garagebooks.reminder (car_id) WHERE resolved_at IS NULL;
 CREATE INDEX IF NOT EXISTS reminder_previous_idx ON garagebooks.reminder (previous_id);
 
+-- (service_item_id is NULL here and filled in by the redefinition at the end of this file, once service_item exists.)
 -- Everything that is due, in one place for the app and Grafana: the open reminders, plus two derived
 -- from a car's current lease, so they follow the lease and can't drift from it (the lease that
 -- covers today, else the next to start): registration expiry, which is informational when the provider renews it,
@@ -521,19 +518,19 @@ CREATE INDEX IF NOT EXISTS reminder_previous_idx ON garagebooks.reminder (previo
 -- (Dates use the database's own day; the app works out "today" in APP_TZ for its pages.)
 CREATE OR REPLACE VIEW garagebooks.reminder_due AS
 SELECT 'reminder'::text AS kind, r.id AS reminder_id, r.car_id, r.title, r.category_id, r.due_date,
-       r.due_km, r.lead_days, r.lead_km, false AS informational
+       r.due_km, r.lead_days, r.lead_km, false AS informational, NULL::smallint AS service_item_id
 FROM garagebooks.reminder r
 WHERE r.resolved_at IS NULL
 UNION ALL
 SELECT 'registration', NULL::integer, cl.car_id, 'Registration expires', NULL::smallint, cl.rego_expiry,
-       NULL::numeric(9, 1), 30, 0::numeric(9, 1), cl.rego_renewed_by_provider
+       NULL::numeric(9, 1), 30, 0::numeric(9, 1), cl.rego_renewed_by_provider, NULL::smallint
 FROM garagebooks.lease cl
 WHERE cl.rego_expiry IS NOT NULL
   AND cl.id = (SELECT l.id FROM garagebooks.lease l WHERE l.car_id = cl.car_id AND l.end_date >= CURRENT_DATE
                ORDER BY l.start_date LIMIT 1)
 UNION ALL
 SELECT 'lease_end', NULL::integer, cl.car_id, 'Lease ends', NULL::smallint, cl.end_date,
-       NULL::numeric(9, 1), 90, 0::numeric(9, 1), false
+       NULL::numeric(9, 1), 90, 0::numeric(9, 1), false, NULL::smallint
 FROM garagebooks.lease cl
 WHERE cl.id = (SELECT l.id FROM garagebooks.lease l WHERE l.car_id = cl.car_id AND l.end_date >= CURRENT_DATE
                ORDER BY l.start_date LIMIT 1);
@@ -932,7 +929,7 @@ BEGIN
         INSERT INTO garagebooks.service_item (name, sort_order) VALUES
             ('Fuel filter', 10), ('Oil filter', 20), ('Engine oil', 30), ('Tyre rotation', 40),
             ('Windscreen washer fluid', 50), ('Windscreen wipers', 60), ('Brakes', 70), ('Brake fluid', 80),
-            ('Timing belt', 90), ('Air filter', 91), ('Coolant', 92), ('Cabin air filter', 93);
+            ('Timing belt', 90), ('Air filter', 91), ('Coolant', 92), ('Cabin air filter', 93), ('Wheel alignment', 94);
     END IF;
 END $$;
 CREATE UNIQUE INDEX IF NOT EXISTS service_item_name_key ON garagebooks.service_item (lower(name));
@@ -948,7 +945,8 @@ DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM garagebooks.category WHERE name = 'Service') THEN
         ALTER TABLE garagebooks.category DISABLE TRIGGER log_change;
-        INSERT INTO garagebooks.category (name, kind, sort_order, budget_pool) VALUES ('Service', 'running', 85, 'maintenance');
+        INSERT INTO garagebooks.category (name, kind, sort_order, budget_pool, upload_folder)
+        VALUES ('Service', 'running', 85, 'maintenance', 'Maintenance');
         ALTER TABLE garagebooks.category ENABLE TRIGGER log_change;
     END IF;
 END $$;
@@ -1036,3 +1034,90 @@ CREATE TABLE IF NOT EXISTS garagebooks.expense_document (
 CREATE INDEX IF NOT EXISTS expense_document_expense_idx ON garagebooks.expense_document (expense_id);
 CREATE UNIQUE INDEX IF NOT EXISTS expense_document_url_key ON garagebooks.expense_document (invoice_url) WHERE invoice_url IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS expense_document_path_key ON garagebooks.expense_document (invoice_path) WHERE invoice_path IS NOT NULL;
+
+-- Service items in reminders, and the end of the service-type categories.
+--   reminder.service_item_id  a reminder can be for a service item ("Cabin air filter every 2 years"): an expense
+--                             with that item ticked resolves it, as one in the reminder's category does. Removing an
+--                             item leaves its reminders as they were, without the item.
+ALTER TABLE garagebooks.reminder ADD COLUMN IF NOT EXISTS service_item_id smallint
+    REFERENCES garagebooks.service_item (id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS reminder_item_idx ON garagebooks.reminder (service_item_id) WHERE service_item_id IS NOT NULL;
+-- reminder_due again, with the item as its last column (the lease-derived rows have none).
+CREATE OR REPLACE VIEW garagebooks.reminder_due AS
+SELECT 'reminder'::text AS kind, r.id AS reminder_id, r.car_id, r.title, r.category_id, r.due_date,
+       r.due_km, r.lead_days, r.lead_km, false AS informational, r.service_item_id
+FROM garagebooks.reminder r
+WHERE r.resolved_at IS NULL
+UNION ALL
+SELECT 'registration', NULL::integer, cl.car_id, 'Registration expires', NULL::smallint, cl.rego_expiry,
+       NULL::numeric(9, 1), 30, 0::numeric(9, 1), cl.rego_renewed_by_provider, NULL::smallint
+FROM garagebooks.lease cl
+WHERE cl.rego_expiry IS NOT NULL
+  AND cl.id = (SELECT l.id FROM garagebooks.lease l WHERE l.car_id = cl.car_id AND l.end_date >= CURRENT_DATE
+               ORDER BY l.start_date LIMIT 1)
+UNION ALL
+SELECT 'lease_end', NULL::integer, cl.car_id, 'Lease ends', NULL::smallint, cl.end_date,
+       NULL::numeric(9, 1), 90, 0::numeric(9, 1), false, NULL::smallint
+FROM garagebooks.lease cl
+WHERE cl.id = (SELECT l.id FROM garagebooks.lease l WHERE l.car_id = cl.car_id AND l.end_date >= CURRENT_DATE
+               ORDER BY l.start_date LIMIT 1);
+
+-- Releases before this had the categories Cabin air filter, Air filter, Wheel alignment and Tyre rotation. They are
+-- items of the Service category now (Tyres stays a category of its own: tyres are bought, not serviced). Once, on
+-- the first start that finds them (a comment on service_item says it has been done, so a category of that name
+-- the owner adds later is theirs to keep), for each one that exists:
+--   - its item is added to the list if missing (matched ignoring case);
+--   - every expense in it moves to Service with that item ticked (the change history records the move);
+--   - its reminders move to Service and to that item, so they are resolved by an expense with the item ticked;
+--   - what the importer learned about vendors moves over (hits add up);
+--   - Service takes its invoice subfolder if Service has none; the budget pool is left as it is (Service is in the
+--     maintenance pool, and the owner's choice for it is never overwritten);
+--   - the category is deleted, but only when nothing in any table refers to it any more (not logged in the history).
+DO $$
+DECLARE
+    old record;
+    svc smallint;
+    item smallint;
+    ref record;
+    in_use boolean;
+BEGIN
+    IF obj_description('garagebooks.service_item'::regclass, 'pg_class') IS NOT DISTINCT FROM 'service categories moved' THEN
+        RETURN;
+    END IF;
+    SELECT id INTO svc FROM garagebooks.category WHERE name = 'Service';
+    IF svc IS NULL THEN
+        RETURN;
+    END IF;
+    -- Housekeeping of the standard categories is not anyone's edit: kept out of the change history (the moves of
+    -- the owner's expenses, which are changes to their data, are logged as usual).
+    ALTER TABLE garagebooks.category DISABLE TRIGGER log_change;
+    FOR old IN SELECT id, name, upload_folder FROM garagebooks.category
+               WHERE name IN ('Cabin air filter', 'Air filter', 'Wheel alignment', 'Tyre rotation') ORDER BY sort_order, id
+    LOOP
+        INSERT INTO garagebooks.service_item (name, sort_order) VALUES (old.name, 94) ON CONFLICT DO NOTHING;
+        SELECT id INTO item FROM garagebooks.service_item WHERE lower(name) = lower(old.name);
+        INSERT INTO garagebooks.expense_service_item (expense_id, item_id)
+            SELECT id, item FROM garagebooks.expense WHERE category_id = old.id ON CONFLICT DO NOTHING;
+        UPDATE garagebooks.expense SET category_id = svc WHERE category_id = old.id;
+        UPDATE garagebooks.reminder SET category_id = svc, service_item_id = item WHERE category_id = old.id;
+        INSERT INTO garagebooks.learned_vendor (vendor, category_id, hits)
+            SELECT vendor, svc, hits FROM garagebooks.learned_vendor WHERE category_id = old.id
+        ON CONFLICT (vendor, category_id) DO UPDATE SET hits = garagebooks.learned_vendor.hits + EXCLUDED.hits;
+        DELETE FROM garagebooks.learned_vendor WHERE category_id = old.id;
+        UPDATE garagebooks.category SET upload_folder = old.upload_folder
+            WHERE id = svc AND upload_folder IS NULL AND old.upload_folder IS NOT NULL;
+        in_use := false;
+        FOR ref IN SELECT k.conrelid::regclass AS tbl, a.attname AS col
+                   FROM pg_constraint k JOIN pg_attribute a ON a.attrelid = k.conrelid AND a.attnum = k.conkey[1]
+                   WHERE k.contype = 'f' AND k.confrelid = 'garagebooks.category'::regclass
+        LOOP
+            EXECUTE format('SELECT EXISTS (SELECT 1 FROM %s WHERE %I = $1)', ref.tbl, ref.col) INTO in_use USING old.id;
+            EXIT WHEN in_use;
+        END LOOP;
+        IF NOT in_use THEN
+            DELETE FROM garagebooks.category WHERE id = old.id;
+        END IF;
+    END LOOP;
+    ALTER TABLE garagebooks.category ENABLE TRIGGER log_change;
+    COMMENT ON TABLE garagebooks.service_item IS 'service categories moved';
+END $$;

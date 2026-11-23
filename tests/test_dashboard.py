@@ -105,9 +105,8 @@ def test_category_colours_are_fixed_and_clearly_different():
     """Grafana's default palette hands out neighbouring shades; the starter categories and charging get
     fixed, well-separated colours (the colour-blind-safe Okabe-Ito set), the same in every chart."""
     seed = (ROOT / "garagebooks" / "schema.sql").read_text()
-    running = [n for n in ("Insurance", "Registration", "Tyres", "Cabin air filter", "Air filter",
-                           "Wheel alignment", "Tyre rotation") if f"('{n}'" in seed]
-    assert len(running) == 7
+    running = [n for n in ("Insurance", "Registration", "Tyres", "Service") if f"('{n}'" in seed]
+    assert len(running) == 4
     panels = {p["id"]: p for p in SOURCE["panels"]}
     palettes = []
     for pid in (11, 12):
