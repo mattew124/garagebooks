@@ -43,9 +43,10 @@ image="teslamate/teslamate:$version"
 echo "compat: TeslaMate $version (this release was tested with $tested)"
 
 name="garagebooks-compat-$$"
-trap 'docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
+trap 'docker rm -fv "$name" >/dev/null 2>&1 || true' EXIT
 pass="$(openssl rand -hex 16)"
-docker run -d --rm --name "$name" -e POSTGRES_USER=teslamate -e POSTGRES_DB=teslamate \
+# --tmpfs: the postgres image's data dir is a VOLUME; without it every run leaks an anonymous volume.
+docker run -d --rm --name "$name" --tmpfs /var/lib/postgresql -e POSTGRES_USER=teslamate -e POSTGRES_DB=teslamate \
     -e "POSTGRES_PASSWORD=$pass" postgres:18-trixie >/dev/null
 until docker exec "$name" pg_isready -q -U teslamate -d teslamate; do sleep 1; done
 sleep 2   # initdb restarts the server once
