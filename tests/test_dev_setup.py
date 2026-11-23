@@ -67,3 +67,17 @@ def test_a_venv_from_before_the_stamp_existed_is_installed_into_once(tmp_path):
     setup(tree, stubs, log)
     (tree / ".venv" / ".requirements-installed").unlink()
     assert setup(tree, stubs, log).count("pip install") == 2
+
+
+def test_a_venv_made_under_another_path_is_made_again(tmp_path):
+    """A venv's scripts name the python they were made with by its full path: after the checkout is moved or
+    renamed, pip and the rest point at a path that is gone (`cannot execute: required file not found`)."""
+    tree, stubs = make_checkout(tmp_path)
+    log = tmp_path / "log"
+    setup(tree, stubs, log)
+    pip = tree / ".venv" / "bin" / "pip"
+    pip.write_text("#!/the/old/checkout/.venv/bin/python3\n")
+    (tree / ".venv" / "stale").write_text("from the old venv")
+    assert setup(tree, stubs, log).count("pip install") == 2
+    assert not (tree / ".venv" / "stale").exists(), "the venv is made afresh, not patched"
+    assert setup(tree, stubs, log).count("pip install") == 2            # and then it is left alone

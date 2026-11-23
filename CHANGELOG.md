@@ -7,6 +7,8 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+- **`scripts/dev.sh setup` remakes a venv from another path.** A venv made before its checkout was moved or renamed
+  has a `pip` that can't start; `setup` now makes it again. Nothing changes for installers.
 - **Dev stack: a real claims connector's key works, and the Dashboards link comes back.** The dev app joins the key
   file's group, so a key readable through a group you are in (`0640`) is readable in the container too, and `up`
   fills in the app and Grafana addresses on the Settings page where they are empty (a saved one stays). Nothing
