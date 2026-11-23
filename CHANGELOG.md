@@ -7,6 +7,10 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+- **`scripts/dev.sh setup` keeps the venv current.** It installs the requirements again when `requirements.txt` or
+  `requirements-dev.txt` has changed since the last install, so a worktree that has merged main doesn't fail with
+  `ModuleNotFoundError`. Nothing changes for installers.
+
 - **Several PDFs in one expense.** On the import page every row has an **Attach to** choice: pick another row and
   its PDF is merged into that row's expense instead of becoming one of its own (an invoice plus its service
   report, say). The main row's PDF stays the expense's invoice; the others are kept as **Attached documents**,

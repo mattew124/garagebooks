@@ -2,7 +2,8 @@
 # =============================================================================
 # dev.sh — run the dev stack on its own test database.
 #
-#   scripts/dev.sh setup             first run in a new checkout: venv + local files check
+#   scripts/dev.sh setup             first run in a new checkout: venv + local files check; run it again
+#                                    after merging main to install any requirements that changed
 #   scripts/dev.sh info              this checkout's stack: name, URL path, ports
 #   scripts/dev.sh up [--image REF]  start; first run creates and seeds the test DB.
 #                                    --image runs a released image instead of
@@ -393,9 +394,13 @@ INFO
 
 setup() {
     sync_local_notes
-    if [ ! -x .venv/bin/python ]; then
-        python3 -m venv .venv
+    [ -x .venv/bin/python ] || python3 -m venv .venv
+    # Install on the first run, and again whenever a requirements file is newer than the last install: merging
+    # main can add a dependency, and a venv from before it fails with ModuleNotFoundError.
+    local stamp=.venv/.requirements-installed
+    if [ ! -f "$stamp" ] || [ requirements.txt -nt "$stamp" ] || [ requirements-dev.txt -nt "$stamp" ]; then
         .venv/bin/pip install -q -r requirements-dev.txt
+        touch "$stamp"
     fi
     echo "dev: .venv ready"
     [ -f dev.env ] || echo "dev: no dev.env, so this stack is on localhost with defaults (see dev.env.example)"
