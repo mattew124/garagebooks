@@ -33,7 +33,8 @@ def old_world(conn):
 
 
 def populate(conn, ids):
-    car = conn.execute("SELECT id FROM garagebooks.car ORDER BY id LIMIT 1").fetchone()[0]
+    car = (conn.execute("SELECT id FROM garagebooks.car ORDER BY id LIMIT 1").fetchone()
+           or conn.execute("INSERT INTO garagebooks.car (name) VALUES ('Mig car') RETURNING id").fetchone())[0]
     for name, cid in ids.items():
         conn.execute("INSERT INTO garagebooks.expense (car_id, category_id, occurred_at, amount, vendor, notes) "
                      "VALUES (%s, %s, '2026-05-01 02:00+00', 100, 'Example Auto', %s)", (car, cid, f"old {name}"))
