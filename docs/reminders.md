@@ -29,6 +29,7 @@ falls due on whichever comes first.
 | Field | What it does |
 |---|---|
 | Category | Optional. When you save an expense in this category, the reminder is offered for resolving, already ticked. |
+| Service item | Optional, for a reminder about one thing a service covers ("Cabin air filter every 2 years or 20,000 km"). When you save an expense with that item ticked, the reminder is offered for resolving, already ticked; a repeating reminder keeps its item. A reminder with an item is ticked by the item, not by its category. |
 | On this date / At this odometer reading | When it is due. At least one is needed. |
 | Warn me this many days / km before | The lead time: how early it counts as **due soon**. It starts at 30 days and 1,000 km; change it for each reminder. |
 | Every (months) / Every (km) | Makes it repeat. Leave both empty for a one-off. |

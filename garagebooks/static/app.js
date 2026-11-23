@@ -369,6 +369,10 @@ document.addEventListener("DOMContentLoaded", () => {
       f.elements.due_km.value = o.dataset.km && Number.isFinite(odometer) ? String(Math.round(odometer + Number(o.dataset.km))) : "";
       const category = [...f.elements.category_id.options].find((c) => c.textContent.trim() === o.dataset.category);
       f.elements.category_id.value = category && o.dataset.category ? category.value : "";
+      if (f.elements.service_item_id) {
+        const item = [...f.elements.service_item_id.options].find((c) => c.textContent.trim() === o.dataset.item);
+        f.elements.service_item_id.value = item && o.dataset.item ? item.value : "";
+      }
     });
   }
 
