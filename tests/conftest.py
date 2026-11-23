@@ -102,7 +102,10 @@ def pg():
     name = f"garagebooks-test-{secrets.token_hex(4)}"
     admin_pass = secrets.token_hex(16)
     try:
+        # --tmpfs on the data dir: the postgres image declares it a VOLUME, so without this Docker
+        # makes an anonymous volume that `docker rm -f` (below) leaves behind (~115 MB per run).
         sh("docker", "run", "-d", "--rm", "--name", name, "-p", "127.0.0.1::5432",
+           "--tmpfs", "/var/lib/postgresql",
            "-e", f"POSTGRES_PASSWORD={admin_pass}", "-e", "POSTGRES_DB=teslamate", IMAGE)
     except subprocess.CalledProcessError as exc:
         pytest.skip(f"cannot start {IMAGE}: {exc.stderr.strip()}")
@@ -136,7 +139,7 @@ def pg():
             pg.psql(OWN_CAR)
         yield pg
     finally:
-        subprocess.run(["docker", "rm", "-f", name], capture_output=True)
+        subprocess.run(["docker", "rm", "-fv", name], capture_output=True)  # -v: belt and braces
 
 
 @pytest.fixture()
