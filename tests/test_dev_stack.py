@@ -267,6 +267,24 @@ def test_the_stand_in_claims_connector_is_private_and_the_app_uses_it_by_default
     assert "stand-in.key" not in fake_mounts["/claims-keys"]["source"] and fake_mounts["/claims-keys"]["read_only"]
 
 
+def test_the_app_joins_the_claims_key_files_group_so_it_can_read_it():
+    """A real connector's key is often root- or service-owned and readable by a group (0640): the user
+    running dev.sh is in that group, but the container runs as their uid with no other groups. The app and
+    the worker join the key file's group, so `dev.sh up` passing its check means the app can read the key."""
+    cfg = config()
+    for name in ("garagebooks-dev", "dev-worker"):
+        assert cfg["services"][name]["group_add"] == ["${DEV_CLAIMS_KEY_GID:-${DEV_GID:-10001}}"], name
+
+
+def test_the_claims_key_group_is_the_key_files_own(tmp_path):
+    key = tmp_path / "real.key"
+    key.write_text("x")
+    done = run_dev(tmp_path, 'DEV_CLAIMS_CONNECTOR_URL=http://connector.invalid:8765\n'
+                             f'DEV_CLAIMS_CONNECTOR_KEY_FILE={key}\n', "info")
+    assert done.returncode == 0, done.stderr
+    assert f"claims_key_gid={key.stat().st_gid}" in done.stdout.splitlines()
+
+
 def test_the_stand_in_gets_a_fresh_key_pair_on_each_start_and_only_the_public_half():
     assert "openssl genpkey -algorithm ed25519" in SCRIPT and "openssl pkey" in SCRIPT and "-pubout" in SCRIPT
     start = SCRIPT[SCRIPT.index("\nstart() {"):]
@@ -388,3 +406,32 @@ def test_dependabot_bumps_the_browser_tests_image_and_package_in_one_pull_reques
 def test_onedrive_link_signs_in_at_the_microsoft_address():
     """The registration's redirect URI is /microsoft/callback; a linked stack must not ask for the older one."""
     assert "callback = 'microsoft'" in function_body("onedrive_link")
+
+
+# ---- the stack's own addresses on the Settings page -------------------------------------------------------------
+
+def seed_settings_sql(app, graf):
+    """The SQL `seed_settings` in dev.sh sends, with its psql variables filled in."""
+    body = SCRIPT[SCRIPT.index("\nseed_settings() {"):]
+    sql = body[body.index("<<'SQL'\n") + len("<<'SQL'\n"):body.index("\nSQL\n")]
+    return sql.replace(":'app'", f"'{app}'").replace(":'graf'", f"'{graf}'")
+
+
+def test_every_up_fills_in_lost_addresses_and_keeps_saved_ones(empty_db):
+    """A stack's database keeps the app and Grafana addresses from its first start; if they are lost (the
+    Settings page saved blank), the nav has no Dashboards link until they are typed in again. `up` puts back
+    only what is empty: an address someone saved stays."""
+    import psycopg
+    start = SCRIPT[SCRIPT.index("\nstart() {"):]
+    start = start[:start.index("\n}\n")]
+    assert "seed_settings" in start, "every up, not only the database's first, fills in the addresses"
+    with psycopg.connect(empty_db, autocommit=True) as conn:
+        conn.execute("CREATE SCHEMA garagebooks; CREATE TABLE garagebooks.setting "
+                     "(id int PRIMARY KEY, app_url text, grafana_url text); "
+                     "INSERT INTO garagebooks.setting VALUES (1, NULL, '')")
+        conn.execute(seed_settings_sql("https://h/app/", "https://h/grafana/"))
+        assert conn.execute("SELECT app_url, grafana_url FROM garagebooks.setting").fetchone() == \
+            ("https://h/app/", "https://h/grafana/")
+        conn.execute("UPDATE garagebooks.setting SET grafana_url = 'https://mine/grafana/'")
+        conn.execute(seed_settings_sql("https://h/app/", "https://h/grafana/"))
+        assert conn.execute("SELECT grafana_url FROM garagebooks.setting").fetchone() == ("https://mine/grafana/",)

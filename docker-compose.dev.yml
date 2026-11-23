@@ -18,6 +18,9 @@ x-dev-app: &dev-app
   # As you (scripts/dev.sh sets these), so what the app writes into the invoice folder below is yours
   # to look at and delete.
   user: "${DEV_UID:-10001}:${DEV_GID:-10001}"
+  # And in the claims key file's group (scripts/dev.sh sets it): a real connector's key is often 0640 for a group
+  # you are in, which the container would not be with the uid alone.
+  group_add: ["${DEV_CLAIMS_KEY_GID:-${DEV_GID:-10001}}"]
   volumes:
     - dev-dashboards:/dashboards
     - type: bind

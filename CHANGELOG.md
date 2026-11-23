@@ -7,6 +7,10 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+- **Dev stack: a real claims connector's key works, and the Dashboards link comes back.** The dev app joins the key
+  file's group, so a key readable through a group you are in (`0640`) is readable in the container too, and `up`
+  fills in the app and Grafana addresses on the Settings page where they are empty (a saved one stays). Nothing
+  changes for installers.
 - **`scripts/dev.sh setup` keeps the venv current.** It installs the requirements again when `requirements.txt` or
   `requirements-dev.txt` has changed since the last install, so a worktree that has merged main doesn't fail with
   `ModuleNotFoundError`. Nothing changes for installers.
