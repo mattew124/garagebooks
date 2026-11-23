@@ -400,6 +400,14 @@ INFO
 
 setup() {
     sync_local_notes
+    # A venv's scripts name the python they were made with by its full path, so a checkout that was moved or
+    # renamed has a pip that can't start: make that venv again rather than patch it.
+    local interp=""
+    [ ! -f .venv/bin/pip ] || interp="$(head -n1 .venv/bin/pip | sed -n 's/^#![[:space:]]*\([^[:space:]]*\).*/\1/p')"
+    if [ -n "$interp" ] && [ ! -x "$interp" ]; then
+        echo "dev: .venv was made under another path ($interp is gone); making it again"
+        rm -rf -- .venv
+    fi
     [ -x .venv/bin/python ] || python3 -m venv .venv
     # Install on the first run, and again whenever a requirements file is newer than the last install: merging
     # main can add a dependency, and a venv from before it fails with ModuleNotFoundError.
