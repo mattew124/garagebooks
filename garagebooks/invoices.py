@@ -412,9 +412,22 @@ BILLER = re.compile(r"biller\s+code\s*:?\s*(\d{3,8})", re.I)
 BPAY_REF = re.compile(r"\bref(?:erence)?(?:\s+(?:no|number)\.?)?\s*:?\s*(\d+(?: \d+){0,5})", re.I)
 
 
+_INCL_GST = re.compile(r"incl(?:uding|udes|usive\s+of)?\.?\s+GST\s+of\s+\$\s*([\d,]+\.\d{2})", re.I)
+
+
 def _gst_stated(text, total, multi):
     """The GST a notice states (the CTP insurance part's): the figure after a 'GST' label, one per line. Two
-    figures on one line are 6 and 12 month options, chosen as the amount is. Never more than the total."""
+    figures on one line are 6 and 12 month options, chosen as the amount is. Never more than the total.
+    A CTP breakdown prints "Total CTP insurance premium $200.00 incl GST of $10.00 $400.00 incl GST of $20.00":
+    the figures after "incl GST of" are the GST (the premium beside them is not), so they come first."""
+    stated = []
+    for m in _INCL_GST.finditer(text):
+        figure = Decimal(m.group(1).replace(",", ""))
+        if figure not in stated:
+            stated.append(figure)
+    if stated:
+        gst = stated[0] if len(stated) == 1 else {"max": max, "min": min}.get(multi, lambda _: None)(stated)
+        return gst if gst is not None and (total is None or gst <= total) else None
     for m in _GST_AFTER.finditer(text):
         if _EX_GST.search(m.group(0)):
             continue
@@ -427,13 +440,29 @@ def _gst_stated(text, total, multi):
     return None
 
 
-def _payment_references(text):
-    """-> (card payment reference, BPAY biller code, BPAY reference), each None when the notice has none."""
-    card = CARD_REF.search(text)
-    bpay = re.search(r"\bBPAY\b", text)
-    after = text[bpay.end():bpay.end() + 120] if bpay else ""
-    biller, ref = BILLER.search(after), BPAY_REF.search(after)
-    return (card.group(1) if card else None, biller.group(1) if biller else None, ref.group(1) if ref else None)
+ONLINE_REF = re.compile(r"payment\s+reference\s+number[^\n]*\n(?:[^\n]*\n){0,3}?[^\n]*?\bref(?:erence)?\s*:\s*(\d+(?: \d+){0,5})", re.I)
+
+
+def _payment_references(text, multi="max"):
+    """-> (card payment reference, BPAY biller code, BPAY reference), each None when the notice has none. The online
+    payment reference is the "Ref:" under "Enter Payment Reference Number" (or after "card payment reference"). The
+    biller code follows "Biller Code:", and the BPAY reference the "Ref:" under it: one per 6 and 12 month option, chosen
+    as the amount is when they differ."""
+    card = CARD_REF.search(text) or ONLINE_REF.search(text)
+    biller = BILLER.search(text)
+    refs = []
+    if biller:
+        for m in BPAY_REF.finditer(text[biller.end():biller.end() + 200]):
+            if m.group(1) not in refs:
+                refs.append(m.group(1))
+    elif re.search(r"\bBPAY\b", text):
+        bpay = re.search(r"\bBPAY\b", text)
+        m = BPAY_REF.search(text[bpay.end():bpay.end() + 120])
+        refs = [m.group(1)] if m else []
+    ref = None
+    if refs:
+        ref = refs[0] if len(refs) == 1 else {"max": refs[-1], "min": refs[0]}.get(multi, refs[0])
+    return (card.group(1) if card else None, biller.group(1) if biller else None, ref)
 
 
 # ---- what a row can say beyond the basics: skip, notes, the period covered, the issuing authority -------
@@ -605,7 +634,7 @@ def propose(folder, name, text, categories, learned=None, multi_amount=None):
         vendor = _authority(text) or vendor
     start, end = _period(text, category, multi_amount or "max")
     gst = _gst_stated(text, amount, multi_amount or "max") if registration else None
-    card_ref, biller, bpay_ref = _payment_references(text) if registration else (None, None, None)
+    card_ref, biller, bpay_ref = _payment_references(text, multi_amount or "max") if registration else (None, None, None)
     out = {"date": when, "category": category, "vendor": vendor, "amount": amount, "odometer_km": odometer,
            "gst_amount": gst, "card_payment_ref": card_ref, "bpay_biller_code": biller, "bpay_ref": bpay_ref,
            "period_start": start, "period_end": end, "notes": _notes(text, category, multi_amount or "max"),

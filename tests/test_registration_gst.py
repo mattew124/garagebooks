@@ -282,8 +282,8 @@ def test_the_payment_references_are_found_on_that_layout():
     assert (got["bpay_biller_code"], got["bpay_ref"]) == ("12345", "1111 2222 33")
 
 
-def test_a_customer_reference_marked_not_for_payment_is_not_a_payment_reference():
-    got = invoices.propose("", "x.pdf", LAYOUT.replace("Ref: 1111 2222 33                    ", "                                  "), CATS)
+def test_no_online_reference_means_none_not_the_customer_or_bpay_reference():
+    got = invoices.propose("", "x.pdf", LAYOUT.replace("by BPAY.                    Ref: 1111 2222 33", "by BPAY."), CATS)
     assert got["card_payment_ref"] is None
 
 

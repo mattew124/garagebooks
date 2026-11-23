@@ -13,7 +13,7 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
   the category's GST rule when the cost after tax is worked out (the amount less that GST, instead of all of it for
   a GST-free category or ten elevenths for the rest). Registration is still ticked GST-free on the Categories page,
   now only as the fallback for an expense with no figure. The claim page offers the stored figure in the connector
-  protocol's existing `gst` field. The card payment reference and BPAY biller code and reference on the notice are
+  protocol's existing `gst` field. The GST is read from the CTP breakdown on the notice's last page (`incl GST of`), not the CTP premium beside it. The card payment reference and BPAY biller code and reference on the notice are
   kept too, in a closed **Payment references** section of the Edit form: never in the list, the tiles, the
   dashboard or the change history's displayed values. Upgrade: pull the new image (the schema gains columns on
   `expense` and the after-tax function is replaced on start; installers on the restricted database role re-run
