@@ -63,6 +63,11 @@ jobs:
       - name: Check only Markdown changed
         id: guard
         run: |
+          # The action swaps these back to the base branch's copies (the pull request's are untrusted); put the
+          # pull request's own back, so a pull request that changes CLAUDE.md isn't taken for a bot edit.
+          for f in CLAUDE.md CLAUDE.local.md .mcp.json .claude.json .gitmodules .ripgreprc; do
+            if git cat-file -e "HEAD:$f" 2>/dev/null; then git checkout -q HEAD -- "$f"; fi
+          done
           changed=$(git status --porcelain | awk '{print $2}')
           echo "changed<<EOF" >> "$GITHUB_OUTPUT"; echo "$changed" >> "$GITHUB_OUTPUT"; echo "EOF" >> "$GITHUB_OUTPUT"
           [ -z "$changed" ] && exit 0
