@@ -106,6 +106,17 @@ def test_large_pdf_is_accepted(page):
     assert set(resp.json()) >= {"date", "amount", "vendor", "category_id", "odometer_km"}
 
 
+def wait_for_import(page, done):
+    """Waits for the import page's status to match `done`. The test folder only grows (the app has no
+    delete, and each upload check leaves a PDF there), and OneDrive takes seconds per PDF, so the time
+    allowed follows the count the page reports ("Reading 3 of 54"), not a fixed limit."""
+    status = page.locator("#import-status-text")
+    done = re.compile(done)
+    expect(status).to_have_text(re.compile(r"Reading \d+ of \d+|" + done.pattern), timeout=120000)   # the folder listed
+    total = re.search(r"Reading \d+ of (\d+)", status.inner_text())
+    expect(status).to_have_text(done, timeout=max(240000, int(total.group(1)) * 15000) if total else 240000)
+
+
 def test_import_page_shows_progress(page):
     """The import page opens at once and reports its progress, instead of a blank wait."""
     page.goto(UI + "storage")
@@ -118,14 +129,13 @@ def test_import_page_shows_progress(page):
     assert time.time() - started < 5, "the import page should open at once, not wait for OneDrive"
     expect(page.locator("#import-status-text")).to_be_visible()
     # It ends with a summary (and the form ready) or a plain message saying why there is nothing to do.
-    expect(page.locator("#import-status-text")).to_have_text(
-        re.compile(r"^(Read \d+ PDF|Every PDF|No PDFs)"), timeout=240000)
+    wait_for_import(page, r"^(Read \d+ PDF|Every PDF|No PDFs)")
     if page.locator("#import-form").is_visible():
         assert page.locator("#import-form button[type=submit]").is_enabled()
         shot(page, "import-progress")
         if in_test_folder(page, UI + f"onedrive/import/{car}"):
             page.goto(UI + f"onedrive/import/{car}", wait_until="domcontentloaded")
-            expect(page.locator("#import-status-text")).to_have_text(re.compile(r"^Read \d+ PDF"), timeout=240000)
+            wait_for_import(page, r"^Read \d+ PDF")
             assert MARKER in page.content(), "the import preview should list the PDF the upload check left there"
             check_skip_prompt(page)
 
