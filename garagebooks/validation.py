@@ -744,7 +744,7 @@ def _km_figure(raw, message):
         raise ValueError(message) from None
 
 
-def parse_reminder_form(form, car_ids, category_ids, car_id=None):
+def parse_reminder_form(form, car_ids, category_ids, car_id=None, service_item_ids=frozenset()):
     """A reminder as typed: a title, a due date and/or odometer reading, lead times, and how often it
     repeats. `car_id` fixes the car (editing); otherwise the form's own must be one of `car_ids`.
     -> (values, errors); `values` has every column of the reminder, blank lead times at their defaults."""
@@ -773,6 +773,10 @@ def parse_reminder_form(form, car_ids, category_ids, car_id=None):
     if raw and not (raw.isdigit() and int(raw) in category_ids):
         errors["category_id"] = "Choose a category from the list."
     values["category_id"] = int(raw) if raw.isdigit() and int(raw) in category_ids else None
+    raw = (form.get("service_item_id") or "").strip()
+    if raw and not (raw.isdigit() and int(raw) in service_item_ids):
+        errors["service_item_id"] = "Choose a service item from the list."
+    values["service_item_id"] = int(raw) if raw.isdigit() and int(raw) in service_item_ids else None
     attempt("due_date", parse_optional_date, form.get("due_date"))
     attempt("due_km", parse_odometer, form.get("due_km"))
     if "due_date" not in errors and "due_km" not in errors and values["due_date"] is None and values["due_km"] is None:

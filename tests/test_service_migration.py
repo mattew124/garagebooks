@@ -23,6 +23,7 @@ def old_world(conn):
     """What the database held before this release: the four categories, with expenses, a reminder, an upload folder
     and learned vendors in them. -> {category name: id}"""
     ids = {}
+    conn.execute("COMMENT ON TABLE garagebooks.service_item IS NULL")       # as a database from before this release is
     for order, name in enumerate(OLD, start=50):
         ids[name] = conn.execute("INSERT INTO garagebooks.category (name, kind, sort_order, upload_folder, budget_pool) "
                                  "VALUES (%s, 'running', %s, %s, %s) RETURNING id",
@@ -106,6 +107,14 @@ def test_learned_vendors_are_merged_not_lost(blank_db, monkeypatch):
         got = conn.execute("SELECT l.vendor, c.name, l.hits FROM garagebooks.learned_vendor l "
                            "JOIN garagebooks.category c ON c.id = l.category_id").fetchall()
         assert got == [("example auto", "Service", 5)]
+
+
+def test_a_category_the_owner_adds_after_the_move_is_theirs(blank_db, monkeypatch):
+    with started(blank_db, monkeypatch) as conn:       # a first start does the move (there is nothing to move)
+        conn.execute("INSERT INTO garagebooks.category (name, sort_order) VALUES ('Air filter', 100)")
+    with started(blank_db, monkeypatch) as conn:
+        assert conn.execute("SELECT count(*) FROM garagebooks.category WHERE name = 'Air filter'").fetchone()[0] == 1
+        conn.execute("DELETE FROM garagebooks.category WHERE name = 'Air filter'")
 
 
 def test_the_move_runs_once_and_changes_nothing_when_run_again(blank_db, monkeypatch):

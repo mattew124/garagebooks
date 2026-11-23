@@ -7,6 +7,18 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+- **The service-type categories are now service items, and reminders can be for an item.** The categories Cabin air
+  filter, Air filter, Wheel alignment and Tyre rotation are gone: on the first start of this release each one
+  that exists is moved into Service. Its expenses move to Service with that item ticked (Wheel alignment is added
+  to the item list), its reminders move to Service and to that item, what the importer learned about vendors is
+  merged, Service takes its invoice subfolder if it has none, and the category is deleted once nothing refers to it.
+  Tyres stays a category (tyres are bought, not serviced). Nothing is lost, and it happens once: a category of that
+  name you add afterwards is yours. Expenses that were in Wheel alignment or Tyre rotation (the tyres budget pool)
+  are now in Service (maintenance pool), so a lease's budget report moves them between pools. A **reminder can be for
+  a service item**: an expense with the item ticked is offered it, already ticked, when saved, and a repeating one
+  keeps its item. The dashboard's category colours use one for Service. Back up the database before upgrading as
+  usual; installers on the restricted database role re-run `scripts/provision-db.sh` (the schema adds a reminder
+  column and replaces a view).
 - **Service items.** A new **Service** category, and a list of what a service covered (fuel filter, oil filter,
   engine oil, tyre rotation, windscreen washer fluid, windscreen wipers, brakes, brake fluid, timing belt, air
   filter, coolant, cabin air filter). Choose the items on each Service expense (the Add and Edit form, and each

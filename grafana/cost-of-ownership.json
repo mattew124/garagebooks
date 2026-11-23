@@ -1103,22 +1103,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Cabin air filter"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "#CC79A7"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Air filter"
+              "options": "Service"
             },
             "properties": [
               {
@@ -1126,36 +1111,6 @@
                 "value": {
                   "mode": "fixed",
                   "fixedColor": "#F0E442"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Wheel alignment"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "#6A3D9A"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Tyre rotation"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "#8C510A"
                 }
               }
             ]
@@ -1297,22 +1252,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Cabin air filter"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "#CC79A7"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Air filter"
+              "options": "Service"
             },
             "properties": [
               {
@@ -1320,36 +1260,6 @@
                 "value": {
                   "mode": "fixed",
                   "fixedColor": "#F0E442"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Wheel alignment"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "#6A3D9A"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Tyre rotation"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "#8C510A"
                 }
               }
             ]
@@ -1525,22 +1435,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Cabin air filter"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "#CC79A7"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Air filter"
+              "options": "Service"
             },
             "properties": [
               {
@@ -1548,36 +1443,6 @@
                 "value": {
                   "mode": "fixed",
                   "fixedColor": "#F0E442"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Wheel alignment"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "#6A3D9A"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Tyre rotation"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "#8C510A"
                 }
               }
             ]

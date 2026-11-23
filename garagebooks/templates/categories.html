@@ -40,7 +40,7 @@
   {% endfor %}
 </ul>
 {% if uploads_enabled %}<p><small>Uploaded invoices go into this subfolder of the car's {{ 'folder' if local_enabled else 'OneDrive folder' }}, made when first
-  needed. Leave it blank to use a folder named after the category, e.g. Tyres and Wheel alignment can both use “Maintenance”.</small></p>{% endif %}
+  needed. Leave it blank to use a folder named after the category, e.g. Tyres and Service can both use “Maintenance”.</small></p>{% endif %}
 <p><small>Tick GST-free for a category whose invoices carry no GST, such as registration and CTP. It only changes what an expense paid from a lease package is shown to cost after tax: the GST on an invoice that isn't GST-free is taken to be a flat 1/11 of it.</small></p>
 <p><small>Tick Has a period for a category whose expenses cover a stretch of time, such as insurance and registration: the Add and Edit form and the import page then ask for the period's start and end dates, and read them from the document when they can.</small></p>
 {% if budgets_on %}<p><small>A car on a novated lease has a yearly budget for each pool. Choose the pool each category's expenses are paid from, or None when the category isn't part of the package.</small></p>{% endif %}

@@ -1,7 +1,7 @@
 {% macro bad(e, name) %}{% if e.get(name) %}aria-invalid="true" aria-describedby="e-{{ name }}"{% endif %}{% endmacro %}
 {% macro note(e, name) %}{% if e.get(name) %}<span class="error" id="e-{{ name }}">{{ e[name] }}</span>{% endif %}{% endmacro %}
 {# The fields of a reminder, for the add form and the edit page. `v` is what to show, `e` the errors by field. #}
-{% macro fields(v, e, cars, categories, lead_days, lead_km, fixed_car=None, standard=None, odometers=None, today=None) %}
+{% macro fields(v, e, cars, categories, lead_days, lead_km, fixed_car=None, standard=None, odometers=None, today=None, items=None) %}
   {% if not fixed_car %}
   <label for="f-car_id">Car
     <select id="f-car_id" name="car_id" required {{ bad(e, 'car_id') }}>
@@ -15,7 +15,7 @@
     <select id="f-standard">
       <option value="">Choose one, or type your own below…</option>
       {% for s in standard %}<option value="{{ s.key }}" data-title="{{ s.title }}" data-months="{{ s.months or '' }}" data-km="{{ s.km or '' }}"
-        data-kinds="{{ (s.kinds or [])|join(' ') }}" data-category="{{ s.category or '' }}">{{ s.title }}</option>{% endfor %}
+        data-kinds="{{ (s.kinds or [])|join(' ') }}" data-category="{{ s.category or '' }}" data-item="{{ s.item or '' }}">{{ s.title }}</option>{% endfor %}
     </select>
     <small>The intervals are common ones: check them against the car's handbook.</small></label>
   {% endif %}
@@ -27,6 +27,13 @@
       <option value="">None</option>
       {% for c in categories %}<option value="{{ c.id }}" {{ 'selected' if v.get('category_id')|string == c.id|string }}>{{ c.name }}</option>{% endfor %}
     </select>{{ note(e, 'category_id') }}</label>
+  {% if items is not none %}
+  <label for="f-service_item_id">Service item <small>(optional: an expense with this item ticked is offered to resolve this)</small>
+    <select id="f-service_item_id" name="service_item_id" {{ bad(e, 'service_item_id') }}>
+      <option value="">None</option>
+      {% for i in items %}<option value="{{ i.id }}" {{ 'selected' if v.get('service_item_id')|string == i.id|string }}>{{ i.name }}</option>{% endfor %}
+    </select>{{ note(e, 'service_item_id') }}</label>
+  {% endif %}
   <fieldset class="due-fields"><legend>Due</legend>
     <p><small>Enter a date, an odometer reading or both: it falls due on whichever comes first.</small></p>
     <div class="row">
