@@ -70,8 +70,9 @@ Parallel sessions each get a git worktree under `.claude/worktrees/<name>/`, and
 
 1. Start with `scripts/dev.sh setup` (creates `.venv`), then `scripts/dev.sh up`.
    `scripts/dev.sh info` shows this checkout's stack, path and ports.
-2. One feature or fix per worktree. Commit on its branch, push it, and open a pull
-   request so CI runs. Merging and releasing happen from the main checkout.
+2. One feature or fix per worktree, branched from `origin/develop`. Commit on its branch, push it, and open a
+   pull request into `develop` (`gh pr create --base develop`) so CI runs. Merging and releasing happen from
+   the main checkout.
 3. Anything touching OneDrive needs a real-account run before it's done, and you run it yourself, without
    asking: `scripts/dev.sh onedrive-link`, then `scripts/dev.sh test-browser --onedrive`. The link loads a saved sign-in from a private file outside
    the repository (`onedrive-save` writes it; `ONEDRIVE_DEV_FILE` moves it) and points this stack at the
@@ -94,6 +95,20 @@ A `v*` tag publishes the image to ghcr.io. Test with a candidate tag first, by d
 production to the digest that passed. Version numbering and the
 candidate-to-stable steps are in RELEASING.md.
 
+## Branches
+
+- `develop` is where pull requests merge, and what the main checkout and its dev stack (`/garagebooks-dev/`)
+  run: that is the stack the owner tests on (Microsoft sign-in is registered for its address only). A
+  worktree's stack is for its own branch.
+- A fix found while testing `develop` gets its own branch from `origin/develop` and a pull request into
+  `develop`. Never commit fixes on a merge-only branch, and never push to `develop` directly.
+- When `develop` is ready, a pull request from `develop` into `main` (merge commit); releases are tagged on
+  `main` (RELEASING.md). A fix for a release already out: branch from `main`, pull request into `main`, then
+  merge `main` into `develop`.
+- A pull request into `develop` is merged once CI is green and both pytest runs pass locally; the browser
+  tests run on the main stack after it merges. Retarget a stacked pull request to `develop` when its base
+  merges.
+
 ## Several branches at once
 
 Parallel work (sub-agents, stacked pull requests) collides in the same few files. To keep merges small:
@@ -105,11 +120,11 @@ Parallel work (sub-agents, stacked pull requests) collides in the same few files
   panels as a row below existing ones, and don't move existing panels.
 - A CHANGELOG entry goes at the top of **Unreleased**. Expect to resolve it by hand when branches merge.
 - A branch that depends on another is stacked on it (`gh pr create --base <that branch>`), says so at
-  the top of its pull request, and is retargeted to `main` when the base merges.
+  the top of its pull request, and is retargeted to `develop` when the base merges.
 - Give each `gh pr create` its own body file (`--body-file`) with a unique name: `/tmp/pr_body.md` is
   shared between sessions, and one session's text ended up in another's pull request.
-- To try several branches together, merge them into a throwaway local `integration/*` branch and run
-  `scripts/dev.sh up`. Don't push it.
+- To try branches together, merge their pull requests into `develop`. Don't make `integration/*` branches:
+  fixes made on one never reached a pull request.
 
 ## Tests
 

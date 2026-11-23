@@ -567,26 +567,29 @@ for s in json.load(sys.stdin) or []:
         print(s["Name"], s["ConfigFiles"].split(",")[0].rsplit("/", 1)[0], sep="\t")'
 }
 
-# The branch to compare with, per repository: origin/main, fetched once (a failed fetch, offline say,
-# uses the last one), or main where there is no origin.
+# The branch to compare with, per repository: develop, where pull requests merge (main only gets develop
+# at a release, so whatever is in main is in develop too), or main where there is no develop. origin's,
+# fetched once (a failed fetch, offline say, uses the last one), or the local branch where there is no origin.
 declare -A PRUNE_BASE=()
 base_ref() {
-    local dir="$1" common
+    local dir="$1" common prefix="" branch
     common="$(git -C "$dir" rev-parse --path-format=absolute --git-common-dir)"
     if [ -z "${PRUNE_BASE[$common]:-}" ]; then
         if git -C "$dir" remote get-url origin >/dev/null 2>&1; then
-            git -C "$dir" fetch -q origin main </dev/null \
-                || echo "dev: couldn't fetch origin main; comparing with the last one fetched" >&2
-            PRUNE_BASE[$common]=origin/main
-        else
-            PRUNE_BASE[$common]=main
+            prefix=origin/
+            git -C "$dir" fetch -q origin main develop </dev/null 2>/dev/null \
+                || git -C "$dir" fetch -q origin main </dev/null \
+                || echo "dev: couldn't fetch origin; comparing with the last one fetched" >&2
         fi
+        branch=main
+        if git -C "$dir" rev-parse -q --verify "${prefix}develop^{commit}" >/dev/null; then branch=develop; fi
+        PRUNE_BASE[$common]="$prefix$branch"
     fi
     printf '%s' "${PRUNE_BASE[$common]}"
 }
 
-# Merged: the checkout's last commit is in main, and isn't one of main's own (first-parent) commits.
-# A branch just made from main, with nothing on it yet, is not merged. Pull requests here are
+# Merged: the checkout's last commit is in the base (develop or main), and isn't one of its own (first-parent)
+# commits. A branch just made from it, with nothing on it yet, is not merged. Pull requests here are
 # merged with a merge commit; a squash or rebase merge isn't recognised, so that stack is kept.
 branch_merged() {
     local dir="$1" base tip
