@@ -51,7 +51,8 @@ def test_the_car_columns_and_their_checks(admin):
 def test_the_cars_page_shows_and_saves_the_details(client, admin):  # noqa: F811
     page = client.get("/cars").data.decode()
     assert 'name="vin"' in page and 'name="build_year"' in page and 'name="model_year"' in page and 'name="body_type"' in page
-    data = {"kind": "BEV", "name": "Test car", "make": "Example", "model": "Roadster", "vin": "1abcd 23efgh456789",
+    before = car(admin)              # the make and model are the suite's shared car's: posted back as they are
+    data = {"kind": "BEV", "name": "Test car", "make": before["make"] or "", "model": before["model"] or "", "vin": "1abcd 23efgh456789",
             "build_year": "2025", "model_year": "2026", "body_type": " Hatchback "}
     assert client.post("/cars/1", data=data, headers=ORIGIN).status_code == 303
     saved = car(admin)
