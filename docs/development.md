@@ -152,7 +152,7 @@ scripts/dev.sh reset          # wipe the test database
 scripts/dev.sh demo up         # second stack of invented data, for screenshots (see below)
 scripts/dev.sh sample-expenses  # add made-up expenses to try the app with; `clear` removes them
 scripts/dev.sh sample-invoices  # write made-up invoice PDFs into the stack's invoice folder
-scripts/dev.sh setup          # in a new worktree: create .venv
+scripts/dev.sh setup          # in a new worktree: create .venv; again after merging main, to install new requirements
 scripts/dev.sh down           # stop the stack, keeping its data
 scripts/dev.sh logs           # follow the app's log (and the worker's, with SCHEDULER=worker in dev.env)
 scripts/dev.sh psql           # a psql shell on the test database

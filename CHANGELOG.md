@@ -7,6 +7,10 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+- **`scripts/dev.sh setup` keeps the venv current.** It installs the requirements again when `requirements.txt` or
+  `requirements-dev.txt` has changed since the last install, so a worktree that has merged main doesn't fail with
+  `ModuleNotFoundError`. Nothing changes for installers.
+
 - **Faster tests.** The suite runs in parallel (`pytest -n auto`, one throwaway Postgres per worker), about three times
   faster on four cores, and the route property tests use 15 examples locally (40 in CI, as before). The `admin`
   fixture makes one round trip instead of a dozen. CI and the TeslaMate compatibility check use `-n auto`, and the check
