@@ -97,7 +97,7 @@ candidate-to-stable steps are in RELEASING.md.
 
 ## Branches
 
-- `develop` is where pull requests merge, and what the main checkout and its dev stack (`/garagebooks-dev/`)
+- `develop` is the default branch: where pull requests merge (`gh pr create` targets it), and what the main checkout and its dev stack (`/garagebooks-dev/`)
   run: that is the stack the owner tests on (Microsoft sign-in is registered for its address only). A
   worktree's stack is for its own branch.
 - A fix found while testing `develop` gets its own branch from `origin/develop` and a pull request into

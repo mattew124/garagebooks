@@ -139,7 +139,7 @@ It needs the `gh` CLI and `zstd`. Databases and SARIF results go to `.dev/codeql
 
 ## Branches
 
-Pull requests go into `develop` (`gh pr create --base develop`), from a branch made from `origin/develop`. The
+`develop` is the default branch. Pull requests go into it, from a branch made from `origin/develop`. The
 main checkout runs `develop` on its dev stack, `/garagebooks-dev/`, and that is where the combined work is tried.
 When `develop` is ready it is merged into `main` in a pull request, and releases are tagged on `main`
 ([RELEASING.md](https://github.com/mattew124/garagebooks/blob/main/RELEASING.md)). A fix to a release already out

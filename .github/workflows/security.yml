@@ -3,7 +3,7 @@
 name: Security
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
   schedule:
     - cron: "17 21 * * 0"   # weekly, Sunday evening UTC
@@ -22,6 +22,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # The weekly run scans what is released (main); the default branch is develop. Pushes and pull
+          # requests scan their own commit.
+          ref: ${{ github.event_name == 'schedule' && 'main' || '' }}
           persist-credentials: false
       - name: Dependencies, secrets and Dockerfile misconfigurations
         # tests/ holds the browser-test image, which runs as root and is never published.
