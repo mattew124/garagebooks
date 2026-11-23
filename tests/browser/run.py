@@ -497,7 +497,7 @@ def test_form(page):
     shot(page, "form-phone")
     expect(page.locator("h1")).to_have_text("Add expense")
     expect(page.locator("select[name=car_id] option")).not_to_have_count(0)
-    assert page.locator("select[name=category_id] option").count() >= 9
+    assert page.locator("select[name=category_id] option").count() >= 7      # the standard categories
 
 
 def test_odometer_autofills(page):
@@ -871,8 +871,8 @@ def test_desktop_look(page):
 
 def test_rows_on_a_phone_show_whole_values(page):
     """Rows view on a phone: the date, the category and the amount are never cut short at the usual widths."""
-    add_expense(page, "1234.56", "Wheel alignment")
-    add_expense(page, "64990.00", "Cabin air filter")
+    add_expense(page, "1234.56", "Registration")          # the longest standard category names
+    add_expense(page, "64990.00", "Initial purchase")
     page.goto(UI)
     page.click("[data-view-choice=rows]")
     cut = page.evaluate("""marker => [...document.querySelectorAll('tbody tr')].filter(r => r.textContent.includes(marker))
@@ -1641,7 +1641,9 @@ def reminder_checks(page):
     expect(page.get_by_label("Every (km)")).to_have_value("10000")
     shot(page, "reminders-add-phone")
     page.get_by_label("What is it for?").fill(title)
-    page.get_by_label("Category").select_option(label="Tyre rotation")
+    expect(page.get_by_label("Category")).to_have_value(                             # the standard one chose both
+        page.locator("#f-category_id option", has_text="Service").get_attribute("value"))
+    expect(page.locator("#f-service_item_id option:checked")).to_have_text("Tyre rotation")
     page.get_by_label("At this odometer reading (km)").fill("12800")
     page.get_by_label("Every (km)").fill("10000")
     page.get_by_label("Warn me this many days before").fill("-3")
@@ -1675,13 +1677,14 @@ def reminder_checks(page):
 
     page.goto(UI + "new")                                                             # the job is done: an expense for it
     page.select_option("select[name=car_id]", label=MARKER)
-    page.select_option("select[name=category_id]", label="Tyre rotation")
+    page.select_option("select[name=category_id]", label="Service")
+    page.locator("#service-fields label", has_text="Tyre rotation").locator("input").check()
     page.fill("input[name=amount]", "90")
     page.fill("input[name=vendor]", MARKER)
     page.fill("input[name=odometer_km]", "12,820")
     page.click("button[type=submit].button")
     page.wait_for_url(re.compile(r"/reminders\?msg=saved"))                           # the car has an open reminder: offered
-    expect(page.get_by_label(re.compile(title))).to_be_checked()                      # same category: ticked
+    expect(page.get_by_label(re.compile(title))).to_be_checked()                      # its service item is ticked
     shot(page, "reminders-offer-phone")
     page.get_by_role("button", name="Resolve ticked").click()
     page.wait_for_url(re.compile(r"msg=reminder_resolved_next"))
