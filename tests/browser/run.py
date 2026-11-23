@@ -22,6 +22,8 @@ INVOICE = "https://example.com/invoice-browser-test.pdf"
 # Writes to a real OneDrive happen only in this folder (scripts/dev.sh onedrive-link points here).
 TEST_FOLDER = "Expenses test"
 REQUIRE_ONEDRIVE = os.environ.get("REQUIRE_ONEDRIVE") == "1"
+# ONLY=header runs just the steps whose name contains it (for working on one thing; the full run is the check).
+ONLY = os.environ.get("ONLY", "")
 passed, failed, skipped = 0, [], []
 
 
@@ -31,6 +33,8 @@ class Skip(Exception):
 
 def step(name, fn, *args):
     global passed
+    if ONLY and ONLY not in name:
+        return
     try:
         fn(*args)
         passed += 1
@@ -576,22 +580,57 @@ def test_phone_layout_has_no_sideways_scroll(page):
     shot(page, "categories-phone")
 
 
-def test_header_stays_tidy_on_a_phone(page):
-    """Every header link is one line, and the links share rows rather than wrapping inside."""
+def header_rows(page):
+    """The distinct rows (by vertical centre) of the header's visible links, button and title."""
+    return page.evaluate("""() => {
+        const rows = new Set();
+        for (const el of document.querySelectorAll('header .brand, header nav a, header .add, header button')) {
+            const r = el.getBoundingClientRect();
+            if (r.width && r.height) rows.add(Math.round((r.top + r.height / 2) / 10));
+        }
+        return rows.size;
+    }""")
+
+
+# Every page the header must reach, as (link text, path the page ends at).
+HEADER_PAGES = [("All", ""), ("Categories", "categories"), ("Cars", "cars"), ("Reminders", "reminders"),
+                ("History", "history"), ("Settings", "settings"), ("Invoice storage", "storage")]
+
+
+def go_via_header(page, name, path, narrow):
     page.goto(UI)
-    boxes = page.evaluate("""() => [...document.querySelectorAll('header nav a, header .add')].map(a => {
-        const r = a.getBoundingClientRect(); return {text: a.textContent.trim(), h: r.height, top: r.top}})""")
-    assert len(boxes) >= 4, boxes                      # All, Categories, Dashboards, Settings, Add
-    line = page.evaluate("parseFloat(getComputedStyle(document.body).lineHeight)")
-    for b in boxes:
-        assert b["h"] < line * 2.6, f"{b['text']} wraps inside its link: {b}"
-    add = next(b for b in boxes if b["text"] == "+ Add")
-    brand_top = page.evaluate("document.querySelector('.brand').getBoundingClientRect().top")
-    assert abs(add["top"] - brand_top) < 20, f"Add should sit beside the title: {add}, brand at {brand_top}"
+    if narrow:
+        page.get_by_role("button", name="Menu").click()
+    elif name in ("Settings", "Invoice storage"):
+        page.locator("header .drop-toggle").click()
+    page.locator("header").get_by_role("link", name=name, exact=True).first.click()
+    page.wait_for_url(re.compile(re.escape(UI + path) + r"(\?.*)?$"))
+
+
+def test_header_stays_tidy_on_a_phone(page):
+    """A phone shows the title, All, Reminders, Add and the menu button on one row; the rest opens from the
+    button, with Settings and Invoice storage in it, and every page can be reached."""
+    page.goto(UI)
+    assert header_rows(page) == 1, "the closed header should be one row"
+    visible = [a.inner_text().split("\n")[0].strip() for a in page.locator("header nav a:visible").all()]
+    assert visible == ["All", "Reminders"], visible
+    button = page.get_by_role("button", name="Menu")
+    assert button.get_attribute("aria-expanded") == "false"
+    assert button.get_attribute("aria-controls") == "site-menu"
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+    shot(page, "header-phone")
+    button.click()
+    assert button.get_attribute("aria-expanded") == "true"
+    for name in ("Categories", "Cars", "History", "Settings", "Invoice storage"):
+        expect(page.locator("header").get_by_role("link", name=name, exact=True)).to_be_visible()
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+    shot(page, "header-phone-open")
+    page.keyboard.press("Escape")
+    assert button.get_attribute("aria-expanded") == "false"
+    for name, path in HEADER_PAGES:
+        go_via_header(page, name, path, narrow=True)
     page.goto(UI + "settings")
     shot(page, "settings-phone")
-    page.goto(UI)
-    shot(page, "header-phone")
 
 
 def test_notifications_settings(page):
@@ -634,12 +673,24 @@ def test_notifications_settings(page):
 
 
 def test_header_on_a_desktop(page):
-    """One row: title then links on the left, Add on the right."""
+    """One row: title then links on the left, Add on the right, Settings a dropdown holding Invoice storage,
+    and every page reachable."""
     page.goto(UI)
-    tops = page.evaluate("""() => [...document.querySelectorAll('header .brand, header nav a, header .add')]
-        .map(a => Math.round(a.getBoundingClientRect().top + a.getBoundingClientRect().height / 2))""")
-    assert max(tops) - min(tops) < 12, tops
+    assert header_rows(page) == 1
+    expect(page.get_by_role("button", name="Menu")).to_be_hidden()
+    expect(page.locator("header").get_by_role("link", name="Invoice storage")).to_be_hidden()
+    toggle = page.locator("header .drop-toggle")
+    assert toggle.get_attribute("aria-expanded") == "false"
+    toggle.click()
+    assert toggle.get_attribute("aria-expanded") == "true"
+    expect(page.locator("header").get_by_role("link", name="Invoice storage")).to_be_visible()
+    shot(page, "header-desktop-settings")
+    page.keyboard.press("Escape")
+    assert toggle.get_attribute("aria-expanded") == "false"
     shot(page, "header-desktop")
+    for name, path in HEADER_PAGES:
+        go_via_header(page, name, path, narrow=False)
+        assert header_rows(page) == 1, name
 
 
 def test_footer_links_to_the_docs_and_names_the_build(page):
@@ -2013,6 +2064,8 @@ def main():
         step("FBT year report: taxable value, costs by pool, year links", test_fbt_report, page)
         step("cost after tax: the rate, Paid from, the list and the FBT year report", test_cost_after_tax, page)
         step("header stays tidy on a phone", test_header_stays_tidy_on_a_phone, page)
+        iphone = browser.new_context(**p.devices["iPhone 13"])
+        step("header menu on an iPhone 13", test_header_stays_tidy_on_a_phone, iphone.new_page())
         step("phone list shows amount, invoice and edit", test_list_shows_key_fields_on_a_phone, page)
         step("a Claim link in the list still fits a phone", test_list_with_a_claim_link_fits_a_phone, page)
         step("claims: preview, needed field, sign-in code, submit, status refresh, remove record", test_claims, page)

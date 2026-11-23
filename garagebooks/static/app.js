@@ -3,6 +3,31 @@ document.addEventListener("DOMContentLoaded", () => {
   document.querySelectorAll("form:not([data-live]) [data-autosubmit]").forEach((el) =>
     el.addEventListener("change", () => el.form.submit()));
 
+  // Header: the menu button (phones) and the Settings dropdown (wide screens). Without this file the
+  // links wrap and the dropdown opens on hover, so nothing is out of reach.
+  const header = document.querySelector("header");
+  const menuButton = header && header.querySelector(".menu-toggle");
+  const dropdown = header && header.querySelector(".dropdown");
+  const dropButton = dropdown && dropdown.querySelector(".drop-toggle");
+  const setMenu = (open) => {
+    header.classList.toggle("menu-open", open);
+    menuButton.setAttribute("aria-expanded", String(open));
+  };
+  const setDrop = (open) => {
+    dropdown.classList.toggle("open", open);
+    dropButton.setAttribute("aria-expanded", String(open));
+  };
+  if (menuButton) menuButton.addEventListener("click", () => setMenu(!header.classList.contains("menu-open")));
+  if (dropButton) {
+    dropButton.addEventListener("click", () => setDrop(!dropdown.classList.contains("open")));
+    document.addEventListener("click", (ev) => { if (!dropdown.contains(ev.target)) setDrop(false); });
+  }
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Escape" || !header) return;
+    if (dropdown && dropdown.classList.contains("open")) { setDrop(false); dropButton.focus(); }
+    else if (header.classList.contains("menu-open")) { setMenu(false); menuButton.focus(); }
+  });
+
   document.querySelectorAll("form[data-confirm]").forEach((form) =>
     form.addEventListener("submit", (ev) => {
       if (!confirm(form.dataset.confirm)) ev.preventDefault();

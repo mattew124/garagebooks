@@ -7,6 +7,10 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+- **The header stays on one line, on a phone too.** A phone shows the title, All, Reminders, + Add and a menu
+  button, which opens the other links. On a wide screen **Settings** is a dropdown holding **Invoice storage**,
+  which no longer has its own link. Without JavaScript the links wrap as before and the dropdown opens on
+  hover or focus. Nothing changes for installers.
 - **`scripts/dev.sh setup` remakes a venv from another path.** A venv made before its checkout was moved or renamed
   has a `pip` that can't start; `setup` now makes it again. Nothing changes for installers.
 - **Dev stack: a real claims connector's key works, and the Dashboards link comes back.** The dev app joins the key

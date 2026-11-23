@@ -15,6 +15,15 @@ already tracks.
 
 New here? Start with [Setup](setup.md).
 
+## Finding your way around
+
+The header holds the links to every page and stays on one line. On a wide screen **Settings** is a small
+dropdown with **Settings** and **Invoice storage** in it. On a phone the header shows **All**, **Reminders** (with
+the number needing attention), **+ Add** and a menu button; the button opens the rest, including **Settings** and
+**Invoice storage**.
+
+<!-- screenshot: header-phone-menu - The header on a phone with the menu button open, and the Settings dropdown on a wide screen -->
+
 ## The dashboard
 
 The **Cost of Ownership** dashboard in Grafana: total cost of ownership, purchase vs running vs
