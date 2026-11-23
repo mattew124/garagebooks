@@ -1,17 +1,12 @@
-"""scripts/ato_rates.py: reads tax rates from the ATO's published pages, for the lease what-if workbook.
+"""garagebooks/ato.py (and scripts/ato_rates.py): reads tax rates from the ATO's published pages, for the lease
+what-if workbook and the app's tax brackets and home charging rate.
 
 The pages are made-up snippets shaped like the ATO's, so nothing here touches the network. A change to
 the ATO's layout must make the script fail loudly, never produce a quietly wrong table.
 """
-import importlib.util
-from pathlib import Path
-
 import pytest
 
-ROOT = Path(__file__).resolve().parent.parent
-spec = importlib.util.spec_from_file_location("ato_rates", ROOT / "scripts" / "ato_rates.py")
-ato = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(ato)
+from garagebooks import ato
 
 
 def table(caption, rows, head=("Taxable income", "Tax on this income")):
@@ -189,7 +184,7 @@ def test_fetch_all_reads_five_pages_and_says_where_from():
              ato.URLS["medicare"]: MEDICARE, ato.URLS["lito"]: LITO, ato.URLS["medicare_family"]: FAMILY}
     got = ato.fetch_all(lambda url: pages[url], now="2026-11-15")
     assert got["fetched"] == "2026-11-15"
-    assert got["sources"] == ato.URLS
+    assert got["sources"] == {key: ato.URLS[key] for key in ato.WORKBOOK_PAGES}
     assert set(got["tax"]) == {"2026-27", "2022-23"}
     assert set(got["help"]) == {"2026-27", "2022-23"}
     assert got["medicare"]["lower"] == 28011 and got["lito"][1]["over"] == 37500
