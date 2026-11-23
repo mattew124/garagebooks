@@ -115,7 +115,10 @@ elif [ "$DEMO" = 0 ] && [ -n "${DEV_INVOICES_SHARE:-}" ]; then
 else
     DEV_INVOICES_DIR="$ROOT/$INVOICES"
 fi
-export DEV_UID DEV_GID DEV_INVOICES_DIR
+# The claims key file's group, which the app joins (group_add in docker-compose.dev.yml): `claims_check` tests that
+# you can read the key, and you may only by a group the container wouldn't otherwise have.
+DEV_CLAIMS_KEY_GID="$(stat -c %g -- "$DEV_CLAIMS_KEY_SOURCE" 2>/dev/null || printf '%s' "$DEV_GID")"
+export DEV_UID DEV_GID DEV_INVOICES_DIR DEV_CLAIMS_KEY_GID
 # Shown on the app's Invoice storage page. The demo's screenshots are published, so it shows an
 # example path instead of this checkout's.
 export DEV_INVOICES_SHOWN="$DEV_INVOICES_DIR"
@@ -335,10 +338,10 @@ prepare_database() {
 seed_data() {
     [ "$FIRST_RUN" = yes ] || return 0
     if [ "$DEMO" = 1 ]; then demo_data; else copy_data; fi
-    seed_settings
 }
 
-# What you would type on the app's Settings page, for this stack's own addresses.
+# What you would type on the app's Settings page, for this stack's own addresses. On every `up`, but only where
+# the page has none (an address someone saved there stays): without them the nav has no Dashboards link.
 seed_settings() {
     local app graf
     if [ -n "${PUBLIC_HOST:-}" ]; then
@@ -348,7 +351,8 @@ seed_settings() {
         graf="http://localhost:$DEV_GRAFANA_PORT$DEV_BASE_PATH/grafana/"
     fi
     dev_psql -q -v "app=$app" -v "graf=$graf" <<'SQL'
-UPDATE garagebooks.setting SET app_url = :'app', grafana_url = :'graf' WHERE id = 1;
+UPDATE garagebooks.setting SET app_url = COALESCE(NULLIF(app_url, ''), :'app'),
+                               grafana_url = COALESCE(NULLIF(grafana_url, ''), :'graf') WHERE id = 1;
 SQL
 }
 
@@ -366,6 +370,7 @@ start() {
         compose up -d --build --wait
     fi
     seed_data
+    seed_settings
     urls
 }
 
@@ -389,6 +394,7 @@ invoices=$DEV_INVOICES_DIR
 router_suffix=${DEV_ROUTER_SUFFIX:-none}
 ui_priority=$DEV_UI_PRIORITY
 grafana_priority=$DEV_GRAFANA_PRIORITY
+claims_key_gid=$DEV_CLAIMS_KEY_GID
 INFO
 }
 
