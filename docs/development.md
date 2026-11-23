@@ -137,6 +137,14 @@ scripts/codeql.sh         # analyses python and actions in about 30 seconds; exi
 It needs the `gh` CLI and `zstd`. Databases and SARIF results go to `.dev/codeql`. Set
 `CODEQL_HOME` to install elsewhere, or `CODEQL_VERSION` (a `codeql-bundle-v…` tag) to pin a version.
 
+## Branches
+
+Pull requests go into `develop` (`gh pr create --base develop`), from a branch made from `origin/develop`. The
+main checkout runs `develop` on its dev stack, `/garagebooks-dev/`, and that is where the combined work is tried.
+When `develop` is ready it is merged into `main` in a pull request, and releases are tagged on `main`
+([RELEASING.md](https://github.com/mattew124/garagebooks/blob/main/RELEASING.md)). A fix to a release already out
+goes into `main` and is then merged into `develop`.
+
 ## Dev stack
 
 `scripts/dev.sh` runs the UI and Grafana on their own test database, not on the TeslaMate
@@ -174,7 +182,8 @@ scripts/dev.sh auto-prune on     # run prune every hour from cron; `off` stops i
 ```
 
 `prune` looks at every dev stack on the machine, not only this checkout's. A worktree's stack (and its
-demo stack) goes once the worktree's last commit has been merged into `origin/main` (fetched first) with a
+demo stack) goes once the worktree's last commit has been merged into `origin/develop` (fetched first; `origin/main`
+where there is no `develop`) with a
 merge commit, as pull requests are here; a squash or rebase merge isn't recognised, and that stack is kept.
 A branch just made from `main`, with nothing on it yet, is not merged. A merged worktree that still has
 uncommitted changes is kept and named in the output. A stack whose checkout has gone (removed with

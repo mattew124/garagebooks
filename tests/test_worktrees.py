@@ -253,6 +253,24 @@ def test_prune_keeps_branches_that_have_not_merged(repo, tmp_path):
     assert downs(tmp_path) == []
 
 
+def test_prune_counts_a_branch_merged_into_develop_as_merged(repo, tmp_path):
+    """Pull requests merge into develop, the branch the main dev stack tests; main only gets develop when
+    a release is ready. A worktree merged into develop is finished, even before develop reaches main."""
+    git(repo, "branch", "develop")
+    git(repo, "checkout", "-q", "develop")
+    wt = merged_worktree(repo, "done")
+    git(repo, "checkout", "-q", "main")
+    wip = worktree(repo, "wip")                   # made from main, a commit of its own, merged nowhere
+    (wip / "wip.txt").write_text("work")
+    git(wip, "add", ".")
+    git(wip, "commit", "-q", "-m", "not merged yet")
+    env = fake_tools(tmp_path, {"garagebooks-dev-done": wt, "garagebooks-dev-wip": wip})
+    r = dev(repo, env, "prune")
+    assert r.returncode == 0, r.stderr
+    assert [c for c in downs(tmp_path) if "-p garagebooks-dev-done" in c]
+    assert not [c for c in downs(tmp_path) if "-p garagebooks-dev-wip" in c]
+
+
 def test_prune_keeps_a_merged_checkout_with_uncommitted_changes(repo, tmp_path):
     wt = merged_worktree(repo, "dirty")
     (wt / "done.txt").write_text("still editing")

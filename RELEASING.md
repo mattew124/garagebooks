@@ -1,7 +1,7 @@
 # Releasing
 
-Releases are tags on `main`. There is no release branch: `main` is always releasable
-(CI must pass before anything merges), and the owner decides when to tag it.
+Releases are tags on `main`. There is no release branch: `main` is always releasable (CI must pass before
+anything merges), and the owner decides when to tag it. Work reaches `main` through `develop` (see below).
 
 ## Version numbers: `MAJOR.MINOR.PATCH`
 
@@ -24,7 +24,8 @@ Rules of thumb:
 
 ## Candidates and stable releases
 
-1. Merge the work to `main` (pull request, CI green). Label each pull request (`enhancement`, `bug`,
+1. Pull requests merge into `develop`, which the main dev stack runs and the owner tests. When it is ready,
+   merge `develop` into `main` in a pull request of its own (merge commit, CI green). Label each pull request (`enhancement`, `bug`,
    `documentation`, `dependencies`, `internal`, or `breaking`): the labels are the groups in the release
    notes. Add each change to "Unreleased" in `CHANGELOG.md` as you go, and note any action installers must take.
    Before tagging, rename "Unreleased" to `## X.Y.Z-rcN - date` in its own pull request, and open the entry
