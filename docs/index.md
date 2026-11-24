@@ -88,7 +88,8 @@ job. See [Reminders](reminders.md).
 ## Adding an expense
 
 Category, date, time, amount, odometer, vendor, notes and the invoice. The odometer can be filled in
-from TeslaMate's own position data for the chosen date and time. The amount field works out sums
+from TeslaMate's own position data for the chosen date and time: the **Fill from TeslaMate** button
+appears only for a car that TeslaMate tracks, and only while TeslaMate is connected. The amount field works out sums
 (`120.50+89.95`, `400/3`) when you leave it, press Enter or save, and has keys for the operators.
 Editing an expense, then saving or cancelling, returns you to the category and order you were
 looking at.

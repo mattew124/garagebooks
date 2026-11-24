@@ -1,6 +1,8 @@
 {% import "_category_choice.html" as choice with context %}
-<tr>
-      <td data-label="Import"><input type="checkbox" name="include_{{ n }}" {{ 'checked' if r.include and not r.skip }}></td>
+<tr{% if r.lease %} class="lease-row"{% endif %}>
+      <td data-label="Import">{% if r.lease %}{% if r.lease.lease_id %}<input type="checkbox" name="lease_{{ n }}" checked title="Keep with the lease">
+        <input type="hidden" name="lease_id_{{ n }}" value="{{ r.lease.lease_id }}"><input type="hidden" name="lease_doc_{{ n }}" value="{{ r.lease.doc }}">{% endif %}
+        {% else %}<input type="checkbox" name="include_{{ n }}" {{ 'checked' if r.include and not r.skip }}>{% endif %}</td>
       <td data-label="Skip"><input type="checkbox" name="skip_{{ n }}" {{ 'checked' if r.skip }} title="Never offer this file for import"></td>
       <td data-label="File"><div class="file">
         {% if kind == 'mail' %}{% set email = r.url.split('#')[0] %}
@@ -9,11 +11,11 @@
         {% else %}<a href="{{ email }}" target="_blank" rel="noopener noreferrer">{{ r.name }} ↗</a>{% endif %}
         {% else %}<a href="{{ link(r.url) }}" target="_blank" rel="noopener noreferrer">{{ r.name }} ↗</a>{% endif %}
         {% if r.folder %}<br><small>{{ r.folder }}</small>{% endif %}
-{% if kind != 'mail' %}
+{% if kind != 'mail' and not r.lease %}
 <br><label class="inline"><input type="checkbox" name="rename_{{ n }}" {{ 'checked' if r.rename }}>
           <small>Rename {{ 'in OneDrive' if kind == 'onedrive' else 'the file' }} to {% if r.new_name %}<em>{{ r.new_name }}</em> (from the values below){% else %}<em>yymmdd - category - vendor</em>{% endif %}</small></label>{% endif %}
-        <br><label class="inline"><small>Attach to</small>
-          <select name="attach_{{ n }}" data-attach data-selected="{{ r.attach }}"><option value="">Its own expense</option></select></label>
+        {% if not r.lease %}<br><label class="inline"><small>Attach to</small>
+          <select name="attach_{{ n }}" data-attach data-selected="{{ r.attach }}"><option value="">Its own expense</option></select></label>{% endif %}
         {% for d in r.duplicates %}<br><small class="dup">Possible duplicate: <a href="{{ d.edit_url }}" target="_blank" rel="noopener noreferrer">{{ d.date }} · {{ d.category }}{% if d.vendor %} · {{ d.vendor }}{% endif %} · {{ d.amount_text }}</a></small>{% endfor %}
         {% if errors.get(n) %}<br><span class="error">{{ errors[n] }}</span>{% elif r.note %}<br><small>{{ r.note }}</small>{% endif %}
         <input type="hidden" name="url_{{ n }}" value="{{ r.url }}">
@@ -22,6 +24,12 @@
         <input type="hidden" name="id_{{ n }}" value="{{ r.id }}">
         {% for k, v in r.guess.items() %}<input type="hidden" name="guess_{{ k }}_{{ n }}" value="{{ v }}">{% endfor %}
       </div></td>
+      {% if r.lease %}
+      <td colspan="6" data-label="Lease document"><strong>{{ r.lease.label }}</strong>
+        {% if r.lease.lease_id %}<small>for the lease from {{ r.lease.lease_start }}</small>
+        {% elif not r.lease.kept %}<a href="{{ r.lease.add_url }}" target="_blank" rel="noopener noreferrer">Add a lease from this</a> <small>(choose this file there; then open this page again)</small>{% endif %}</td>
+    </tr>
+      {% else %}
       <td data-label="Date"><input type="date" name="date_{{ n }}" value="{{ r.date }}"></td>
       <td data-label="Category">
         <select name="category_id_{{ n }}">
@@ -61,3 +69,4 @@
           <button type="button" class="linklike" data-add-service>Add an item…</button>
         </fieldset></div></td>
     </tr>
+    {% endif %}

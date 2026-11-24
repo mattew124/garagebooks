@@ -70,6 +70,7 @@ MESSAGES = {
     "reminder_reopened_kept": "Reminder reopened. The next one had been edited or resolved, so it was left as it is.",
     "categories_saved": "Changes saved.",
     "service_added": "Service item added.",
+    "lease_document_kept": "Kept the file with the lease. It stays where it is, with its own name.",
     "service_deleted": "Service item removed. Expenses that had it keep their other items.",
     "settings": "Settings saved.",
     "folders": "Folders saved.",
@@ -534,6 +535,9 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 "car_storage": {car_id: f["backend"] for car_id, f in folders.items() if store_for(f["backend"])},
                 "default_storage": "onedrive" if drive else "local",
                 "cars": sorted(db.cars(conn), key=lambda c: c["sold_at"] is not None),   # sold cars last (the sort is stable)
+                # The cars "Fill from TeslaMate" can answer for: ones TeslaMate tracks, while its figures are usable.
+                "teslamate_cars": {c["id"] for c in db.cars(conn) if c["teslamate_car_id"] is not None}
+                                  if teslamate(conn).usable else set(),
                 "categories": db.categories(conn),
                 "values": values or {},
                 "errors": errors or {},
@@ -886,6 +890,9 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             text += f" Renamed {renamed}{'' if request.args.get('store') == 'local' else ' in OneDrive'}."
         if failed:
             text += f" Couldn't rename {failed} (a file with that name may already exist): imported with the old name."
+        kept = request.args.get("leases", 0, type=int)
+        if kept:
+            text += f" Kept {kept} lease document{'' if kept == 1 else 's'} with {'its' if kept == 1 else 'their'} lease."
         copied, not_copied = (request.args.get(k, 0, type=int) for k in ("copied", "copy_failed"))
         if copied:
             text += f" Saved {copied} attached PDF{'' if copied == 1 else 's'} in the car's invoice storage."
@@ -2542,7 +2549,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 "amount": "", "odometer_km": "", "url": "", "name": "", "folder": "",
                 "note": "", "id": "", "attach": "", "car_fill": False, "car_fields": [], "services": [], "notes": "", "gst_amount": "", "card_payment_ref": "",
                 "bpay_biller_code": "", "bpay_ref": "", "car_vin": "", "car_build_year": "", "car_model_year": "",
-                "car_body_type": "", "car_make": "", "car_model": "", "period_start": "", "period_end": "", "guess": {}, "new_name": "", "rename": False, "odo_note": "", "duplicates": [], **fields}
+                "car_body_type": "", "car_make": "", "car_model": "", "period_start": "", "period_end": "", "guess": {}, "new_name": "", "rename": False, "odo_note": "", "duplicates": [], "lease": None, **fields}
 
     def import_page(store, car, **ctx):
         """The import page's template with what every version of it needs. A row's `url` is the file's
@@ -2618,6 +2625,33 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         guess["missing"] = [f for f in ("date", "category", "amount") if guess[f] is None]
         return guess
 
+    def lease_document_row(car, text):
+        """What the import offers for a PDF that is a lease form or agreement, or None for any other PDF:
+        {doc, label, lease_id (the lease it can be kept with, or None), add_url, note}. A lease matches by the
+        start date its form states (an agreement states none: it matches when the car has one lease)."""
+        doc = leaseform.document_kind(text)
+        if doc is None or car["id"] == 0:
+            return None
+        start = leaseform.parse_date(leaseform.read(text).get("start_date"))
+        label = validation.LEASE_DOCUMENTS[doc]
+        with connect() as conn:
+            leases = db.car_leases(conn, car["id"])
+        match = next((x for x in leases if start and x["start_date"] == start), None)
+        if match is None and doc == "agreement" and len(leases) == 1:
+            match = leases[0]
+        found = {"doc": doc, "label": label, "lease_id": None, "add_url": url_for("car_lease_new", car_id=car["id"]),
+                 "kept": False, "lease_start": ""}
+        if match is not None:
+            started = f"{match['start_date']:%d %b %Y}".lstrip("0")
+            kept = bool(match[f"{doc}_url"] or match[f"{doc}_path"])
+            found.update(lease_id=None if kept else match["id"], kept=kept, lease_start=started)
+        found["note"] = (
+            f"This looks like a {label.lower()}, not an invoice, so it isn't offered as an expense. "
+            + (f"The lease from {found['lease_start']} already has one." if found["kept"] else
+               f"Tick it to keep it with the lease from {found['lease_start']}; the file isn't renamed or moved."
+               if found["lease_id"] else "No lease matches it yet: add one from it first."))
+        return found
+
     def read_file(store, car, ctx, n, f):
         """Read one PDF (or email) and propose its expense: an import row. A file that can't be fetched
         becomes a row saying why, never an error for the whole page."""
@@ -2626,6 +2660,12 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         timer = docinfo.Timer()
         try:
             text, pdf, email = read_document(store, f["id"])
+            lease_doc = lease_document_row(car, text) if email is None else None
+            if lease_doc:
+                # A lease form or agreement is kept with its lease, not imported as an expense, and the file is
+                # never renamed or moved: the row has no rename option at all.
+                row.update(lease=lease_doc, note=lease_doc["note"])
+                return row
             guess = invoices.propose(f["folder"], f["name"], text, list(by_name), ctx["learned"],
                                      ctx["settings"]["multi_amount"])
             if email is not None:
@@ -2924,7 +2964,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             with connect() as conn:
                 db_items = db.service_items(conn)
             count = min(request.form.get("count", type=int) or 0, 200)
-            rows, chosen, errors, skip_urls = [], [], {}, []
+            rows, chosen, errors, skip_urls, lease_picks = [], [], {}, [], []
             for n in range(count):
                 def f(key, n=n):
                     return request.form.get(f"{key}_{n}", "")
@@ -2944,6 +2984,9 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                     continue
                 if row["skip"] and row["url"]:
                     skip_urls.append(row["url"])
+                    continue
+                if f("lease"):          # a lease form or agreement, kept with its lease: no expense, no rename
+                    lease_picks.append((f("lease_id"), f("lease_doc"), row))
                     continue
                 if not row["include"]:
                     continue
@@ -2995,8 +3038,21 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             if skip_urls:
                 with connect() as conn:
                     db.skip_imports(conn, car_id, skip_urls)
+            kept = 0
+            for lease_id, doc, row in lease_picks:
+                try:
+                    ref = (validation.parse_invoice_path if ref_field == "invoice_path" else validation.parse_invoice_url)(row["url"])
+                except ValueError:
+                    continue
+                if car_id and ref and lease_id.isdigit() and doc in validation.LEASE_DOCUMENTS:
+                    with connect() as conn:
+                        kept += db.set_lease_document(conn, car_id, int(lease_id), doc, ref_field, ref)
+            if kept:
+                log.info("import kept %d file(s) as lease documents of car %s", kept, car_id)
             if not chosen:
-                if skip_urls:
+                if kept and len(lease_picks) == kept and not skip_urls:
+                    return redirect(url_for("car_lease", car_id=car_id, msg="lease_document_kept"), 303)
+                if skip_urls or kept:
                     return redirect(url_for(f"{kind}_import", car_id=car_id), 303)
                 return render_import(store, car, rows, status=400, notice="Tick at least one invoice to import.")
             imported, renamed, rename_failed, copied, copy_failed = [], 0, 0, 0, 0
@@ -3037,6 +3093,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             more = {"store": kind} if kind == "local" else {}
             if copied or copy_failed:
                 more.update(copied=copied, copy_failed=copy_failed)
+            if kept:
+                more.update(leases=kept)
             return redirect(url_for("index", msg="imported", n=len(imported), renamed=renamed,
                                     rename_failed=rename_failed, **more), 303)
 

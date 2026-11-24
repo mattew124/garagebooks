@@ -11,6 +11,12 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
   button, which opens the other links. On a wide screen **Settings** is a dropdown holding **Invoice storage**,
   which no longer has its own link. Without JavaScript the links wrap as before and the dropdown opens on
   hover or focus. Nothing changes for installers.
+- **Fill from TeslaMate only where it can work.** The Add form's button for the odometer shows only for a car
+  TeslaMate tracks, while TeslaMate is connected and usable; a car added by hand, or an install without TeslaMate,
+  doesn't get it. Nothing changes for installers.
+- **The import recognises lease forms and agreements.** A PDF that is an associate lease form or a lease agreement
+  is offered to keep with the matching lease (or to add a lease from it) instead of as an expense, and is never
+  renamed or moved. A kept file isn't offered for import again. Nothing changes for installers.
 - **Fuel is only for cars with an engine, and Charging only for cars that plug in.** Each category and service item
   on the Categories page has a **For** choice: all cars, cars that plug in (battery electric and plug-in hybrid) or
   cars with an engine (petrol or diesel, plug-in hybrid and hybrid). Fuel, and the service items oil filter, fuel

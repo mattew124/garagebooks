@@ -54,7 +54,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // The button says what it will do: nothing to import but some to skip is "Skip 3", not "Import ticked".
   const ticked = (prefix) => importForm.querySelectorAll(`input[name^=${prefix}_]:checked`).length;
   const importLabel = () => {
-    const [n, s] = [ticked("include"), ticked("skip")];
+    const [n, s] = [ticked("include") + ticked("lease"), ticked("skip")];
     return n && s ? `Import ${n} and skip ${s}` : s ? `Skip ${s}` : "Import ticked";
   };
   const relabel = () => {
@@ -860,7 +860,18 @@ document.addEventListener("DOMContentLoaded", () => {
   const odo = form.elements.odometer_km;
   const hint = document.getElementById("odometer-hint");
 
+  // Only a car TeslaMate tracks has an odometer to fill from; the button follows the chosen car.
+  const fillButton = document.getElementById("fill-odometer");
+  const tracked = () => {
+    const chosen = form.elements.car_id.selectedOptions[0];
+    return !!chosen && chosen.dataset.teslamate === "1";
+  };
+  const showFill = () => { if (fillButton) fillButton.hidden = !tracked(); };
+  form.elements.car_id.addEventListener("change", showFill);
+  showFill();
+
   async function fill(manual) {
+    if (!tracked()) return;
     const { car_id, date, time } = form.elements;
     if (!car_id.value || !date.value || !time.value) {
       if (manual) hint.textContent = "Pick the car, date and time first.";
@@ -881,7 +892,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  document.getElementById("fill-odometer").addEventListener("click", () => fill(true));
+  if (fillButton) fillButton.addEventListener("click", () => fill(true));
 
   // Choosing the invoice PDF fills in what can be read from it, but never a field the person
   // has already typed in or changed.
