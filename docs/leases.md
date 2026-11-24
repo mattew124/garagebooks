@@ -114,7 +114,8 @@ FBT year, with links to the previous and next years that have a lease or an expe
 
 - **After tax**: the year's running costs on the invoices and what they cost after tax (TeslaMate's charging
   counted as paid personally), and the year's after-tax cost of running the car. The breakdown by pool or
-  category, and every year side by side, are on the [dashboard](dashboard.md#cost-after-tax). For an electric car whose lease has its home charging reimbursed it adds the
+  category, and every year side by side, are on the [dashboard](dashboard.md#cost-after-tax). For an electric car
+  whose lease has its home charging reimbursed it adds the
   [reimbursement](#cost-after-tax): the km driven, the ATO's rate used, the reimbursement and the tax saved on it.
   With no tax bracket chosen in Settings it says so and shows no after-tax figure.
 
