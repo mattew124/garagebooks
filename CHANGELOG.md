@@ -7,6 +7,10 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+- **Claims send an invoice kept in OneDrive.** Claiming an expense whose invoice is in OneDrive used to stop with
+  "only a link: attach the invoice file first", which can't be done when OneDrive is the car's folder. The claim
+  now downloads the file from OneDrive (up to 10 MB) and sends it, and says so plainly when the OneDrive sign-in
+  has lapsed or the file has been moved or deleted. Nothing to do on upgrade.
 - **`scripts/dev.sh setup` remakes a venv from another path.** A venv made before its checkout was moved or renamed
   has a `pip` that can't start; `setup` now makes it again. Nothing changes for installers.
 - **Dev stack: a real claims connector's key works, and the Dashboards link comes back.** The dev app joins the key

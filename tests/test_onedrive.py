@@ -31,6 +31,8 @@ SECRET = "s3cret~value"
 WEB_URL = "https://onedrive.live.com/?id=FILE1"
 CALLBACK = "http://localhost/microsoft/callback"
 FILE_DOWNLOAD = "https://cdn.example.com/F1"
+SHARED_LINK = "https://1drv.ms/b/s!SHARED"        # a sharing link to F1, which Graph's shares lookup finds
+F1_META = {"id": "F1", "name": "receipt.pdf", "size": len(PDF), "file": {}, "@microsoft.graph.downloadUrl": FILE_DOWNLOAD}
 
 # A small drive: root -> Cars -> Test car -> Invoices
 FOLDERS = {
@@ -106,7 +108,11 @@ class FakeMicrosoft:
         if method == "GET" and path.endswith("/me/drive/root"):
             return 200, with_children("ROOT") if expand else item("ROOT")
         if method == "GET" and path.endswith("/me/drive/items/F1"):
-            return 200, {"id": "F1", "size": len(PDF), "@microsoft.graph.downloadUrl": FILE_DOWNLOAD}
+            return 200, F1_META
+        if method == "GET" and path.startswith("/v1.0/shares/u!") and path.endswith("/driveItem"):
+            shared = path.split("/shares/u!")[1].split("/")[0]
+            url = base64.urlsafe_b64decode(shared + "=" * (-len(shared) % 4)).decode()
+            return (200, F1_META) if url == SHARED_LINK else (404, {"error": {"code": "itemNotFound"}})
         if method == "GET" and "/me/drive/items/" in path:
             key = path.rsplit("/", 1)[1]
             if key not in FOLDERS:
@@ -980,3 +986,47 @@ def test_the_header_has_one_link_for_every_storage_and_old_links_still_arrive(cl
     assert '<a href="/storage">Invoice storage</a>' in nav and "OneDrive" not in nav
     old = client.get("/onedrive")
     assert old.status_code == 302 and old.headers["Location"].endswith("/storage")
+
+
+# ---- a file by the address an expense keeps for it (claims send the invoice from here) --------------------
+
+@pytest.mark.parametrize("url, item_id", [
+    ("https://onedrive.live.com?cid=ABC&id=ABC!s0123", "ABC!s0123"),
+    ("https://onedrive.live.com/?id=FILE1", "FILE1"),
+    ("https://onedrive.live.com/redir?resid=ABC!123&authkey=x", "ABC!123"),
+    ("https://1drv.ms/b/s!SHARED", None),
+    ("https://example.com/?id=F1", None),
+    ("http://onedrive.live.com/?id=F1", None),
+])
+def test_the_item_id_is_read_from_a_personal_drive_address(url, item_id):
+    assert onedrive.item_id_from_url(url) == item_id
+
+
+@pytest.mark.parametrize("url, ours", [
+    ("https://onedrive.live.com?cid=ABC&id=ABC!1", True), ("https://1drv.ms/b/s!x", True),
+    ("https://outlook.live.com/owa/?ItemID=x", False), ("https://onedrive.live.com.example.com/?id=1", False),
+    ("", False), (None, False),
+])
+def test_only_onedrive_addresses_are_fetched_from_onedrive(url, ours):
+    assert onedrive.is_drive_url(url) is ours
+
+
+def test_a_file_is_fetched_by_its_address(ms):
+    drive = onedrive.OneDrive(KEY, ms)
+    assert drive.fetch("AT-1", "https://onedrive.live.com?cid=ABC&id=F1") == ("receipt.pdf", PDF)
+    assert drive.fetch("AT-1", SHARED_LINK) == ("receipt.pdf", PDF)
+
+
+def test_a_file_over_the_limit_is_refused_before_its_bytes_are_fetched(ms):
+    drive = onedrive.OneDrive(KEY, ms)
+    with pytest.raises(onedrive.TooLarge):
+        drive.fetch("AT-1", "https://onedrive.live.com/?id=F1", max_bytes=len(PDF) - 1)
+    assert not [c for c in ms.calls if c[1] == FILE_DOWNLOAD]
+
+
+def test_a_file_that_has_gone_is_not_found(ms):
+    drive = onedrive.OneDrive(KEY, ms)
+    with pytest.raises(onedrive.NotFound, match="isn't in OneDrive any more"):
+        drive.fetch("AT-1", "https://onedrive.live.com/?id=GONE")
+    with pytest.raises(onedrive.NotFound):
+        drive.fetch("AT-1", "https://1drv.ms/b/s!OTHER")
