@@ -119,6 +119,8 @@ expenses that had it; renaming keeps it on them). Missing one while importing? *
 dialog; the new item is added to every row's list and ticked on the row you were in, and nothing else on the
 page changes.
 
+<!-- screenshot: categories-page - The Categories page: every category and service item in one form with one Save button, and the small x that deletes a service item -->
+
 <!-- screenshot: import-service-items - An import row in the Service category, with its service items and the Add an item dialog -->
 
 ## Possible duplicates

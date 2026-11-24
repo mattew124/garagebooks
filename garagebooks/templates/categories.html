@@ -18,7 +18,7 @@
     {% endif %}
     <div class="row">
       <label class="check"><input type="checkbox" name="gst_partial_{{ c.id }}" value="1" {{ 'checked' if c.gst_free }}>
-        <span>GST only partly applies <small>(the GST on each invoice is read or entered, not assumed; with none, none is counted)</small></span></label>
+        <span>GST only partly applies <small>(the GST is read or entered, not taken as 1/11)</small></span></label>
     </div>
     <div class="row">
       <label class="check"><input type="checkbox" name="has_period_{{ c.id }}" value="1" {{ 'checked' if c.has_period }}>
