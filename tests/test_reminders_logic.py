@@ -191,3 +191,19 @@ def test_the_next_km_falls_back_to_the_previous_due_km_then_to_nothing():
 
 def test_a_one_off_has_no_next():
     assert rm.next_reminder(reminder(id=1, car_id=1, title="x", due_date=date(2026, 1, 1)), date(2026, 1, 2), 1) is None
+
+
+def test_a_lease_end_with_the_next_lease_loaded_is_information_even_when_past():
+    """The derived lease end of a lease whose successor is already entered: never due soon or overdue."""
+    for due in (date(2026, 11, 20), date(2026, 11, 16), date(2026, 11, 15)):
+        r = reminder(due_date=due, lead_days=90, informational=True, next_lease_start=date(2026, 11, 21))
+        s = rm.status(r, TODAY, None)
+        assert s.code == rm.INFO and not s.needs_attention
+        assert s.label == "Next lease loaded"
+        assert s.describe[-1] == "next lease already loaded (starts 21 Nov 2026)"
+        assert not any("overdue" in p or "due" in p.split() for p in s.describe)
+    assert rm.status(reminder(due_date=date(2026, 11, 20), lead_days=90, informational=True,
+                              next_lease_start=date(2026, 11, 21)), TODAY, None).describe == [
+        "ends in 4 days", "next lease already loaded (starts 21 Nov 2026)"]
+    # a provider-renewed registration keeps its own label
+    assert rm.status(reminder(due_date=date(2026, 11, 20), informational=True), TODAY, None).label == "Provider renews"
