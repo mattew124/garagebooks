@@ -411,7 +411,8 @@ CATEGORY_FIELDS = ("upload_folder", "gst_free", "has_period", "budget_pool")
 
 def update_category(conn, category_id, **fields):
     """Set some of a category's editable fields (CATEGORY_FIELDS). False if no such category."""
-    assert fields and set(fields) <= set(CATEGORY_FIELDS), fields
+    if not fields or not set(fields) <= set(CATEGORY_FIELDS):
+        raise ValueError(f"not editable category fields: {fields}")
     sets = ", ".join(f"{name} = %({name})s" for name in fields)
     return conn.execute(f"UPDATE garagebooks.category SET {sets} WHERE id = %(id)s",  # noqa: S608 - names checked above
                         {**fields, "id": category_id}).rowcount == 1
