@@ -1921,7 +1921,7 @@
       "id": 23,
       "type": "stat",
       "title": "Running costs after tax",
-      "description": "What the running costs entered for this car (and TeslaMate's charging) come to on the invoices, and what they cost after tax: an expense paid from the package has its GST claimed back and the rest comes from pre-tax salary. All-time (ignores the dashboard time range). Follows the Category filter. A dash while a packaged expense can't be worked out. Cost after tax is worked out from the marginal tax rate saved in GarageBooks' Settings and each lease's pre-tax and post-tax payments (see the documentation); it is not tax advice. The home charging reimbursement needs the odometer, so it is shown in GarageBooks (the FBT year report), not here.",
+      "description": "What the running costs entered for this car (and TeslaMate's charging) come to on the invoices, and what they cost after tax: an expense paid from the package has its GST claimed back and the rest comes from pre-tax salary. All-time (ignores the dashboard time range). Follows the Category filter. A dash while a packaged expense can't be worked out. Cost after tax is worked out from the tax bracket and Medicare levy status chosen for each income year in GarageBooks' Settings and each lease's pre-tax and post-tax payments (see the documentation); it is not tax advice. The home charging reimbursement needs the odometer, so it is shown in GarageBooks (the FBT year report), not here.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "TeslaMate"
@@ -1982,7 +1982,7 @@
       "id": 24,
       "type": "table",
       "title": "After tax by FBT year",
-      "description": "Each FBT year (1 April to 31 March, from each expense's date in the dashboard's time zone): the running costs on the invoices (TeslaMate's charging included), what they cost after tax, and the difference. Ignores the dashboard time range. A dash where a packaged expense can't be worked out. Cost after tax is worked out from the marginal tax rate saved in GarageBooks' Settings and each lease's pre-tax and post-tax payments (see the documentation); it is not tax advice. The home charging reimbursement needs the odometer, so it is shown in GarageBooks (the FBT year report), not here.",
+      "description": "Each FBT year (1 April to 31 March, from each expense's date in the dashboard's time zone): the running costs on the invoices (TeslaMate's charging included), what they cost after tax, and the difference. Ignores the dashboard time range. A dash where a packaged expense can't be worked out. Cost after tax is worked out from the tax bracket and Medicare levy status chosen for each income year in GarageBooks' Settings and each lease's pre-tax and post-tax payments (see the documentation); it is not tax advice. The home charging reimbursement needs the odometer, so it is shown in GarageBooks (the FBT year report), not here.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "TeslaMate"

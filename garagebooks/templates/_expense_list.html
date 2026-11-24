@@ -67,7 +67,7 @@
       <small class="period-note">{{ (e.period_start|day) if e.period_start else '…' }} to {{ (e.period_end|day) if e.period_end else '…' }}</small>{% endif %}{% if services and services.get(e.id) %}
       <small class="service-note">{{ services[e.id]|join(', ') }}</small>{% endif %}</td>
     <td class="num amount{{ ' credit' if e.amount < 0 }}" data-label="Amount">{{ e.amount|money }}{% set cost = after.costs.get(e.id) %}{% if cost is not none %}
-      <small class="after-tax" title="After tax: {{ cost|money }}. Paid from the package, so the GST is claimed back and the rest comes from pre-tax salary (at the marginal tax rate in Settings). Not tax advice.">{{ cost|money }} after tax</small>{% endif %}</td>
+      <small class="after-tax" title="After tax: {{ cost|money }}. Paid from the package, so the GST is claimed back and the rest comes from pre-tax salary (at the marginal rate for its income year, from Settings). Not tax advice.">{{ cost|money }} after tax</small>{% endif %}</td>
     <td class="num odo" data-label="Odometer">{{ e.odometer_km|km }}</td>
     {# A stored invoice is served by the app; anything else is the link that was pasted or uploaded. #}
     {% set inv = url_for('invoice', expense_id=e.id) if e.invoice_path else e.invoice_url %}
