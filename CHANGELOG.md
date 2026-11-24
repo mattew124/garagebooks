@@ -7,6 +7,12 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+- **The kilometre pace counts the whole FBT year when it holds two leases.** When a lease ended and the next one started
+  during an FBT year, the lease page and the dashboard's **Kilometre pace** panel were labelled with the FBT year but
+  counted only the current lease's part of it. The distance driven under the earlier lease was left out, so a car on
+  pace looked thousands of km behind. Both now add up every lease held in the year, each with its own days and
+  estimate. The FBT year report keeps each lease's section and adds the year in total below them. Nothing to do: pull
+  the new image.
 - **`scripts/dev.sh setup` remakes a venv from another path.** A venv made before its checkout was moved or renamed
   has a `pip` that can't start; `setup` now makes it again. Nothing changes for installers.
 - **Dev stack: a real claims connector's key works, and the Dashboards link comes back.** The dev app joins the key

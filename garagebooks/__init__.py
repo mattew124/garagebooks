@@ -1133,6 +1133,17 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         found.update(start_reading=start, current_reading=now, reasons=list(dict.fromkeys(reasons)))
         return found
 
+    def km_pace_year(paces, rows, year, today):
+        """The FBT year's kilometre pace across its leases (lease.km_pace_year), from each lease's km_pace_for: None
+        unless two or more leases with an estimate are held in the year (one lease's own figures are the year's)."""
+        parts = [(row, p["start_reading"] and p["start_reading"].km, p["current_reading"] and p["current_reading"].km)
+                 for row, p in zip(rows, paces, strict=True)]
+        found = lease.km_pace_year(parts, year, today)
+        if found is None or found["leases"] < 2:
+            return None
+        found["reasons"] = list(dict.fromkeys(r for p in paces for r in p["reasons"]))
+        return found
+
     def render_lease(car, status=200):
         today = today_here()
         with connect() as conn:
@@ -1140,9 +1151,16 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             views = [lease_view(conn, row, today) for row in db.car_leases(conn, car["id"])]
             shown = next((v for v in views if current and v["id"] == current["id"]), None)
             if shown and shown["figures"]["status"] == "current":
-                shown["pace"] = km_pace_for(conn, car, shown, lease.fbt_year(today), today)
+                year = lease.fbt_year(today)
+                shown["pace"] = km_pace_for(conn, car, shown, year, today)
+                # The FBT year can hold an earlier (or a later) lease too: the short version then counts the whole year.
+                held = [v for v in views if lease.days_held(v, year)]
+                if len(held) > 1:
+                    paces = [shown["pace"] if v is shown else km_pace_for(conn, car, v, year, today) for v in held]
+                    shown["pace_year"] = km_pace_year(paces, held, year, today)
         others = [v for v in views if v is not shown]
-        return render_template("lease.html", **lease_context(car, shown=shown, others=others, today=today, fbt_label=lease.fbt_label)), status
+        return render_template("lease.html", **lease_context(car, shown=shown, others=others, today=today, fbt_label=lease.fbt_label,
+                                                            fbt_start=lease.fbt_start)), status
 
     def render_lease_form(car, lease_id, values, errors, status=200):
         return render_template("lease_form.html", **lease_context(car, lease_id=lease_id, values=values, errors=errors)), status
@@ -1400,10 +1418,11 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             report = lease.fbt_report(leases, costs, charging, year, today)
             after = fbt_after_tax(conn, car, leases, report, year, today, budgets_on)
             paces = [km_pace_for(conn, car, row, year, today) for row, _budgets, _figures in report["leases"]]
+            pace_year = km_pace_year(paces, [row for row, _b, _f in report["leases"]], year, today)
         earlier, later = [y for y in years if y < year], [y for y in years if y > year]
         return render_template("fbt.html", car=car, report=report, paces=paces, today=today, budgets_on=budgets_on, frequencies={k: v[0] for k, v in lease.FREQUENCIES.items()},
                                previous=earlier[-1] if earlier else None, following=later[0] if later else None,
-                               label=lease.fbt_label, after=after)
+                               label=lease.fbt_label, after=after, pace_year=pace_year)
     # ---- reminders (roadmap item 4) ------------------------------------------------
 
     def open_items(conn, car_id=None):
