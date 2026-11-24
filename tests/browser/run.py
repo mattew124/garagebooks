@@ -480,6 +480,7 @@ def test_history_page(page):
     page.click("button[type=submit].button")
     page.wait_for_url(re.compile(r"msg=updated"))
     remove_marked(page)
+    page.get_by_role("button", name="Menu").click()   # on a phone History is in the menu
     page.click("header nav a:has-text('History')")
     expect(page.locator("h1")).to_have_text("Change history")
     first = page.locator("li.change").first
