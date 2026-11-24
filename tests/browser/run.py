@@ -1010,7 +1010,7 @@ def test_settings_lists_the_scheduled_jobs(page):
     assert section.locator("h2").text_content() == "Scheduled jobs", section.locator("h2").text_content()
     assert section.locator("#jobs-where").inner_text().strip(), "it says where the jobs run"
     names = section.locator("li[data-job]").evaluate_all("els => els.map(e => e.dataset.job)")
-    assert names == ["dashboard", "mail", "notifications", "teslamate"], names
+    assert names == ["ato_rates", "dashboard", "mail", "notifications", "teslamate"], names
     states = section.locator("li[data-job]").evaluate_all("els => els.map(e => e.dataset.state)")
     assert set(states) <= {"never", "ok", "failed", "running"}, states
     assert "every hour" in section.locator('li[data-job="teslamate"]').inner_text()
@@ -1499,19 +1499,31 @@ def fbt_checks(page):
     assert page.get_by_role("link", name=re.compile(r"FBT \d{4}–\d\d →")).count() == 1, "no link on to a year with data"
 
 
-def set_marginal_rate(page, value):
-    """Settings > Marginal tax rate. Blank means not entered."""
+def this_income_year():
+    from datetime import date
+    today = date.today()
+    return today.year if today.month >= 7 else today.year - 1
+
+
+def set_tax_year(page, bracket, medicare="not_exempt"):
+    """Settings > Cost after tax: this income year's bracket (by its first dollar; "" follows the year before) and
+    Medicare levy status. -> what they were before."""
+    year = this_income_year()
     page.goto(UI + "settings")
-    page.fill("input[name=marginal_tax_rate]", value)
+    pick, levy = (page.locator(f"select[name=tax_employee_{year}_{part}]") for part in ("bracket", "medicare"))
+    before = (pick.input_value(), levy.input_value())
+    pick.select_option(bracket)
+    levy.select_option(medicare)
     page.click("button[type=submit].button")
     page.wait_for_url(re.compile(r"msg=settings"))
+    return before
 
 
 def after_tax_dashboard_checks(page):
     """With a rate and a lease the dashboard has both after-tax panels, and they sit below the Kilometre pace row
     without covering it (a tall viewport: Grafana only draws the panels in view)."""
     car_id = re.search(r"/cars/(\d+)/", page.url).group(1)
-    wide = page.context.browser.new_context(viewport={"width": 1280, "height": 3000})
+    wide = page.context.browser.new_context(viewport={"width": 1280, "height": 3600})   # down to the after-tax TCO row
     graf = wide.new_page()
     try:
         for _ in range(12):      # Grafana re-reads the provisioned dashboard every 60 seconds
@@ -1524,32 +1536,34 @@ def after_tax_dashboard_checks(page):
         shot(graf, "after-tax-dashboard")
         expect(graf.get_by_text("Running costs after tax", exact=True).first).to_be_visible(timeout=30000)
         expect(graf.get_by_text("After tax by FBT year", exact=True).first).to_be_visible()
+        for title in ("After-tax cost by income year", "Household cost after tax", "Lease after tax by income year",
+                      "After tax by category and FBT year"):
+            expect(graf.get_by_text(title, exact=True).first).to_be_visible()
     finally:
         wide.close()
 
 
 def test_cost_after_tax(page):
-    """The marginal rate in Settings, "Paid from" on the form, the after-tax figure in the list and the After tax
-    part of the FBT year report. The rate is put back as it was, and the car (and its expense) deleted, at the end."""
-    page.goto(UI + "settings")
-    before = page.input_value("input[name=marginal_tax_rate]")
+    """This income year's tax bracket in Settings, "Paid from" on the form, the after-tax figure in the list and the
+    After tax part of the FBT year report. The year's choice is put back as it was, and the car (and its expense)
+    deleted, at the end."""
+    before = set_tax_year(page, "45001")                 # $45,001 - $135,000 (30%), not exempt: 32%
     try:
-        cost_after_tax_checks(page, before)
+        cost_after_tax_checks(page)
     finally:
         remove_marked(page)
-        set_marginal_rate(page, before)
+        set_tax_year(page, *before)
 
 
-def cost_after_tax_checks(page, before):
+def cost_after_tax_checks(page):
     from datetime import date, timedelta
     today = date.today()
-    set_marginal_rate(page, "34")
-    assert page.input_value("input[name=marginal_tax_rate]").startswith("34"), "the rate wasn't kept"
+    year = this_income_year()
+    assert page.input_value(f"select[name=tax_employee_{year}_bracket]") == "45001", "the bracket wasn't kept"
+    expect(page.locator("#tax-years")).to_contain_text("$45,001 – $135,000 (30%)")
     expect(page.locator("#ev-rates")).to_contain_text("FBT 2026–27")        # the ATO's rates are listed, as data
+    expect(page.locator("#ev-rates input")).to_have_count(0)                # and not edited here
     shot(page, "settings-after-tax")
-    page.fill("input[name=marginal_tax_rate]", "101")
-    page.click("button[type=submit].button")
-    expect(page.locator("#after-tax-settings .error")).to_contain_text("between 0 and 100")
     add_marked_car(page).get_by_role("link", name="Lease").click()
     page.click("#add-lease-top")
     page.locator("#f-financier").fill("Example Finance")
@@ -1573,7 +1587,7 @@ def cost_after_tax_checks(page, before):
     page.click("button[type=submit].button")
     page.wait_for_url(re.compile(r"msg=saved"))
     row = page.locator("tr", has_text=MARKER)
-    expect(row.locator("small.after-tax")).to_contain_text("$681.25 after tax")
+    expect(row.locator("small.after-tax")).to_contain_text("$700.00 after tax")
     expect(page.locator("#after-tax-total")).to_contain_text("after tax")
     shot(page, "list-after-tax")
     row.get_by_role("link", name="Edit").click()                           # paid personally: no after-tax figure
@@ -1589,16 +1603,14 @@ def cost_after_tax_checks(page, before):
     page.locator(".car", has_text=MARKER).get_by_role("link", name="Lease").click()
     page.get_by_role("link", name="Costs, taxable value and contributions by FBT year").click()
     after = page.locator("#fbt-after-tax")
-    expect(after.locator("#fbt-after-tax-lines")).to_contain_text("$681.25")
+    expect(after.locator("#fbt-after-tax-running")).to_contain_text("$700.00")
     expect(after.locator("#fbt-reimbursement")).to_contain_text("Not known")     # no odometer: never counted as nothing
     expect(after.locator("#fbt-after-tax-total")).to_contain_text("unavailable")
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "sideways scroll on a phone"
     shot(page, "fbt-after-tax")
     after_tax_dashboard_checks(page)
-    set_marginal_rate(page, "")                                                  # no rate: pages say so, show nothing
-    page.goto(UI)
-    expect(page.locator("#no-tax-rate")).to_be_visible()
-    expect(page.locator("small.after-tax")).to_have_count(0)
+    # (With no year chosen at all the pages say so and show nothing: tests/test_after_tax.py. The dev stack may hold
+    # earlier years' choices, which a later year follows, so it isn't tried here.)
 
 
 def km_pace_checks(page, today, year):
@@ -1631,7 +1643,7 @@ def km_pace_checks(page, today, year):
     expect(page.locator("#lease-km-pace")).to_contain_text("0 km driven so far")
     shot(page, "km-pace-lease-phone")
     car_id = re.search(r"/cars/(\d+)/", report).group(1)
-    wide = page.context.browser.new_context(viewport={"width": 1280, "height": 3000})   # Grafana only draws the panels in view
+    wide = page.context.browser.new_context(viewport={"width": 1280, "height": 3600})   # Grafana only draws the panels in view
     graf = wide.new_page()
     for _ in range(12):      # Grafana re-reads the provisioned dashboard every 60 seconds: wait for the new panel
         graf.goto(GRAFANA + f"d/garagebooks-tco/cost-of-ownership?var-car_id={car_id}")
