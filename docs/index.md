@@ -29,7 +29,7 @@ the number needing attention), **+ Add** and a menu button; the button opens the
 The **Cost of Ownership** dashboard in Grafana: total cost of ownership, purchase vs running vs
 charging, cost per km, per day and per month, monthly spend by category, cumulative cost, and a
 table of every expense with a link to its invoice. [What the dashboard counts](dashboard.md) explains
-each figure.
+each figure. A car that runs on fuel also gets a [Fuel dashboard](dashboard.md#fuel-dashboard).
 
 ![The Cost of Ownership dashboard in Grafana](images/dashboard.png)
 
@@ -97,6 +97,27 @@ looking at.
 ![The form for adding an expense](images/expense-form.png)
 
 <!-- screenshot: amount-calculator - The amount field with a sum typed in and its result -->
+
+### Fuel
+
+An expense in a category that **Records litres** (**Fuel** to begin with; change it with the tick on the
+**Categories** page) also asks for the litres, whether it was a **partial fill**, and whether you **missed
+recording a fuel-up** since the last one. As soon as the car, date and odometer are in, the form shows the
+distance travelled since the last fuel-up, whatever kind of fill either was. Once the litres are in, it
+shows L/100 km of the tank. The expense list shows the same under the amount and the odometer.
+
+- L/100 km is worked out when a fill-up **fills the tank**: the litres put in since the tank was last full
+  (partial fills in between are counted in), divided by the distance since then.
+- A **partial fill** shows its distance at once, and its litres count towards the next full tank.
+- A fuel-up you **missed** still shows its distance, but that tank has no L/100 km (its litres aren't all
+  known). The next tank is measured as usual.
+- The first full fill-up has nothing to measure from, so L/100 km starts at the second.
+- The odometer is needed for any of it: add it to each fill-up.
+
+Fuel entered before litres existed keeps counting in the totals; add the litres by editing it. The
+[Fuel dashboard](dashboard.md#fuel-dashboard) charts all of this.
+
+<!-- screenshot: fuel-form - The expense form for a fuel fill-up, with the distance since the last fuel-up and L/100 km shown -->
 
 ### Payment calculator
 

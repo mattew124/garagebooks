@@ -26,7 +26,7 @@ RUN pip install -r requirements.txt \
 
 COPY gunicorn.conf.py .
 COPY garagebooks ./garagebooks
-COPY grafana/cost-of-ownership.json ./grafana/cost-of-ownership.json
+COPY grafana/cost-of-ownership.json grafana/fuel.json ./grafana/
 # Where the app writes its Grafana dashboard when DASHBOARD_DIR points here. World-writable
 # (sticky) so a new named volume mounted here is writable by whatever uid compose runs us as.
 RUN mkdir /dashboards && chmod 1777 /dashboards

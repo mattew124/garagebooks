@@ -27,7 +27,7 @@ from psycopg import errors as pg_errors
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from . import ato, claims as claim_lib, dashboard, db, docinfo, icons, invoices, jobs, jobtext, lease, leaseform, logs, notices, notify, onedrive, outlook, reminders, sources, storage, tax, updates, validation
+from . import ato, claims as claim_lib, dashboard, db, docinfo, fuel, icons, invoices, jobs, jobtext, lease, leaseform, logs, notices, notify, onedrive, outlook, reminders, sources, storage, tax, updates, validation
 
 log = logging.getLogger("garagebooks.app")
 
@@ -236,8 +236,13 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                     pace = db.any_estimated_km(conn)
             except Exception:           # noqa: BLE001 - no database yet: the panel is left out until a lease has an estimate
                 pace = False
+            try:
+                with connect() as conn:
+                    fuel_used = db.any_fuel(conn)
+            except Exception:           # noqa: BLE001 - no database yet: the Fuel dashboard waits until a car uses fuel
+                fuel_used = False
             wrote = dashboard.export(dashboard_dir, tz, os.environ.get("BASE_PATH", "").rstrip("/"), start=start,
-                                     teslamate=known["teslamate"], sold=sold, pace=pace, after_tax=after_tax)
+                                     teslamate=known["teslamate"], sold=sold, pace=pace, after_tax=after_tax, fuel=fuel_used)
             log.info("Grafana dashboard %s in %s", "written" if wrote else "already up to date", dashboard_dir)
         except OSError as exc:
             log.warning("Could not write the Grafana dashboard to %s: %s", dashboard_dir, exc)
@@ -758,7 +763,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         return {"service_item": form.getlist("service_item"), **{k: form.get(k, "") for k in (
             "car_id", "category_id", "date", "time", "amount", "odometer_km",
             "vendor", "notes", "invoice_url", "invoice_path", "packaged", "period_start", "period_end", "gst_amount",
-        "card_payment_ref", "bpay_biller_code", "bpay_ref")}}
+        "card_payment_ref", "bpay_biller_code", "bpay_ref", "litres", "partial", "missed")}}
 
     # ---- routes ---------------------------------------------------------------
 
@@ -955,6 +960,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             "gst_amount": "" if row["gst_amount"] is None else f"{row['gst_amount']:.2f}",
             "card_payment_ref": row["card_payment_ref"] or "", "bpay_biller_code": row["bpay_biller_code"] or "",
             "bpay_ref": row["bpay_ref"] or "",
+            "litres": "" if row["litres"] is None else f"{row['litres']:.2f}",
+            "partial": "" if row["full_tank"] else "1", "missed": "1" if row["missed_fill"] else "",
         }
         with connect() as conn:
             offer = bool(db.stored_open_reminders(conn, row["car_id"]))
@@ -1046,7 +1053,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         item_applies = {i["id"]: i["applies_to"] for i in service_rows}
         errors, overlay, category_changes, renames = {}, {}, {}, {}
         for cid in (i for i in posted_ids("category_id") if i in cats):
-            typed = {"gst_free": form.get(f"gst_partial_{cid}") == "1", "has_period": form.get(f"has_period_{cid}") == "1"}
+            typed = {"gst_free": form.get(f"gst_partial_{cid}") == "1", "has_period": form.get(f"has_period_{cid}") == "1",
+                     "has_litres": form.get(f"has_litres_{cid}") == "1"}
             if f"upload_folder_{cid}" in form:
                 typed["upload_folder"] = form[f"upload_folder_{cid}"]
             if f"budget_pool_{cid}" in form:
@@ -2131,9 +2139,11 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         "expense": (("car_id", "Car"), ("category_id", "Category"), ("occurred_at", "Date and time"),
                     ("amount", "Amount"), ("odometer_km", "Odometer"), ("vendor", "Vendor"), ("notes", "Notes"),
                     ("invoice_url", "Invoice link"), ("invoice_path", "Invoice file"), ("packaged", "Paid from"),
-                    ("period_start", "Period start"), ("period_end", "Period end"), ("gst_amount", "GST")),
+                    ("period_start", "Period start"), ("period_end", "Period end"), ("gst_amount", "GST"),
+                    ("litres", "Litres"), ("full_tank", "Filled the tank"), ("missed_fill", "Missed a fuel-up")),
         "category": (("name", "Name"), ("kind", "Kind"), ("sort_order", "Sort order"),
-                     ("upload_folder", "Invoice subfolder"), ("gst_free", "GST only partly applies"), ("has_period", "Has a period")),
+                     ("upload_folder", "Invoice subfolder"), ("gst_free", "GST only partly applies"), ("has_period", "Has a period"),
+                     ("has_litres", "Records litres")),
         "expense_claim": (("provider", "Provider"), ("reference", "Reference"), ("status", "Status"),
                           ("amount", "Amount"), ("gst", "GST"), ("approved_amount", "Approved amount"),
                           ("paid_date", "Paid on")),
@@ -2143,7 +2153,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         def show(field, value):
             if field == "packaged":
                 return {None: "Automatic", True: "The package", False: "Personally"}.get(value, str(value))
-            if field == "gst_free":
+            if field in ("gst_free", "full_tank", "missed_fill", "has_litres"):
                 return "Yes" if value else "No"
             if value is None or value == "":
                 return "—"
@@ -2162,17 +2172,20 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                     return str(value)
             return str(value)
 
+        quiet = {"full_tank": True, "missed_fill": False, "has_litres": False}      # not worth a line when added
         out = []
         for e in entries:
             before, after = e["before_row"] or {}, e["after_row"] or {}
             row = after or before
             fields = history_fields[e["table_name"]]
             if e["operation"] == "update":
-                changed = [(label, show(f, before.get(f)), show(f, after.get(f)))
-                           for f, label in fields if before.get(f) != after.get(f)]
+                # A row logged before a column existed has no value for it: that is the column's default.
+                changed = [(label, show(f, before.get(f, quiet.get(f))), show(f, after.get(f, quiet.get(f))))
+                           for f, label in fields if before.get(f, quiet.get(f)) != after.get(f, quiet.get(f))]
             else:
                 changed = [(label, None, show(f, row.get(f))) for f, label in fields
-                           if row.get(f) not in (None, "") and not (f == "gst_free" and row.get(f) is False)]
+                           if row.get(f) not in (None, "") and not (f == "gst_free" and row.get(f) is False)
+                           and not (f in quiet and row.get(f) == quiet[f])]
             if e["table_name"] == "expense":
                 title = "Expense: " + " · ".join(
                     x for x in (category_names.get(row.get("category_id")), car_names.get(row.get("car_id")),
@@ -3339,6 +3352,29 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             return jsonify(error=str(exc)), 400
         with connect() as conn:
             return jsonify(matches=dup_view(db.find_duplicates(conn, car_id, when, amount)))
+
+    @app.get("/api/fuel")
+    def api_fuel():
+        """What a fill-up would show once saved, for the form to display while it is being filled in: the distance
+        since the last fuel-up, then L/100 km of the tank. The same view the list reads, run on the fill-up and
+        undone (see db.fuel_preview), so the two can't disagree. Nothing is saved."""
+        with connect() as conn:
+            car_ids = {c["id"] for c in db.cars(conn)}
+            cat_ids = {c["id"] for c in db.categories(conn)}
+        values, errors = validation.parse_expense_form({"amount": "0", **request.args.to_dict()}, tz, car_ids, cat_ids)
+        if errors:
+            return jsonify(error=" ".join(errors.values())), 400
+        expense_id = request.args.get("expense_id", type=int)
+        with connect() as conn:
+            row = db.fuel_preview(conn, values, expense_id)
+        if row is None:
+            return jsonify(error="No such expense."), 404
+        row = {**row, "litres": values.get("litres"), "odometer_km": values.get("odometer_km")}
+        figure = row["l_per_100km"] if values.get("litres") is not None else None
+        return jsonify(
+            distance_km=None if row["distance_km"] is None else float(row["distance_km"]),
+            l_per_100km=None if figure is None else float(figure),
+            lines=fuel.describe(row))
 
     @app.get("/api/odometer")
     def api_odometer():

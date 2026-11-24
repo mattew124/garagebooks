@@ -115,7 +115,7 @@ def test_category_colours_are_fixed_and_clearly_different():
             colour = next(p["value"] for p in o["properties"] if p["id"] == "color")
             assert colour["mode"] == "fixed"
             found[o["matcher"]["options"]] = colour["fixedColor"]
-        assert set(found) == {"Charging", *running}
+        assert set(found) == {"Charging", "Fuel", *running}
         palettes.append(found)
     assert palettes[0] == palettes[1]
     colours = list(palettes[0].values())

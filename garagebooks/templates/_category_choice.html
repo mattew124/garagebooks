@@ -2,7 +2,7 @@
    the car (car_kind; none: no car chosen yet) is offered; what an expense already has is shown even when it doesn't
    apply, so an expense saved before keeps it. app.js offers them again when the form's car changes. #}
 {% macro category_options(categories, selected, car_kind) %}
-{%- for c in categories %}{% set offered = applies(c.applies_to, car_kind or none) or c.id|string == selected|string %}<option value="{{ c.id }}" data-period="{{ 1 if c.has_period else 0 }}" data-service="{{ 1 if c.name == 'Service' else 0 }}" data-gstfree="{{ 1 if c.gst_free else 0 }}" data-purchase="{{ 1 if c.kind == 'purchase' else 0 }}" data-applies="{{ c.applies_to }}" {{ 'selected' if c.id|string == selected|string }}{{ '' if offered else ' hidden disabled' }}>{{ c.name }}</option>{% endfor %}
+{%- for c in categories %}{% set offered = applies(c.applies_to, car_kind or none) or c.id|string == selected|string %}<option value="{{ c.id }}" data-period="{{ 1 if c.has_period else 0 }}" data-service="{{ 1 if c.name == 'Service' else 0 }}" data-gstfree="{{ 1 if c.gst_free else 0 }}" data-purchase="{{ 1 if c.kind == 'purchase' else 0 }}" data-applies="{{ c.applies_to }}" data-litres="{{ 1 if c.has_litres else 0 }}" {{ 'selected' if c.id|string == selected|string }}{{ '' if offered else ' hidden disabled' }}>{{ c.name }}</option>{% endfor %}
 {%- endmacro %}
 {% macro service_item_box(i, name, checked, car_kind, tag='span') -%}
 <label class="inline" data-applies="{{ i.applies_to }}"{{ '' if applies(i.applies_to, car_kind or none) or checked else ' hidden' }}><input type="checkbox" name="{{ name }}" value="{{ i.id }}" {{ 'checked' if checked }}> <{{ tag }}>{{ i.name }}</{{ tag }}></label>

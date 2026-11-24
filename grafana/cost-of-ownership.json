@@ -3,7 +3,8 @@
   "uid": "garagebooks-tco",
   "tags": [
     "tesla",
-    "TeslamateCustomDashboards"
+    "TeslamateCustomDashboards",
+    "garagebooks"
   ],
   "editable": true,
   "graphTooltip": 1,
@@ -48,6 +49,17 @@
       "tags": [
         "tesla"
       ]
+    },
+    {
+      "title": "GarageBooks dashboards",
+      "type": "dashboards",
+      "asDropdown": true,
+      "icon": "dashboard",
+      "tags": [
+        "garagebooks"
+      ],
+      "includeVars": true,
+      "keepTime": true
     }
   ],
   "templating": {
@@ -70,6 +82,24 @@
         "current": {}
       },
       {
+        "name": "energy_label",
+        "label": "Energy",
+        "type": "query",
+        "hide": 2,
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "TeslaMate"
+        },
+        "refresh": 1,
+        "includeAll": false,
+        "multi": false,
+        "options": [],
+        "regex": "",
+        "query": "SELECT CASE WHEN k.kind = 'ICE' OR k.kind = 'HEV' THEN 'Fuel' WHEN k.kind = 'PHEV' THEN 'Charging and fuel' ELSE 'Charging' END AS label FROM garagebooks.car k WHERE k.id = $car_id",
+        "definition": "SELECT CASE WHEN k.kind = 'ICE' OR k.kind = 'HEV' THEN 'Fuel' WHEN k.kind = 'PHEV' THEN 'Charging and fuel' ELSE 'Charging' END AS label FROM garagebooks.car k WHERE k.id = $car_id",
+        "current": {}
+      },
+      {
         "name": "category",
         "label": "Category",
         "type": "query",
@@ -82,8 +112,8 @@
         "multi": true,
         "options": [],
         "regex": "",
-        "query": "SELECT name FROM (SELECT name, sort_order AS s FROM garagebooks.category UNION ALL SELECT 'Charging', 1000) x GROUP BY name ORDER BY min(s), name",
-        "definition": "SELECT name FROM (SELECT name, sort_order AS s FROM garagebooks.category UNION ALL SELECT 'Charging', 1000) x GROUP BY name ORDER BY min(s), name",
+        "query": "SELECT name FROM (SELECT c.name, c.sort_order AS s FROM garagebooks.category c, garagebooks.car k WHERE k.id = $car_id AND (c.applies_to = 'all' OR (c.applies_to = 'electric' AND k.kind IN ('BEV', 'PHEV')) OR (c.applies_to = 'combustion' AND k.kind <> 'BEV') OR EXISTS (SELECT 1 FROM garagebooks.expense e WHERE e.car_id = k.id AND e.category_id = c.id)) UNION ALL SELECT 'Charging', 1000 FROM garagebooks.car k WHERE k.id = $car_id AND k.teslamate_car_id IS NOT NULL) x GROUP BY name ORDER BY min(s), name",
+        "definition": "SELECT name FROM (SELECT c.name, c.sort_order AS s FROM garagebooks.category c, garagebooks.car k WHERE k.id = $car_id AND (c.applies_to = 'all' OR (c.applies_to = 'electric' AND k.kind IN ('BEV', 'PHEV')) OR (c.applies_to = 'combustion' AND k.kind <> 'BEV') OR EXISTS (SELECT 1 FROM garagebooks.expense e WHERE e.car_id = k.id AND e.category_id = c.id)) UNION ALL SELECT 'Charging', 1000 FROM garagebooks.car k WHERE k.id = $car_id AND k.teslamate_car_id IS NOT NULL) x GROUP BY name ORDER BY min(s), name",
         "current": {
           "selected": true,
           "text": [
@@ -93,7 +123,7 @@
             "$__all"
           ]
         },
-        "description": "Limits the headline figures (cost totals, per km, per day, per month) to these categories. Charging counts as its own category. Distance and time owned are not affected."
+        "description": "Limits the headline figures (cost totals, per km, per day, per month) to these categories. Only the car's own are listed: charging for a car that charges, fuel for one that burns it. Charging counts as its own category. Distance and time owned are not affected."
       },
       {
         "name": "period",
@@ -353,8 +383,8 @@
     {
       "id": 4,
       "type": "stat",
-      "title": "Charging",
-      "description": "Charging and fuel: TeslaMate's charging costs for a car it tracks, plus what you entered in a charging or fuel category. All-time (ignores the dashboard time range). Follows the Category filter.",
+      "title": "${energy_label}",
+      "description": "What the car's energy cost: TeslaMate's charging costs for a car it tracks, plus what you entered in a charging or fuel category. Named for what this car uses. All-time (ignores the dashboard time range). Follows the Category filter.",
       "datasource": {
         "type": "grafana-postgresql-datasource",
         "uid": "TeslaMate"
@@ -1114,6 +1144,21 @@
                 }
               }
             ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Fuel"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#CC79A7"
+                }
+              }
+            ]
           }
         ]
       },
@@ -1260,6 +1305,21 @@
                 "value": {
                   "mode": "fixed",
                   "fixedColor": "#F0E442"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Fuel"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#CC79A7"
                 }
               }
             ]

@@ -943,6 +943,54 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   };
   if (carSelect && carSelect.tagName === "SELECT") carSelect.addEventListener("change", showForCar);
+  // Fuel: the litres follow the category, and the distance since the last fuel-up and L/100 km of the tank are
+  // asked of the app as the fill-up is filled in (the same figures the list shows once it is saved).
+  const litresFields = document.getElementById("litres-fields");
+  if (litresFields) {
+    const summary = document.getElementById("fuel-summary");
+    const editing = /\/(\d+)\/edit\/?$/.exec(window.location.pathname);
+    let pending = 0;
+    const show = (lines) => {
+      summary.replaceChildren(...lines.map((line) => Object.assign(document.createElement("span"), { textContent: line })));
+    };
+    const refresh = async () => {
+      if (litresFields.hidden) return;
+      const { car_id, category_id, date, time, odometer_km, litres, partial, missed } = form.elements;
+      if (!car_id.value || !category_id.value || !date.value || !time.value) {
+        show(["Pick the car, category, date and time to see the distance since the last fuel-up."]);
+        return;
+      }
+      const q = new URLSearchParams({
+        car_id: car_id.value, category_id: category_id.value, date: date.value, time: time.value,
+        odometer_km: odometer_km.value, litres: litres.value,
+      });
+      if (partial.checked) q.set("partial", "1");
+      if (missed.checked) q.set("missed", "1");
+      if (editing) q.set("expense_id", editing[1]);
+      const mine = ++pending;
+      try {
+        const res = await fetch(litresFields.dataset.fuelUrl + "?" + q);
+        const data = await res.json();
+        if (mine !== pending) return;                  // a newer answer is on its way
+        show(res.ok ? data.lines : [data.error || "Couldn't work out the figures."]);
+      } catch (e) {
+        if (mine === pending) show([]);
+      }
+    };
+    let timer = null;
+    const soon = () => { clearTimeout(timer); timer = setTimeout(refresh, 250); };
+    ["car_id", "category_id", "date", "time", "odometer_km", "litres", "partial", "missed"].forEach((name) => {
+      const el = form.elements[name];
+      if (el) ["input", "change"].forEach((ev) => el.addEventListener(ev, soon));
+    });
+    form.elements.category_id.addEventListener("change", () => {
+      const chosen = form.elements.category_id.selectedOptions[0];
+      litresFields.hidden = !((chosen && chosen.dataset.litres === "1") || form.elements.litres.value);
+      soon();
+    });
+    document.getElementById("fill-odometer").addEventListener("click", () => setTimeout(soon, 1500));
+    refresh();
+  }
   // Fill the form from what /api/prefill read in a PDF; `body` is the form data to send it.
   async function prefillFrom(body) {
     prefillHint.textContent = "Reading the invoice…";

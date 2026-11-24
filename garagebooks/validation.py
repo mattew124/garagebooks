@@ -14,6 +14,7 @@ from . import leaseform
 
 MAX_AMOUNT = Decimal("9999999999.99")  # numeric(12,2)
 MAX_ODOMETER = 9_999_999.9  # numeric(9,1)
+MAX_LITRES = Decimal("99999.99")  # numeric(7,2)
 MAX_URL_LEN = 2048
 MAX_TEXT_LEN = 500
 MAX_NOTES_LEN = 2000
@@ -60,6 +61,27 @@ def parse_odometer(raw):
     if value < 0 or value > MAX_ODOMETER:
         raise ValueError("Odometer is out of range.")
     return round(value, 1)
+
+
+def parse_litres(raw):
+    """Optional. '42.5 L' -> Decimal('42.50'); blank -> None. Litres put in the tank: more than none."""
+    cleaned = (raw or "").replace(",", "").replace("litres", "").replace("L", "").replace("l", "").strip()
+    if not cleaned:
+        return None
+    try:
+        value = Decimal(cleaned)
+    except InvalidOperation:
+        raise ValueError("Litres must be a number, e.g. 42.5.") from None
+    if not value.is_finite():
+        raise ValueError("Litres must be a number, e.g. 42.5.")
+    if value <= 0:
+        raise ValueError("Litres must be more than 0.")
+    if value > MAX_LITRES:
+        raise ValueError("Litres is too large.")
+    value = value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    if value <= 0:
+        raise ValueError("Litres must be more than 0.")
+    return value
 
 
 def parse_invoice_url(raw):
@@ -552,6 +574,11 @@ def parse_expense_form(form, tz, valid_car_ids, valid_category_ids):
     pick("category_id", form.get("category_id"), valid_category_ids, "Choose a category.")
     attempt("amount", parse_amount, form.get("amount"))
     attempt("odometer_km", parse_odometer, form.get("odometer_km"))
+    attempt("litres", parse_litres, form.get("litres"))
+    # Whether a fill-up was partial, or follows one that wasn't recorded, only means something with litres.
+    has_litres = values.get("litres") is not None
+    values["full_tank"] = not (has_litres and form.get("partial") == "1")
+    values["missed_fill"] = bool(has_litres and form.get("missed") == "1")
     attempt("invoice_url", parse_invoice_url, form.get("invoice_url"))
     attempt("invoice_path", parse_invoice_path, form.get("invoice_path"))
     attempt("vendor", _text, form.get("vendor"), MAX_TEXT_LEN, "Vendor")

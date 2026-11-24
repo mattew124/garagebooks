@@ -7,6 +7,16 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+- **Fuel records litres, shows the distance since the last fuel-up, and has a dashboard of its own.** A category that
+  **Records litres** (Fuel to begin with, a tick on the Categories page) asks for the litres on the expense form, with
+  **Partial fill** and **I missed recording a fuel-up** ticks. The form shows the distance since the last fuel-up as
+  soon as the odometer is in, whether that was a partial fill or one was missed, then L/100 km of the tank once the
+  litres are in; the expense list shows the same. The new **Fuel** Grafana dashboard (stats, L/100 km and price per
+  litre over time, per-period cost and litres, and a table of fill-ups) is written once a car runs on fuel or has a
+  fill-up. On the Cost of Ownership dashboard, the energy tile is named for what the car uses, and the **Category**
+  box lists only the car's own categories, so a petrol car no longer offers Charging. Upgrade: pull the new image;
+  fuel entered before keeps counting, and its litres can be added by editing it (installers on the restricted
+  database role re-run `scripts/provision-db.sh`).
 - **The header stays on one line, on a phone too.** A phone shows the title, All, Reminders, + Add and a menu
   button, which opens the other links. On a wide screen **Settings** is a dropdown holding **Invoice storage**,
   which no longer has its own link. Without JavaScript the links wrap as before and the dropdown opens on
