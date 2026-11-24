@@ -75,7 +75,7 @@ def test_the_categories_page_sets_it(client, admin):  # noqa: F811
 def test_the_expense_form_refuses_what_doesnt_apply_to_the_car(client, admin):  # noqa: F811
     fuel, charging = category_id(admin, "Fuel"), category_id(admin, "Charging")
     resp = client.post("/new", data=form(admin, category_id=str(fuel)), headers=ORIGIN)       # car 1 is a BEV
-    assert resp.status_code == 400 and "doesn't apply" in resp.data.decode() and rows(admin) == []
+    assert resp.status_code == 400 and "does not apply" in resp.data.decode() and rows(admin) == []
     set_kind(admin, "ICE")
     assert client.post("/new", data=form(admin, category_id=str(charging)), headers=ORIGIN).status_code == 400
     assert client.post("/new", data=form(admin, category_id=str(fuel)), headers=ORIGIN).status_code == 303
@@ -152,4 +152,4 @@ def test_the_import_row_only_offers_what_applies_and_refuses_the_rest(stocked, a
     resp = stocked.post("/local/import/1", headers=ORIGIN, data={
         "count": "1", "include_0": "on", "date_0": "2026-10-24", "category_id_0": str(fuel), "amount_0": "80.00",
         "vendor_0": "Example Garage", "url_0": path, "id_0": path, "name_0": "fuel.pdf"})
-    assert resp.status_code == 400 and "doesn't apply" in resp.data.decode() and rows(admin) == []
+    assert resp.status_code == 400 and "does not apply" in resp.data.decode() and rows(admin) == []

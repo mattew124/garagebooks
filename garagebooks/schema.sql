@@ -1515,6 +1515,6 @@ BEGIN
         ALTER TABLE garagebooks.service_item ADD COLUMN applies_to text NOT NULL DEFAULT 'all'
             CHECK (applies_to IN ('all', 'electric', 'combustion'));
         UPDATE garagebooks.service_item SET applies_to = 'combustion'
-            WHERE lower(name) IN ('fuel filter', 'oil filter', 'engine oil', 'timing belt', 'air filter', 'spark plugs');
+            WHERE lower(name) IN ('fuel filter', 'oil filter', 'engine oil', 'timing belt', 'air filter', 'engine air filter', 'spark plugs');
     END IF;
 END $$;

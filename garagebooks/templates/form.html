@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_provider.html" import mark with context %}
+{% import "_category_choice.html" as choice with context %}
 {% block title %}{{ 'Edit expense' if expense_id else 'Add expense' }}{% endblock %}
 {% macro err(field) %}{% if errors.get(field) %}<span class="error">{{ errors[field] }}</span>{% endif %}{% endmacro %}
 {% block main_attrs %} class="narrow"{% endblock %}

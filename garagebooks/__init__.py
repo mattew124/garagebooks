@@ -390,6 +390,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
     def when(value):
         return value.astimezone(ZoneInfo(tz)).strftime("%d %b %Y %H:%M")
 
+    app.jinja_env.globals["applies"] = db.applies
     app.jinja_env.filters["every"] = jobtext.every_in_words
     app.jinja_env.filters["job_state"] = jobtext.state
 
@@ -549,13 +550,36 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                  "amount_text": money(m["amount"]), "edit_url": url_for("edit", expense_id=m["id"])}
                 for m in matches]
 
-    def parse(form, check_duplicates=False):
+    def powertrain_errors(car_kind, category_id, raw_items, categories, items, stored=None):
+        """What a category or service item that doesn't suit the car's powertrain (db.applies) is refused with, as
+        {field: text}. `stored` is (car_id, category_id, item ids, car id now) of an expense being edited: what it
+        already has is kept even when it no longer applies, so only a change is checked."""
+        errors, category = {}, categories.get(category_id)
+        same_car = stored is not None and stored[0] == stored[3]
+        if category and not db.applies(category["applies_to"], car_kind) and not (same_car and stored[1] == category_id):
+            errors["category_id"] = f"{category['name']} does not apply to this kind of car."
+        if category and category["name"] == db.SERVICE_CATEGORY:
+            kept = set(stored[2]) if same_car else set()
+            bad = [i["name"] for i in items if str(i["id"]) in {str(r) for r in raw_items}
+                   and not db.applies(i["applies_to"], car_kind) and i["id"] not in kept]
+            if bad:
+                errors["service_item"] = ", ".join(bad) + (" does not" if len(bad) == 1 else " do not") + " apply to this kind of car."
+        return errors
+
+    def parse(form, check_duplicates=False, stored=None):
         """-> (values, errors). With check_duplicates, a likely duplicate is reported as
-        errors["_duplicates"] (before anything is uploaded) unless the owner has said to save anyway."""
+        errors["_duplicates"] (before anything is uploaded) unless the owner has said to save anyway.
+        `stored` is (car id, category id, service item ids) of the expense being edited."""
         with connect() as conn:
-            car_ids = {c["id"] for c in db.cars(conn)}
-            cat_ids = {c["id"] for c in db.categories(conn)}
+            cars = {c["id"]: c for c in db.cars(conn)}
+            cats = {c["id"]: c for c in db.categories(conn)}
+            items = db.service_items(conn)
+        car_ids, cat_ids = set(cars), set(cats)
         values, errors = validation.parse_expense_form(form, tz, car_ids, cat_ids)
+        if not errors:
+            car_now = values["car_id"]
+            errors.update(powertrain_errors(cars[car_now].get("kind"), values["category_id"], form.getlist("service_item"),
+                                            cats, items, stored and (*stored, car_now)))
         if check_duplicates and not errors and not form.get("confirm_duplicate"):
             with connect() as conn:
                 matches = db.find_duplicates(conn, values["car_id"], values["occurred_at"], values["amount"])
@@ -934,7 +958,10 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
 
     @app.post("/<int:expense_id>/edit")
     def update(expense_id):
-        values, errors = parse(request.form)
+        with connect() as conn:
+            current = db.get_expense(conn, expense_id)
+            stored = current and (current["car_id"], current["category_id"], db.expense_service_ids(conn, expense_id))
+        values, errors = parse(request.form, stored=stored)
         if errors:
             ctx = form_context(form_values(request.form), errors, expense_id)
             return render_template("form.html", **ctx), 400
@@ -2612,6 +2639,9 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         content = pdf if pdf is not None else text.encode()
         log.debug("import file=%s folder=%s bytes=%d sha256=%s found=%s missing=%s ms=%d", docinfo.quote(f["name"]),
                   docinfo.quote(f["folder"]), len(content), docinfo.sha12(content), have, missing, timer.ms)
+        guessed = next((c for c in ctx["categories"] if c["name"] == guess["category"]), None)
+        if guessed and not db.applies(guessed["applies_to"], car.get("kind") if car["id"] else None):
+            guess = {**guess, "category": None}       # a guess that doesn't suit this car (fuel for an EV) isn't offered
         row.update(
             date=guess["date"].isoformat() if guess["date"] else "",
             category_id=str(by_name.get(guess["category"], "")),
@@ -2890,6 +2920,9 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 settings_row = db.get_settings(conn)
             cat_names = {c["id"]: c["name"] for c in cat_rows}
             cat_kinds = {c["id"]: c["kind"] for c in cat_rows}
+            cats_by_id = {c["id"]: c for c in cat_rows}
+            with connect() as conn:
+                db_items = db.service_items(conn)
             count = min(request.form.get("count", type=int) or 0, 200)
             rows, chosen, errors, skip_urls = [], [], {}, []
             for n in range(count):
@@ -2923,6 +2956,9 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                     ref_field: row["url"]}, tz, car_ids, cat_ids)
                 if not row["url"]:
                     row_errors[ref_field] = "Missing link to the PDF."
+                if not row_errors:
+                    row_errors.update(powertrain_errors(car.get("kind") if car_id else None, values["category_id"],
+                                                        row["services"], cats_by_id, db_items))
                 if row["car_fill"]:             # the car's details, as confirmed on the row (checked with the row)
                     details, detail_errors = validation.parse_car_extras(lambda k, row=row: row[f"car_{k}"])
                     row["car_details"] = {k: v for k, v in details.items() if v is not None and f"car_{k}_{n}" in request.form}
