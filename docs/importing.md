@@ -128,8 +128,15 @@ page changes.
 Possible duplicates are flagged. Saving a new expense (the Add form) that has the same car and exactly
 the same amount as one within 14 days either side asks first: it lists the match with a link to open it, and
 **Save anyway** saves the new one regardless. The question comes before anything is uploaded or saved, and the
-server asks again if the page's own check was skipped. The import preview does the same per file, leaving a
-likely duplicate unticked with a link to the expense it resembles.
+server asks again if the page's own check was skipped.
+
+The import preview does the same per file, with one difference. When the matching expense **has no invoice yet**
+(one you entered by hand, or [imported from aCar](#importing-from-acar), say), the row offers **Attach this invoice to**
+that expense and does so by default, instead of making a second expense. Attaching puts the file on the expense,
+fills its odometer and vendor only if they are blank, and changes nothing else (category, amount and date stay,
+and an invoice already on an expense is never replaced). The **Rename** option still renames the file from the
+expense's own values. Choose **Add as a new expense** to keep both. When the match already has an invoice, the
+row is only flagged and left unticked.
 
 <!-- screenshot: duplicate-warning - The question asked before saving a possible duplicate -->
 
@@ -156,3 +163,45 @@ PDF text. **Import page → See and remove what it has learned** lists everythin
 delete it. This stores only short labels and vendor names, in the `garagebooks` schema.
 
 <!-- screenshot: learned-page - The page listing what the importer has learned -->
+
+# Importing from aCar
+
+Costs you kept in the Android app **aCar** can be brought in from its CSV export: on the **Cars** page,
+press **Import costs from aCar**, choose the car they belong to and the **Records** CSV that aCar wrote
+(a file named like `aCar-records-….csv`; the statistics and trip exports aren't it).
+
+<!-- screenshot: acar-import - The aCar import page: the file, the car and the preview table -->
+
+The next page lists every cost to check, correct and untick, the same way the invoice import does, and
+**nothing is saved until you press Import**. What comes across:
+
+- **Services, expenses and purchases** (aCar's *Event Records*), with the vendor from *Place Name*. A refund
+  stays negative. A *Purchased* record becomes the car's **Initial purchase**.
+- **Fill-ups**, as **Fuel**, with the litres and price per litre in the notes. Untick **Include fill-ups** on the first
+  page to leave them out.
+
+- **Records with no cost** (a note, a free fill-up) come across at $0.00, so the odometer reading and the note aren't lost.
+- **The sale** (aCar's *Sold*) is recorded on the car: date, price and final odometer. It is unticked if the car
+  already has a sale, because importing it replaces that one.
+
+Only **trips** are left out (the preview counts them). Odometer readings in miles are converted to kilometres,
+and an odometer of 0 (aCar's "none entered") is left blank.
+
+**Merging into expenses you already have.** When a cost has the same car and amount as an expense within 14 days, the row
+offers **Add the odometer reading to** that expense, and does so by default where the expense has no odometer
+(typically one imported from an invoice PDF). A merge fills in the odometer, and the vendor if it's blank, and
+changes nothing else: the category, amount, date, invoice link and any reading already there stay as they are.
+Choose **Add as a new expense** to keep both instead.
+
+A category is chosen only where it matches one you have: aCar's Insurance, Registration, Tyres, Tyre rotation,
+Wheel alignment, Cabin air filter and Air filter map to the categories of the same name, and any other sub-type
+(Toll, say) is matched to a category with that name if you have one. Everything else is left for you to choose and
+starts unticked. Anything aCar had in a record's other sub-types, its payment method and its own notes go into
+the expense's notes.
+
+If the file holds more than one vehicle, the app asks which one first. Dates are read by the pattern aCar writes in
+the file (`d/M/yyyy` or `M/d/yyyy`, say), and times are taken as your local time ([`APP_TZ`](setup.md)).
+
+Where an expense matches but has nothing to add, the row is flagged as a [possible duplicate](#possible-duplicates)
+and left unticked, so importing the same file twice doesn't double up. One import takes up to 1,000 costs: leave the
+fill-ups out or import one vehicle at a time for more.

@@ -7,6 +7,17 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+- **Importing an invoice attaches it to an expense you already have.** When an invoice in the import preview matches an
+  expense with no invoice yet (same car and amount within 14 days, typically one made from an aCar import), the row now
+  offers **Attach this invoice to** it, selected by default, rather than creating a second expense. The invoice goes on
+  that expense, a blank odometer and vendor are filled, and nothing else on it changes. A match that already has an
+  invoice is flagged and left unticked, as before.
+- **Import from aCar.** **Cars → Import costs from aCar** reads the CSV that the aCar app exports (its Records file):
+  services, expenses, purchases and, if you like, fill-ups. A preview lists every cost to check, categorise and untick,
+  flags likely duplicates, and saves nothing until you confirm. Notes and records with no cost come across at $0.00 and
+  the sale is recorded on the car; only trips are left out. A cost that matches an existing expense (an invoice you imported
+  from a PDF, say) can be merged into it: its odometer reading is added and nothing else on it changes. Nothing for
+  installers to do: pull the new image.
 - **Fuel is only for cars with an engine, and Charging only for cars that plug in.** Each category and service item
   on the Categories page has a **For** choice: all cars, cars that plug in (battery electric and plug-in hybrid) or
   cars with an engine (petrol or diesel, plug-in hybrid and hybrid). Fuel, and the service items oil filter, fuel

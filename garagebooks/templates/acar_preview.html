@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Import from aCar{% endblock %}
+{% block content %}
+<h1>Import from aCar{% if vehicle %}: {{ vehicle }}{% endif %}</h1>
+{% if error %}<p class="notice bad" role="alert">{{ error }}</p>{% endif %}
+{% if rows %}
+<p>Category, vendor, amount and odometer come from aCar; a category is chosen only where it matches one you have
+  (Insurance, Registration, Tyres and so on, or one named like aCar's own), so <strong>choose the rest</strong>.
+  Rows that look like an expense you already have are flagged and left unticked. Nothing is saved until you press Import.
+  {% if left_out %}Left out: {{ left_out }}.{% endif %}</p>
+<form method="post" action="{{ url_for('acar_import_confirm') }}" class="import" id="import-form">
+  <input type="hidden" name="count" value="{{ rows|length }}">
+  <input type="hidden" name="car_id" value="{{ car_id }}">
+  <div class="table-wrap">
+  <table class="import-table">
+    <thead><tr><th>Import</th><th>What</th><th>Date</th><th>Category</th><th>Vendor</th>
+      <th class="num">Amount</th><th class="num">Odometer (km)</th></tr></thead>
+    <tbody>
+    {% for r in rows %}{% set n = r.n %}{% include "_acar_row.html" %}{% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <div class="row">
+    <button type="submit" class="button">Import ticked</button>
+    <a href="{{ url_for('acar_import_page', car_id=car_id) }}">Cancel</a>
+  </div>
+</form>
+{% else %}
+<p class="empty">There are no costs in that file to import. <a href="{{ url_for('acar_import_page', car_id=car_id) }}">Back</a></p>
+{% endif %}
+{% endblock %}

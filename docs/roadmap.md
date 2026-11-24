@@ -57,7 +57,7 @@ Everything that was here has shipped (see Already in place). The next items are 
   *Depends on:* 2
 
 - **12. Import from other apps** (size M)
-  Import costs from aCar and fuel-ups from Fuelly CSV exports, with the same preview as the invoice import, duplicate detection (already used by the Add form) and a choice of car before anything is saved.
+  Import costs from aCar (done: Cars → Import costs from aCar) and fuel-ups from Fuelly CSV exports, with the same preview as the invoice import, duplicate detection (already used by the Add form) and a choice of car before anything is saved. Fuelly is still to do.
   *Depends on:* —
 
 - **13. Watch the invoice folder** (size L)

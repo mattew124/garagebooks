@@ -27,7 +27,7 @@ from psycopg import errors as pg_errors
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from . import ato, claims as claim_lib, dashboard, db, docinfo, icons, invoices, jobs, jobtext, lease, leaseform, logs, notices, notify, onedrive, outlook, reminders, sources, storage, tax, updates, validation
+from . import acar, ato, claims as claim_lib, dashboard, db, docinfo, icons, invoices, jobs, jobtext, lease, leaseform, logs, notices, notify, onedrive, outlook, reminders, sources, storage, tax, updates, validation
 
 log = logging.getLogger("garagebooks.app")
 
@@ -881,7 +881,16 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
 
     def import_message():
         n, renamed, failed = (request.args.get(k, 0, type=int) for k in ("n", "renamed", "rename_failed"))
-        text = f"Imported {n} invoice{'' if n == 1 else 's'}." if n else MESSAGES["imported"]
+        if request.args.get("from") == "acar":
+            merged, sale = request.args.get("merged", 0, type=int), request.args.get("sale", 0, type=int)
+            text = f"Imported {n} cost{'' if n == 1 else 's'} from aCar."
+            if merged:
+                text += f" Added the odometer reading to {merged} existing expense{'' if merged == 1 else 's'}."
+            return text + (" Recorded the sale." if sale else "")
+        attached = request.args.get("attached", 0, type=int)
+        text = f"Imported {n} invoice{'' if n == 1 else 's'}." if n else ("" if attached else MESSAGES["imported"])
+        if attached:
+            text = (text + " " if text else "") + f"Attached {attached} to expenses you already had."
         if renamed:
             text += f" Renamed {renamed}{'' if request.args.get('store') == 'local' else ' in OneDrive'}."
         if failed:
@@ -2542,7 +2551,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 "amount": "", "odometer_km": "", "url": "", "name": "", "folder": "",
                 "note": "", "id": "", "attach": "", "car_fill": False, "car_fields": [], "services": [], "notes": "", "gst_amount": "", "card_payment_ref": "",
                 "bpay_biller_code": "", "bpay_ref": "", "car_vin": "", "car_build_year": "", "car_model_year": "",
-                "car_body_type": "", "car_make": "", "car_model": "", "period_start": "", "period_end": "", "guess": {}, "new_name": "", "rename": False, "odo_note": "", "duplicates": [], **fields}
+                "car_body_type": "", "car_make": "", "car_model": "", "period_start": "", "period_end": "", "guess": {}, "new_name": "", "rename": False, "odo_note": "", "duplicates": [],
+                "candidates": [], "action": "new", **fields}
 
     def import_page(store, car, **ctx):
         """The import page's template with what every version of it needs. A row's `url` is the file's
@@ -2683,6 +2693,15 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             if same:
                 row["duplicates"] = dup_view(same)
                 row["include"] = False          # the owner decides, not the default
+                # An expense with no invoice yet (one imported from aCar, say) takes this file instead of a second
+                # expense being made: the closest such one is chosen, unless the file is missing something.
+                bare = [] if store.kind == "mail" else [m for m in same if not (m["invoice_url"] or m["invoice_path"])]
+                row["candidates"] = [{"id": m["id"], "text": f"{d['date']} · {d['category']}"
+                                      + (f" · {d['vendor']}" if d["vendor"] else "") + f" · {d['amount_text']}"
+                                      + (f" · {m['odometer_km']:.0f} km" if m["odometer_km"] is not None else " · no odometer")}
+                                     for m, d in zip(same, row["duplicates"]) if m in bare]
+                if bare and not guess["missing"]:
+                    row["action"], row["include"] = str(bare[0]["id"]), True
         if guess["date"] and guess["category"] and store.kind != "mail":    # an email's PDF is copied, not renamed
             target = validation.invoice_filename(
                 datetime.combine(guess["date"], dtime(12)), guess["category"], guess["vendor"],
@@ -2924,12 +2943,14 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             with connect() as conn:
                 db_items = db.service_items(conn)
             count = min(request.form.get("count", type=int) or 0, 200)
-            rows, chosen, errors, skip_urls = [], [], {}, []
+            rows, chosen, attaches, errors, skip_urls = [], [], [], {}, []
+            with connect() as conn:
+                own = {r["id"] for r in conn.execute("SELECT id FROM garagebooks.expense WHERE car_id = %s", (car_id,))}
             for n in range(count):
                 def f(key, n=n):
                     return request.form.get(f"{key}_{n}", "")
 
-                row = import_row(n, include=bool(f("include")), skip=bool(f("skip")), rename=bool(f("rename")), date=f("date"), category_id=f("category_id"),
+                row = import_row(n, include=bool(f("include")), skip=bool(f("skip")), rename=bool(f("rename")), action=f("action") or "new", date=f("date"), category_id=f("category_id"),
                                  vendor=f("vendor"), amount=f("amount"), odometer_km=f("odometer_km"),
                                  notes=f("notes"), period_start=f("period_start"), period_end=f("period_end"),
                                  services=request.form.getlist(f"service_item_{n}"), gst_amount=f("gst_amount"),
@@ -2946,6 +2967,17 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                     skip_urls.append(row["url"])
                     continue
                 if not row["include"]:
+                    continue
+                if row["action"] != "new":      # this file goes on an expense that is already saved
+                    target = int(row["action"]) if row["action"].isdigit() else None
+                    try:
+                        if target not in own:
+                            raise ValueError("Choose which expense to attach the invoice to.")
+                        if not row["url"]:
+                            raise ValueError("Missing link to the PDF.")
+                        attaches.append((row, target, validation.parse_odometer(row["odometer_km"])))
+                    except ValueError as exc:
+                        errors[n] = str(exc)
                     continue
                 values, row_errors = validation.parse_expense_form({
                     "car_id": car_id, "category_id": row["category_id"], "date": row["date"], "time": "12:00",
@@ -2995,11 +3027,41 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             if skip_urls:
                 with connect() as conn:
                     db.skip_imports(conn, car_id, skip_urls)
-            if not chosen:
+            if not chosen and not attaches:
                 if skip_urls:
                     return redirect(url_for(f"{kind}_import", car_id=car_id), 303)
                 return render_import(store, car, rows, status=400, notice="Tick at least one invoice to import.")
-            imported, renamed, rename_failed, copied, copy_failed = [], 0, 0, 0, 0
+            imported, renamed, rename_failed, attached, copied, copy_failed = [], 0, 0, 0, 0, 0
+            with connect() as conn:
+                known = db.known_invoices(conn, [v[ref_field] for _, v in chosen] + [r["url"] for r, _, _ in attaches])
+
+            def rename_file(row, when, category, vendor, amount):
+                """Rename the file to the template, by the values the expense has. -> the new reference, or the old one."""
+                nonlocal renamed, rename_failed
+                target = validation.invoice_filename(
+                    when.astimezone(ZoneInfo(tz)), category, vendor, settings_row["invoice_date_format"],
+                    settings_row["invoice_name_format"], car=car["name"], amount=amount)
+                if not (row["rename"] and row["id"] and target != row["name"]):
+                    return row["url"]
+                try:
+                    new_ref = store.rename(row["id"], target)
+                    renamed += 1
+                    return new_ref
+                except storage.StorageError as exc:
+                    rename_failed += 1           # import it anyway, still pointing at the old name
+                    log.warning("import rename item=%s to=%s failed: %s", row["id"], docinfo.quote(target), exc)
+                    return row["url"]
+
+            for row, target_id, km in attaches:
+                if row["url"] in known:          # the file is attached somewhere already (a double submit)
+                    continue
+                with connect() as conn:
+                    existing = db.get_expense(conn, target_id)
+                if existing is None or existing["invoice_url"] or existing["invoice_path"]:
+                    continue                      # an invoice is never replaced
+                ref = rename_file(row, existing["occurred_at"], existing["category"], existing["vendor"], existing["amount"])
+                with connect() as conn:
+                    attached += db.attach_invoice(conn, car_id, target_id, ref_field, ref, km, row["vendor"].strip())
             for row, values in chosen:
                 if values[ref_field] in known:   # a double submit imports once
                     continue
@@ -3030,14 +3092,14 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                     for extra in attachments.get(row["n"], []):         # the other PDFs of this expense
                         db.add_document(conn, expense_id, extra["name"], ref_field, extra["url"])
                 imported.append((row, values))
-            log.debug("import confirm car=%d rows=%d imported=%d skipped_known=%d renamed=%d rename_failed=%d", car_id,
-                      len(chosen), len(imported), len(chosen) - len(imported), renamed, rename_failed)
+            log.debug("import confirm car=%d rows=%d imported=%d attached=%d skipped_known=%d renamed=%d rename_failed=%d", car_id,
+                      len(chosen) + len(attaches), len(imported), attached, len(chosen) - len(imported), renamed, rename_failed)
             refresh_dashboard()
             learn_from(store, imported)
             more = {"store": kind} if kind == "local" else {}
             if copied or copy_failed:
                 more.update(copied=copied, copy_failed=copy_failed)
-            return redirect(url_for("index", msg="imported", n=len(imported), renamed=renamed,
+            return redirect(url_for("index", msg="imported", n=len(imported), attached=attached, renamed=renamed,
                                     rename_failed=rename_failed, **more), 303)
 
         def api_browse(car_id):
@@ -3086,6 +3148,171 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
 
     for kind in SOURCES:
         storage_routes(kind)
+
+    # ---- import from aCar (a CSV export): upload, preview, confirm. Nothing is saved before confirm. ----
+
+    ACAR_MAX_ROWS = 1000
+    ACAR_MAX_BYTES = 5 * 1024 * 1024
+
+    def acar_left_out(left_out):
+        """'1 sale, 1 note and 3 trips were left out', or ''."""
+        names = {"Sold": ("sale", "sales"), "Note": ("note", "notes"), "trips": ("trip", "trips"),
+                 "no amount": ("record with no cost", "records with no cost"),
+                 "unreadable": ("record with a date it couldn't read", "records with a date it couldn't read")}
+        parts = [f"{n} {names.get(k, (k.lower(), k.lower()))[0 if n == 1 else 1]}" for k, n in left_out.items()]
+        return "" if not parts else (", ".join(parts[:-1]) + " and " + parts[-1] if len(parts) > 1 else parts[0])
+
+    def acar_page(template="acar_upload.html", status=200, **ctx):
+        with connect() as conn:
+            cars = db.cars(conn)
+        return render_template(template, cars=cars, car_id=ctx.pop("car_id", request.args.get("car_id", "")),
+                               error=ctx.pop("error", None), **ctx), status
+
+    @app.get("/import/acar")
+    def acar_import_page():
+        return acar_page()
+
+    def acar_preview_rows(export, car, categories):
+        """One row per record, oldest first. A cost that matches an expense already saved (same amount,
+        within the duplicate window) is offered as a merge into it where that would add an odometer reading."""
+        names = {c["name"]: c["id"] for c in categories}
+        out = []
+        with connect() as conn:
+            for n, rec in enumerate(sorted(export.records, key=lambda r: (r.date, r.time))):
+                when = datetime.combine(rec.date, rec.time, tzinfo=ZoneInfo(tz))
+                row = {"n": n, "kind": "sale" if rec.kind == "sale" else "expense", "include": True, "action": "new",
+                       "date": rec.date.isoformat(), "time": rec.time.strftime("%H:%M"), "category_id": "", "vendor": rec.vendor,
+                       "amount": f"{rec.amount:.2f}", "odometer_km": "" if rec.odometer_km is None else f"{rec.odometer_km:.1f}",
+                       "notes": rec.notes, "label": rec.label, "duplicates": [], "candidates": [], "note": ""}
+                if rec.kind == "sale":
+                    row["include"] = car["sold_at"] is None
+                    row["note"] = "" if row["include"] else "This car already has a sale recorded; importing this replaces it."
+                    out.append(row)
+                    continue
+                match = acar.match_category(rec, list(names))
+                row["category_id"] = str(names[match]) if match else ""
+                found = db.find_duplicates(conn, car["id"], when, rec.amount)
+                row["duplicates"] = dup_view(found)
+                row["include"] = bool(match) and not found
+                if rec.amount:
+                    row["candidates"] = [{"id": m["id"], "text": f"{d['date']} · {d['category']}"
+                                          + (f" · {d['vendor']}" if d["vendor"] else "") + f" · {d['amount_text']}"
+                                          + (" · has an invoice" if m["invoice_url"] or m["invoice_path"] else "")
+                                          + (f" · {m['odometer_km']:.0f} km" if m["odometer_km"] is not None else " · no odometer")}
+                                         for m, d in zip(found, row["duplicates"])]
+                    fill = next((m for m in found if m["odometer_km"] is None), None) if rec.odometer_km is not None else None
+                    if fill is not None:
+                        row["action"], row["include"] = str(fill["id"]), True
+                out.append(row)
+        return out
+
+    @app.post("/import/acar")
+    def acar_import_preview():
+        with connect() as conn:
+            cars = db.cars(conn)
+            categories = db.categories(conn)
+        car_ids = {c["id"] for c in cars}
+        car_id = request.form.get("car_id", type=int)
+        keep = {"car_id": request.form.get("car_id", "")}
+        if car_id not in car_ids:
+            return acar_page(error="Choose a car.", status=400, **keep)
+        upload = request.files.get("file")
+        data = upload.read(ACAR_MAX_BYTES + 1) if upload and upload.filename else request.form.get("csv_text", "").encode()
+        if not data:
+            return acar_page(error="Choose the CSV file aCar exported.", status=400, **keep)
+        if len(data) > ACAR_MAX_BYTES:
+            return acar_page(error="That file is too large to be an aCar export.", status=400, **keep)
+        fill_ups = bool(request.form.get("fill_ups"))
+        vehicle = request.form.get("vehicle") or None
+        try:
+            export = acar.parse(data, vehicle=vehicle, fill_ups=fill_ups)
+        except acar.NotAnExport as exc:
+            return acar_page(error=str(exc), status=400, **keep)
+        if vehicle is None and len(export.vehicles) > 1:
+            return acar_page(vehicles=export.vehicles, csv_text=data.decode("utf-8", "replace").lstrip("\ufeff"),
+                             fill_ups=fill_ups, **keep)
+        if len(export.records) > ACAR_MAX_ROWS:
+            return acar_page(error=f"That has {len(export.records)} costs, more than one import takes "
+                                   f"({ACAR_MAX_ROWS}). Leave the fill-ups out, or import one vehicle at a time.",
+                             status=400, **keep)
+        rows = acar_preview_rows(export, next(c for c in cars if c["id"] == car_id), categories)
+        log.debug("acar preview car=%d records=%d left_out=%s", car_id, len(rows), dict(export.left_out))
+        return acar_page("acar_preview.html", rows=rows, categories=categories, errors={}, left_out=acar_left_out(export.left_out),
+                         vehicle=vehicle or (export.vehicles[0]["name"] if export.vehicles else ""), **keep)
+
+    @app.post("/import/acar/confirm")
+    def acar_import_confirm():
+        with connect() as conn:
+            car_ids = {c["id"] for c in db.cars(conn)}
+            categories = db.categories(conn)
+        cat_ids = {c["id"] for c in categories}
+        car_id = request.form.get("car_id", type=int)
+        if car_id not in car_ids:
+            abort(400)
+        count = min(request.form.get("count", type=int) or 0, ACAR_MAX_ROWS)
+        rows, new, merges, sales, errors = [], [], [], [], {}
+        with connect() as conn:
+            own = {r["id"] for r in conn.execute("SELECT id FROM garagebooks.expense WHERE car_id = %s", (car_id,))}
+        now = datetime.now(ZoneInfo(tz))
+        for n in range(count):
+            def f(key, n=n):
+                return request.form.get(f"{key}_{n}", "")
+
+            row = {"n": n, "kind": f("kind") if f("kind") == "sale" else "expense", "include": bool(f("include")), "date": f("date"),
+                   "time": f("time"), "category_id": f("category_id"), "vendor": f("vendor"), "amount": f("amount"),
+                   "odometer_km": f("odometer_km"), "notes": f("notes"), "label": f("label"), "action": f("action") or "new",
+                   "duplicates": [], "candidates": [], "note": ""}
+            rows.append(row)
+            if not row["include"]:
+                continue
+            if row["kind"] == "sale":
+                values, row_errors = validation.parse_sale({"date": row["date"], "price": row["amount"], "km": row["odometer_km"]}, tz, now)
+                if row_errors:
+                    errors[n] = " ".join(row_errors.values())
+                elif sales:
+                    errors[n] = "Only one sale can be imported."
+                else:
+                    sales.append(values)
+            elif row["action"] != "new":
+                try:
+                    target = int(row["action"])
+                    km = validation.parse_odometer(row["odometer_km"])
+                    if target not in own:
+                        raise ValueError("That expense is not this car's.")
+                    if km is None:
+                        raise ValueError("There is no odometer reading to add.")
+                except ValueError as exc:
+                    errors[n] = str(exc) if "odometer" in str(exc) or "expense" in str(exc) else "Choose which expense to merge into."
+                else:
+                    merges.append((target, km, row["vendor"].strip()[:validation.MAX_TEXT_LEN]))
+            else:
+                values, row_errors = validation.parse_expense_form(
+                    {"car_id": car_id, **{k: row[k] for k in ("category_id", "date", "time", "amount", "odometer_km", "vendor", "notes")}},
+                    tz, car_ids, cat_ids)
+                if row_errors:
+                    errors[n] = " ".join(row_errors.values())
+                else:
+                    new.append(values)
+        keep = {"car_id": str(car_id)}
+        if errors:
+            return acar_page("acar_preview.html", rows=rows, categories=categories, errors=errors, left_out="", vehicle="", status=400, **keep)
+        if not (new or merges or sales):
+            return acar_page("acar_preview.html", rows=rows, categories=categories, errors={}, left_out="", vehicle="", status=400,
+                             error="Tick at least one cost to import.", **keep)
+        saved = merged = 0
+        with connect() as conn:
+            for values in new:
+                if db.expense_exists(conn, values):      # a double submit imports once
+                    continue
+                db.insert_expense(conn, values)
+                saved += 1
+            for target, km, vendor in merges:
+                merged += db.merge_into_expense(conn, car_id, target, km, vendor)
+            for sale in sales:
+                db.set_sale(conn, car_id, sale["sold_at"], sale["sale_price"], sale["sale_km"])
+        log.info("acar import car=%d saved=%d merged=%d sale=%d", car_id, saved, merged, len(sales))
+        refresh_dashboard()
+        return redirect(url_for("index", msg="imported", n=saved, merged=merged, sale=len(sales), **{"from": "acar"}), 303)
 
     def name_example(values):
         """What an uploaded file would be called under the saved (or just-typed, if valid) settings."""

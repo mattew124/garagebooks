@@ -63,6 +63,7 @@
   {% elif teslamate.state == "absent" %}TeslaMate is not configured, and isn't needed: add your cars here. The odometer comes from the readings on your expenses.
   {% else %}TeslaMate's figures are unavailable. Everything entered by hand carries on.
   {% endif %}</small></p>
+<p><small>Coming from another app? <a href="{{ url_for('acar_import_page') }}">Import costs from aCar</a>.</small></p>
 {% if teslamate.reason %}<p class="{{ 'notice' if teslamate.state == 'ok' else 'error' }}" id="teslamate-reason">{{ teslamate.reason }}</p>{% endif %}
 <div class="cards">
 {% for c in cars %}{% set e = errors.get(c.id, {}) %}{% set v = values.get(c.id) %}{% set sale_err = e.sold_date or e.sold_price or e.sold_km %}

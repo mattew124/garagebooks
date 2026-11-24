@@ -1,0 +1,28 @@
+<tr>
+      <td data-label="Import"><input type="checkbox" name="include_{{ n }}" {{ 'checked' if r.include }}></td>
+      <td data-label="What"><div class="file">
+        <strong>{{ 'Sale of the car' if r.kind == 'sale' else r.label }}</strong>
+        {% if r.notes %}<br><small>{{ r.notes }}</small>{% endif %}
+        {% if r.note %}<br><small>{{ r.note }}</small>{% endif %}
+        {% if r.candidates %}<br><label class="inline"><small>If it matches an expense you have:</small>
+          <select name="action_{{ n }}">
+            <option value="new">Add as a new expense</option>
+            {% for c in r.candidates %}<option value="{{ c.id }}" {{ 'selected' if r.action == c.id|string }}>Add the odometer reading to {{ c.text }}</option>{% endfor %}
+          </select></label>{% endif %}
+        {% for d in r.duplicates %}{% if not r.candidates %}<br><small class="dup">Possible duplicate: <a href="{{ d.edit_url }}" target="_blank" rel="noopener noreferrer">{{ d.date }} · {{ d.category }}{% if d.vendor %} · {{ d.vendor }}{% endif %} · {{ d.amount_text }}</a></small>{% endif %}{% endfor %}
+        {% if errors.get(n) %}<br><span class="error">{{ errors[n] }}</span>{% endif %}
+        <input type="hidden" name="kind_{{ n }}" value="{{ r.kind }}">
+        <input type="hidden" name="time_{{ n }}" value="{{ r.time }}">
+        <input type="hidden" name="notes_{{ n }}" value="{{ r.notes }}">
+        <input type="hidden" name="label_{{ n }}" value="{{ r.label }}">
+      </div></td>
+      <td data-label="Date"><input type="date" name="date_{{ n }}" value="{{ r.date }}"></td>
+      <td data-label="Category">{% if r.kind == 'sale' %}<small>Recorded on the car</small>{% else %}
+        <select name="category_id_{{ n }}">
+          <option value="">Choose…</option>
+          {% for c in categories %}<option value="{{ c.id }}" {{ 'selected' if c.id|string == r.category_id }}>{{ c.name }}</option>{% endfor %}
+        </select>{% endif %}</td>
+      <td data-label="Vendor"><input name="vendor_{{ n }}" maxlength="500" value="{{ r.vendor }}"></td>
+      <td class="num" data-label="Amount"><input name="amount_{{ n }}" inputmode="decimal" value="{{ r.amount }}"></td>
+      <td class="num" data-label="Odometer"><input name="odometer_km_{{ n }}" inputmode="decimal" value="{{ r.odometer_km }}"></td>
+    </tr>

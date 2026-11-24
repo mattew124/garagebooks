@@ -14,6 +14,11 @@
           <small>Rename {{ 'in OneDrive' if kind == 'onedrive' else 'the file' }} to {% if r.new_name %}<em>{{ r.new_name }}</em> (from the values below){% else %}<em>yymmdd - category - vendor</em>{% endif %}</small></label>{% endif %}
         <br><label class="inline"><small>Attach to</small>
           <select name="attach_{{ n }}" data-attach data-selected="{{ r.attach }}"><option value="">Its own expense</option></select></label>
+        {% if r.candidates %}<br><label class="inline"><small>It looks like an expense you have:</small>
+          <select name="action_{{ n }}">
+            <option value="new">Add as a new expense</option>
+            {% for c in r.candidates %}<option value="{{ c.id }}" {{ 'selected' if r.action == c.id|string }}>Attach this invoice to {{ c.text }}</option>{% endfor %}
+          </select></label>{% endif %}
         {% for d in r.duplicates %}<br><small class="dup">Possible duplicate: <a href="{{ d.edit_url }}" target="_blank" rel="noopener noreferrer">{{ d.date }} · {{ d.category }}{% if d.vendor %} · {{ d.vendor }}{% endif %} · {{ d.amount_text }}</a></small>{% endfor %}
         {% if errors.get(n) %}<br><span class="error">{{ errors[n] }}</span>{% elif r.note %}<br><small>{{ r.note }}</small>{% endif %}
         <input type="hidden" name="url_{{ n }}" value="{{ r.url }}">

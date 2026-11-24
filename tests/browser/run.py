@@ -510,6 +510,28 @@ def test_form(page):
     assert page.locator("select[name=category_id] option").count() >= 7      # the standard categories
 
 
+ACAR_CSV = (
+    '\ufeffMetadata\n"Date Format","Time Format"\n"d/M/yyyy","HH:mm"\n\n\nVehicles\n"Name","Make","Model","Year"\n'
+    '"Example","Example","Hatch","2020"\n\n\nFill-Up Records\n"Vehicle","Date","Time"\n\n\nEvent Records\n'
+    '"Vehicle","Date","Time","Odometer Reading","Distance Unit","Type","Sub Types","Total Cost","Payment","Place Name","Notes"\n'
+    '"Example","19/2/2026","14:10","19,281","km","Service","Engine Oil, Inspection","$429.30","","Example Garage",""\n'
+    '"Example","1/6/2026","23:59","20,500","km","Sold","","$2,500.00","","",""\n')
+
+
+def test_acar_import_preview(page):
+    """Upload an aCar CSV: the preview shows the costs and the sale, and nothing is saved."""
+    page.goto(UI + "import/acar")
+    page.select_option("select[name=car_id]", index=1)
+    page.set_input_files("input[name=file]", {"name": "aCar-records.csv", "mimeType": "text/csv", "buffer": ACAR_CSV.encode()})
+    page.click("button[type=submit]")
+    expect(page.locator("table.import-table tbody tr")).to_have_count(2)
+    assert "Sale of the car" in page.inner_text("table.import-table")
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+    shot(page, "acar-import")
+    page.goto(UI)
+    assert page.locator("tbody tr", has_text="Example Garage").count() == 0
+
+
 def test_odometer_autofills(page):
     page.goto(UI + "new")
     expect(page.locator("#odometer-hint")).to_have_text("Filled from TeslaMate.")
@@ -2085,6 +2107,7 @@ def main():
         remove_marked(page)
 
         step("form renders on a phone", test_form, page)
+        step("aCar import previews without saving", test_acar_import_preview, page)
         step("odometer fills itself in", test_odometer_autofills, page)
         step("odometer button uses the chosen date", test_odometer_button_for_past_date, page)
         step("a bad invoice link is explained, input kept", test_bad_link_is_explained, page)

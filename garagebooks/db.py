@@ -684,6 +684,36 @@ def find_duplicates(conn, car_id, occurred_at, amount, window_days=DUPLICATE_WIN
         {"car": car_id, "amount": amount, "when": occurred_at, "days": window_days, "skip": exclude_id}).fetchall()
 
 
+def expense_exists(conn, v):
+    """Whether this very expense is saved already: same car, category, moment and amount."""
+    return conn.execute("SELECT 1 FROM garagebooks.expense WHERE car_id = %(car_id)s AND category_id = %(category_id)s "
+                        "AND occurred_at = %(occurred_at)s AND amount = %(amount)s LIMIT 1", v).fetchone() is not None
+
+
+def merge_into_expense(conn, car_id, expense_id, odometer_km, vendor=""):
+    """Add what an import knows to an expense that is already saved, without changing anything it has:
+    the odometer reading and the vendor, each only where it is blank. Its category, amount, date and
+    invoice stay as they are. Returns how many expenses changed (0 or 1)."""
+    return conn.execute(
+        "UPDATE garagebooks.expense SET odometer_km = COALESCE(odometer_km, %(km)s), "
+        "vendor = COALESCE(NULLIF(btrim(vendor), ''), NULLIF(%(vendor)s, '')), updated_at = now() "
+        "WHERE id = %(id)s AND car_id = %(car)s AND (odometer_km IS NULL OR vendor IS NULL OR btrim(vendor) = '')",
+        {"km": odometer_km, "vendor": vendor, "id": expense_id, "car": car_id}).rowcount
+
+
+def attach_invoice(conn, car_id, expense_id, ref_field, ref, odometer_km=None, vendor=""):
+    """Put an invoice file on an expense that is already saved and has none. It never replaces an invoice,
+    and changes nothing else except a blank odometer and a blank vendor, which it fills. `ref_field` is
+    'invoice_url' or 'invoice_path'. Returns how many expenses changed (0 or 1)."""
+    if ref_field not in ("invoice_url", "invoice_path"):
+        raise ValueError(ref_field)
+    return conn.execute(
+        f"UPDATE garagebooks.expense SET {ref_field} = %(ref)s, odometer_km = COALESCE(odometer_km, %(km)s), "
+        "vendor = COALESCE(NULLIF(btrim(vendor), ''), NULLIF(%(vendor)s, '')), updated_at = now() "
+        "WHERE id = %(id)s AND car_id = %(car)s AND invoice_url IS NULL AND invoice_path IS NULL",
+        {"ref": ref, "km": odometer_km, "vendor": vendor, "id": expense_id, "car": car_id}).rowcount
+
+
 def known_invoices(conn, refs):
     """Which of these invoices an expense already has: links, or paths in the folder on the server
     (a path starts with '/', a link with https://, so one can't be taken for the other)."""
