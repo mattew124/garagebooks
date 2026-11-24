@@ -7,6 +7,14 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+- **Fuel is only for cars with an engine, and Charging only for cars that plug in.** Each category and service item
+  on the Categories page has a **For** choice: all cars, cars that plug in (battery electric and plug-in hybrid) or
+  cars with an engine (petrol or diesel, plug-in hybrid and hybrid). Fuel, and the service items oil filter, fuel
+  filter, engine oil, timing belt and air filter, start as engine only; Charging as plug-in only (your own choice is
+  kept on upgrade). The expense form and the import page offer only what suits the car, and the server refuses the
+  rest. Expenses already saved that break the rule stay and show as before. Upgrade: pull the new image (the schema
+  gains `category.applies_to` and `service_item.applies_to`; on the restricted database role re-run
+  `scripts/provision-db.sh` first).
 - **Tests never read the ATO's pages.** The weekly `ato_rates` job reached the real ATO site in every test that
   started the app, which made the suite slow and a scheduler test fail at random in CI. Tests now get a stand-in
   that refuses at once. Nothing changes for installers.
