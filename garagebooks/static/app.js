@@ -1093,3 +1093,30 @@ document.addEventListener("DOMContentLoaded", () => {
   // New expense with nothing typed yet: fill automatically.
   if (!odo.value) fill(false);
 });
+
+// A box that takes a file by dropping it as well as by the button: `<div class="drop" data-drop-ext=".csv">` with its
+// file input and a hidden `<small class="drop-hint">`. The hint is shown here, so without JavaScript it never promises
+// a drop that can't work. The extension (default .pdf) is what is accepted; anything else dropped is ignored.
+document.addEventListener("DOMContentLoaded", () => {
+  document.querySelectorAll(".drop[data-drop-ext]").forEach((box) => {
+    const input = box.querySelector("input[type=file]");
+    const ext = (box.dataset.dropExt || ".pdf").toLowerCase();
+    const hint = box.querySelector(".drop-hint");
+    if (!input) return;
+    if (hint) hint.hidden = false;
+    ["dragenter", "dragover"].forEach((name) => box.addEventListener(name, (ev) => {
+      ev.preventDefault();
+      box.classList.add("over");
+    }));
+    ["dragleave", "drop"].forEach((name) => box.addEventListener(name, () => box.classList.remove("over")));
+    box.addEventListener("drop", (ev) => {
+      ev.preventDefault();
+      const file = [...((ev.dataTransfer && ev.dataTransfer.files) || [])].find((f) => f.name.toLowerCase().endsWith(ext));
+      if (!file) return;
+      const chosen = new DataTransfer();
+      chosen.items.add(file);
+      input.files = chosen.files;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  });
+});

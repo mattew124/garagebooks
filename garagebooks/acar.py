@@ -7,7 +7,7 @@ position, because aCar adds some between versions (and repeats one: `Place City`
 
 Everything is read except trips: fill-ups, the expense, service and purchase events, notes (which
 have no cost) and the sale (`kind == "sale"`). Trips are counted in `left_out` so the page can say so.
-A record with no cost has an amount of 0. Nothing here keeps a plate or VIN.
+A record with no cost has an amount of 0. The plate is never read. A vehicle's VIN is returned so the person can make a car from it; it is never logged.
 """
 
 import csv
@@ -137,6 +137,19 @@ def _odometer(raw, unit):
     return value.quantize(Decimal("0.1"))
 
 
+def guess_kind(engine):
+    """BEV, ICE, PHEV or HEV from aCar's free-text engine ('V6 GAS', '1.6 PLUG-IN HYBRID'). Blank is ICE: the
+    person can change it before the car is made."""
+    text = (engine or "").upper()
+    if "PLUG" in text or "PHEV" in text:
+        return "PHEV"
+    if "HYBRID" in text or "HEV" in text:
+        return "HEV"
+    if "ELECTRIC" in text or re.search(r"\b(BEV|EV)\b", text):
+        return "BEV"
+    return "ICE"
+
+
 def category_hint(event_type, subtypes):
     """The seeded category name aCar's own type and sub-types point to, or None."""
     if event_type == "Purchased":
@@ -214,7 +227,8 @@ def parse(data, vehicle=None, fill_ups=True):
     for row in rows:
         if get(row, "Name"):
             vehicles.append({"name": get(row, "Name"), "make": get(row, "Make"), "model": get(row, "Model"),
-                             "year": get(row, "Year")})
+                             "year": get(row, "Year"), "body_type": get(row, "Body Type"), "vin": get(row, "VIN"),
+                             "engine": get(row, "Engine"), "kind": guess_kind(get(row, "Engine"))})
 
     left_out, records = Counter(), []
 

@@ -3,6 +3,37 @@
 {% block content %}
 <h1>Import from aCar{% if vehicle %}: {{ vehicle }}{% endif %}</h1>
 {% if error %}<p class="notice bad" role="alert">{{ error }}</p>{% endif %}
+{% if new_car is not none and new_car %}
+<section class="card stack" id="new-car">
+  <h2>New car</h2>
+  <p><small>aCar's details for this vehicle. The car is made when you press Import, not before.</small></p>
+  <div class="row">
+    <label>Name <input form="import-form" name="car_name" maxlength="100" value="{{ new_car.name }}">
+      {% if car_errors.name %}<span class="error">{{ car_errors.name }}</span>{% endif %}</label>
+    <label>Type
+      <select name="car_kind" form="import-form">
+        {% for code, label in kinds.items() %}<option value="{{ code }}" {{ 'selected' if new_car.kind == code }}>{{ label }}</option>{% endfor %}
+      </select>
+      {% if car_errors.kind %}<span class="error">{{ car_errors.kind }}</span>{% endif %}</label>
+  </div>
+  <div class="row">
+    <label>Make <input form="import-form" name="car_make" maxlength="60" value="{{ new_car.make }}">
+      {% if car_errors.make %}<span class="error">{{ car_errors.make }}</span>{% endif %}</label>
+    <label>Model <input form="import-form" name="car_model" maxlength="60" value="{{ new_car.model }}">
+      {% if car_errors.model %}<span class="error">{{ car_errors.model }}</span>{% endif %}</label>
+  </div>
+  <div class="row">
+    <label>Model year <input form="import-form" name="car_model_year" inputmode="numeric" value="{{ new_car.model_year }}">
+      {% if car_errors.model_year %}<span class="error">{{ car_errors.model_year }}</span>{% endif %}</label>
+    <label>Year built <input form="import-form" name="car_build_year" inputmode="numeric" value="{{ new_car.build_year }}">
+      {% if car_errors.build_year %}<span class="error">{{ car_errors.build_year }}</span>{% endif %}</label>
+    <label>Body type <input form="import-form" name="car_body_type" value="{{ new_car.body_type }}">
+      {% if car_errors.body_type %}<span class="error">{{ car_errors.body_type }}</span>{% endif %}</label>
+  </div>
+  <label>VIN <input form="import-form" name="car_vin" maxlength="20" autocomplete="off" value="{{ new_car.vin }}">
+    {% if car_errors.vin %}<span class="error">{{ car_errors.vin }}</span>{% endif %}</label>
+</section>
+{% endif %}
 {% if rows %}
 <p>Category, vendor, amount and odometer come from aCar; a category is chosen only where it matches one you have
   (Insurance, Registration, Tyres and so on, or one named like aCar's own), so <strong>choose the rest</strong>.

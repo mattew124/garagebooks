@@ -5,7 +5,7 @@
 
 Vehicles
 "Name","Type","Year","Make","Model","SubModel","Engine","Transmission","Drive Type","Body Type","Bed Type","Active","License Plate","VIN","Insurance Policy","Color","Fuel Tank Capacity","Volume Unit","Distance Unit","Country","Region","City","Notes"
-"Example","CAR","2020","Example","Hatch","Base","","Automatic","","Hatchback","","Yes","ABC123","","","","0.0","LITER","KILOMETER","Australia","","",""
+"Example","CAR","2020","Example","Hatch","Base","1.4 TURBO GAS","Automatic","","Hatchback","","Yes","ABC123","1ABCD23EF45678901","","","0.0","LITER","KILOMETER","Australia","","",""
 "Old Example","CAR","2005","Example","Ute","Base","","Manual","","","","No","ABC123","","","","0.0","LITER","MILE","Australia","","",""
 
 

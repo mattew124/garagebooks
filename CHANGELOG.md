@@ -13,7 +13,8 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
   that expense, a blank odometer and vendor are filled, and nothing else on it changes. A match that already has an
   invoice is flagged and left unticked, as before.
 - **Import from aCar.** **Cars → Import costs from aCar** reads the CSV that the aCar app exports (its Records file):
-  services, expenses, purchases and, if you like, fill-ups. A preview lists every cost to check, categorise and untick,
+  services, expenses, purchases and, if you like, fill-ups, into a car you have or into a new one made from the
+  vehicle's details in the file (name, type, make, model, year, body type and VIN, all editable first). A preview lists every cost to check, categorise and untick,
   flags likely duplicates, and saves nothing until you confirm. Notes and records with no cost come across at $0.00 and
   the sale is recorded on the car; only trips are left out. A cost that matches an existing expense (an invoice you imported
   from a PDF, say) can be merged into it: its odometer reading is added and nothing else on it changes. Nothing for

@@ -883,7 +883,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         n, renamed, failed = (request.args.get(k, 0, type=int) for k in ("n", "renamed", "rename_failed"))
         if request.args.get("from") == "acar":
             merged, sale = request.args.get("merged", 0, type=int), request.args.get("sale", 0, type=int)
-            text = f"Imported {n} cost{'' if n == 1 else 's'} from aCar."
+            text = (f"Created the car {request.args.get('new_car', '')[:100]}. " if request.args.get("new_car") else "") \
+                + f"Imported {n} cost{'' if n == 1 else 's'} from aCar."
             if merged:
                 text += f" Added the odometer reading to {merged} existing expense{'' if merged == 1 else 's'}."
             return text + (" Recorded the sale." if sale else "")
@@ -3212,10 +3213,11 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             cars = db.cars(conn)
             categories = db.categories(conn)
         car_ids = {c["id"] for c in cars}
-        car_id = request.form.get("car_id", type=int)
+        making = request.form.get("car_id") == "new"
+        car_id = 0 if making else request.form.get("car_id", type=int)
         keep = {"car_id": request.form.get("car_id", "")}
-        if car_id not in car_ids:
-            return acar_page(error="Choose a car.", status=400, **keep)
+        if not making and car_id not in car_ids:
+            return acar_page(error="Choose a car, or create a new one from the file.", status=400, **keep)
         upload = request.files.get("file")
         data = upload.read(ACAR_MAX_BYTES + 1) if upload and upload.filename else request.form.get("csv_text", "").encode()
         if not data:
@@ -3235,11 +3237,21 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             return acar_page(error=f"That has {len(export.records)} costs, more than one import takes "
                                    f"({ACAR_MAX_ROWS}). Leave the fill-ups out, or import one vehicle at a time.",
                              status=400, **keep)
-        car = next(c for c in cars if c["id"] == car_id)
+        first = next((v for v in export.vehicles if v["name"] == vehicle), None) or (export.vehicles[0] if export.vehicles else None)
+        new_car = None
+        if making:
+            first = first or {}
+            new_car = {"name": first.get("name", ""), "kind": first.get("kind", "ICE"), "make": first.get("make", ""),
+                       "model": first.get("model", ""), "vin": first.get("vin", ""), "model_year": first.get("year", ""),
+                       "build_year": "", "body_type": first.get("body_type", "")}
+            car = {"id": 0, "kind": new_car["kind"], "sold_at": None}
+        else:
+            car = next(c for c in cars if c["id"] == car_id)
         rows = acar_preview_rows(export, car, categories)
         log.debug("acar preview car=%d records=%d left_out=%s", car_id, len(rows), dict(export.left_out))
         return acar_page("acar_preview.html", rows=rows, categories=[c for c in categories if db.applies(c["applies_to"], car["kind"])], errors={}, left_out=acar_left_out(export.left_out),
-                         vehicle=vehicle or (export.vehicles[0]["name"] if export.vehicles else ""), **keep)
+                         vehicle=vehicle or (export.vehicles[0]["name"] if export.vehicles else ""), new_car=new_car,
+                         car_errors={}, kinds=db.CAR_KINDS, **keep)
 
     @app.post("/import/acar/confirm")
     def acar_import_confirm():
@@ -3247,9 +3259,17 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             cars = {c["id"]: c for c in db.cars(conn)}
             all_categories = db.categories(conn)
         car_ids = set(cars)
-        car_id = request.form.get("car_id", type=int)
-        if car_id not in car_ids:
-            abort(400)
+        making = request.form.get("car_id") == "new"
+        new_car, car_values, car_errors = None, None, {}
+        if making:      # the car is made only once every row is right: the checks use id 0 for it
+            car_id, car_ids = 0, car_ids | {0}
+            new_car = {k: request.form.get(f"car_{k}", "") for k in ("name", "kind", "make", "model", "vin", "build_year", "model_year", "body_type")}
+            car_values, car_errors = validation.parse_car_form({k: new_car[k] for k in new_car}, db.CAR_KINDS)
+            cars[0] = {"id": 0, "kind": car_values["kind"] if "kind" not in car_errors else None, "sold_at": None}
+        else:
+            car_id = request.form.get("car_id", type=int)
+            if car_id not in car_ids:
+                abort(400)
         categories = [c for c in all_categories if db.applies(c["applies_to"], cars[car_id]["kind"])]
         cats_by_id = {c["id"]: c for c in all_categories}
         cat_ids = set(cats_by_id)
@@ -3299,14 +3319,19 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                     errors[n] = " ".join(row_errors.values())
                 else:
                     new.append(values)
-        keep = {"car_id": str(car_id)}
-        if errors:
-            return acar_page("acar_preview.html", rows=rows, categories=categories, errors=errors, left_out="", vehicle="", status=400, **keep)
+        keep = {"car_id": "new" if making else str(car_id), "new_car": new_car, "kinds": db.CAR_KINDS}
+        if errors or car_errors:
+            return acar_page("acar_preview.html", rows=rows, categories=categories, errors=errors, car_errors=car_errors,
+                             left_out="", vehicle="", status=400, **keep)
         if not (new or merges or sales):
-            return acar_page("acar_preview.html", rows=rows, categories=categories, errors={}, left_out="", vehicle="", status=400,
-                             error="Tick at least one cost to import.", **keep)
+            return acar_page("acar_preview.html", rows=rows, categories=categories, errors={}, car_errors={}, left_out="", vehicle="",
+                             status=400, error="Tick at least one cost to import.", **keep)
         saved = merged = 0
         with connect() as conn:
+            if making:
+                car_id = db.add_car(conn, car_values)
+                for values in new:
+                    values["car_id"] = car_id
             for values in new:
                 if db.expense_exists(conn, values):      # a double submit imports once
                     continue
@@ -3316,9 +3341,10 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 merged += db.merge_into_expense(conn, car_id, target, km, vendor)
             for sale in sales:
                 db.set_sale(conn, car_id, sale["sold_at"], sale["sale_price"], sale["sale_km"])
-        log.info("acar import car=%d saved=%d merged=%d sale=%d", car_id, saved, merged, len(sales))
+        log.info("acar import car=%d%s saved=%d merged=%d sale=%d", car_id, " (made)" if making else "", saved, merged, len(sales))
         refresh_dashboard()
-        return redirect(url_for("index", msg="imported", n=saved, merged=merged, sale=len(sales), **{"from": "acar"}), 303)
+        return redirect(url_for("index", msg="imported", n=saved, merged=merged, sale=len(sales),
+                                **({"new_car": car_values["name"]} if making else {}), **{"from": "acar"}), 303)
 
     def name_example(values):
         """What an uploaded file would be called under the saved (or just-typed, if valid) settings."""

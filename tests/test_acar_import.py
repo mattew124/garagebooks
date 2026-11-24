@@ -27,15 +27,16 @@ def upload(client, name="acar-records.csv", **over):
 
 def preview_fields(html):
     """The preview's inputs as the browser would send them back."""
-    form = html[html.index('<form method="post" action="/import/acar/confirm"'):]
+    card = html.find('id="new-car"')       # the new car's inputs sit above the form and point at it
+    form = html[card if card >= 0 else html.index('<form method="post" action="/import/acar/confirm"'):]
     data = {}
     for tag in re.findall(r"<input[^>]*>", form):
         name = re.search(r'name="([^"]+)"', tag)
         value = re.search(r'value="([^"]*)"', tag)
         if name and 'type="checkbox"' not in tag:
             data[name.group(1)] = value.group(1) if value else ""
-    for select in re.finditer(r'<select name="([^"]+)">(.*?)</select>', form, re.S):
-        chosen = re.search(r'<option value="(\d*)" selected', select.group(2))
+    for select in re.finditer(r'<select name="([^"]+)"[^>]*>(.*?)</select>', form, re.S):
+        chosen = re.search(r'<option value="([^"]*)" selected', select.group(2))
         data[select.group(1)] = chosen.group(1) if chosen else ""
     return data
 
@@ -50,6 +51,13 @@ def tick_all(data):
 def test_the_upload_page_asks_for_a_file_and_a_car(client):
     html = client.get("/import/acar").data.decode()
     assert 'name="file"' in html and 'name="car_id"' in html and "Test car" in html
+
+
+def test_the_file_box_takes_a_dropped_csv_like_the_add_pages_invoice_box(client):
+    html = client.get("/import/acar").data.decode()
+    assert 'class="drop" id="acar-drop" data-drop-ext=".csv"' in html
+    assert re.search(r'<small class="drop-hint" id="acar-drop-hint" hidden>You can also drop the CSV file onto this box\.</small>', html)
+    assert "or-pick" not in html and "Choose from" not in html          # no storage to choose from here
 
 
 def test_the_cars_page_links_to_it(client):
@@ -254,3 +262,105 @@ def test_an_electric_car_is_not_offered_fuel_and_a_forced_fuel_row_is_refused(cl
     resp = client.post("/import/acar/confirm", data=data, headers=ORIGIN)
     assert resp.status_code == 400 and "does not apply to this kind of car" in resp.data.decode()
     assert rows(admin) == []
+
+
+# ---- making the car from the export --------------------------------------------------
+
+def new_cars(admin):
+    return admin.execute("SELECT * FROM garagebooks.car WHERE id <> 1 ORDER BY id").fetchall()
+
+
+def forget_new_cars(admin):
+    admin.execute("DELETE FROM garagebooks.expense WHERE car_id <> 1")
+    admin.execute("DELETE FROM garagebooks.odometer_reading WHERE car_id <> 1")
+    admin.execute("DELETE FROM garagebooks.car WHERE id <> 1")
+
+
+@pytest.fixture()
+def made(admin):
+    yield
+    forget_new_cars(admin)
+
+
+def test_the_upload_page_offers_to_create_the_car(client):
+    html = client.get("/import/acar").data.decode()
+    assert '<option value="new"' in html and "Create a new car from this file" in html
+
+
+def test_a_new_car_preview_shows_the_cars_details_to_check_and_creates_nothing(client, admin, made):
+    html = upload(client, car_id="new").data.decode()
+    fields = preview_fields(html)
+    assert (fields["car_name"], fields["car_make"], fields["car_model"], fields["car_model_year"], fields["car_vin"],
+            fields["car_body_type"], fields["car_kind"]) == ("Example", "Example", "Hatch", "2020", "1ABCD23EF45678901",
+                                                              "Hatchback", "ICE")
+    assert "New car" in html and new_cars(admin) == [] and rows(admin) == []
+    assert "ABC123" not in html                                   # the plate isn't read
+
+
+def test_a_new_car_gets_fuel_because_the_guessed_type_has_an_engine(client, admin, made):
+    html = upload(client, car_id="new").data.decode()
+    assert '<option value="%s"' % category_id(admin, "Fuel") in html
+
+
+def test_confirming_makes_the_car_and_puts_the_costs_on_it(client, admin, made):
+    data = tick_all(preview_fields(upload(client, car_id="new").data.decode()))
+    for key, value in list(data.items()):
+        if key.startswith("category_id_") and not value:
+            data[key] = str(category_id(admin, "Registration"))
+    resp = client.post("/import/acar/confirm", data=data, headers=ORIGIN)
+    assert resp.status_code == 303 and "Location" in resp.headers
+    (car,) = new_cars(admin)
+    assert (car["name"], car["kind"], car["make"], car["model"], car["vin"], car["model_year"], car["body_type"]) == (
+        "Example", "ICE", "Example", "Hatch", "1ABCD23EF45678901", 2020, "Hatchback")
+    assert car["id"] >= 1000 and str(car["sale_price"]) == "2500.00"            # the sale went on the new car
+    assert len(rows(admin)) == 9 and {r["car_id"] for r in rows(admin)} == {car["id"]}
+
+
+def test_the_car_details_can_be_corrected_before_it_is_made(client, admin, made):
+    data = tick_all(preview_fields(upload(client, car_id="new").data.decode()))
+    data.update(car_name="Family hatch", car_kind="PHEV", car_model="Hatch RS")
+    for key, value in list(data.items()):
+        if key.startswith("category_id_") and not value:
+            data[key] = str(category_id(admin, "Registration"))
+    client.post("/import/acar/confirm", data=data, headers=ORIGIN)
+    (car,) = new_cars(admin)
+    assert (car["name"], car["kind"], car["model"]) == ("Family hatch", "PHEV", "Hatch RS")
+
+
+def test_a_bad_car_detail_makes_nothing_and_keeps_what_was_typed(client, admin, made):
+    data = tick_all(preview_fields(upload(client, car_id="new").data.decode()))
+    data.update(car_vin="NOTAVIN", car_name="Keep me")
+    for key, value in list(data.items()):
+        if key.startswith("category_id_") and not value:
+            data[key] = str(category_id(admin, "Registration"))
+    resp = client.post("/import/acar/confirm", data=data, headers=ORIGIN)
+    page = resp.data.decode()
+    assert resp.status_code == 400 and "17 letters and digits" in page and "Keep me" in page
+    assert new_cars(admin) == [] and rows(admin) == []
+
+
+def test_a_bad_row_makes_no_car_either(client, admin, made):
+    data = tick_all(preview_fields(upload(client, car_id="new").data.decode()))        # the Toll has no category
+    assert client.post("/import/acar/confirm", data=data, headers=ORIGIN).status_code == 400
+    assert new_cars(admin) == []
+
+
+def test_an_electric_new_car_is_offered_no_fuel_and_refused_it(client, admin, made):
+    data = tick_all(preview_fields(upload(client, car_id="new").data.decode()))
+    data["car_kind"] = "BEV"
+    for key, value in list(data.items()):
+        if key.startswith("category_id_") and not value:
+            data[key] = str(category_id(admin, "Registration"))
+    resp = client.post("/import/acar/confirm", data=data, headers=ORIGIN)
+    assert resp.status_code == 400 and "does not apply to this kind of car" in resp.data.decode()
+    assert new_cars(admin) == []
+
+
+def test_two_vehicles_ask_which_then_make_that_one(client, admin, made):
+    html = upload(client, "acar-two-vehicles.csv", car_id="new").data.decode()
+    assert "Which vehicle" in html and 'value="new"' in html
+    text = re.search(r'name="csv_text"[^>]*>(.*?)</textarea>', html, re.S).group(1)
+    text = text.replace("&#34;", '"').replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+    page = client.post("/import/acar", data={"car_id": "new", "fill_ups": "1", "vehicle": "Old Example", "csv_text": text},
+                       headers=ORIGIN).data.decode()
+    assert preview_fields(page)["car_name"] == "Old Example" and preview_fields(page)["car_model"] == "Ute"

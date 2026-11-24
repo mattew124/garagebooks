@@ -167,8 +167,8 @@ delete it. This stores only short labels and vendor names, in the `garagebooks` 
 # Importing from aCar
 
 Costs you kept in the Android app **aCar** can be brought in from its CSV export: on the **Cars** page,
-press **Import costs from aCar**, choose the car they belong to and the **Records** CSV that aCar wrote
-(a file named like `aCar-records-….csv`; the statistics and trip exports aren't it).
+press **Import costs from aCar**, choose the car they belong to (or **Create a new car from this file**) and the **Records** CSV that aCar wrote
+(a file named like `aCar-records-….csv`; the statistics and trip exports aren't it). You can choose the file with the button or drop it onto the box, as on the Add page.
 
 <!-- screenshot: acar-import - The aCar import page: the file, the car and the preview table -->
 
@@ -198,6 +198,14 @@ Wheel alignment, Cabin air filter and Air filter map to the categories of the sa
 (Toll, say) is matched to a category with that name if you have one. Everything else is left for you to choose and
 starts unticked. Anything aCar had in a record's other sub-types, its payment method and its own notes go into
 the expense's notes.
+
+**Creating the car.** aCar's export describes the vehicle, so the import can make the car for you: choose
+**Create a new car from this file** and the preview opens with a **New car** card holding the name, type, make, model,
+model year, body type and VIN from the file, ready to check and correct. The type is guessed from aCar's engine text
+(*GAS* and *DIESEL* are petrol or diesel, *HYBRID* a hybrid, *PLUG-IN* a plug-in hybrid, *ELECTRIC* battery electric;
+blank is petrol or diesel), and it decides which categories are offered, so Fuel isn't offered for an electric car.
+The car is made when you press Import, along with its costs and its sale: if any row or car detail is wrong, nothing is
+made. The licence plate isn't read.
 
 If the file holds more than one vehicle, the app asks which one first. Dates are read by the pattern aCar writes in
 the file (`d/M/yyyy` or `M/d/yyyy`, say), and times are taken as your local time ([`APP_TZ`](setup.md)).

@@ -133,3 +133,16 @@ def test_a_row_with_a_bad_date_or_amount_is_left_out_not_fatal():
 def test_a_row_for_a_vehicle_the_file_does_not_list_is_still_read():
     text = (FIXTURES / "acar-records.csv").read_text(encoding="utf-8").replace('"Example","19/2/2026"', '"Ghost","19/2/2026"')
     assert any(r.vehicle == "Ghost" for r in acar.parse(text.encode()).records)
+
+
+def test_the_vehicles_details_are_read_for_making_a_car():
+    (v,) = load().vehicles
+    assert (v["name"], v["make"], v["model"], v["year"], v["body_type"], v["vin"]) == (
+        "Example", "Example", "Hatch", "2020", "Hatchback", "1ABCD23EF45678901")
+    assert v["kind"] == "ICE" and v["engine"] == "1.4 TURBO GAS"
+
+
+@pytest.mark.parametrize("engine, kind", [("V6 GAS", "ICE"), ("2.0 DIESEL", "ICE"), ("", "ICE"), ("ELECTRIC", "BEV"),
+                                          ("Electric Motor", "BEV"), ("1.8 HYBRID", "HEV"), ("1.6 PLUG-IN HYBRID", "PHEV")])
+def test_the_kind_of_car_is_guessed_from_the_engine(engine, kind):
+    assert acar.guess_kind(engine) == kind

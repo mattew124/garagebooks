@@ -521,15 +521,33 @@ ACAR_CSV = (
 def test_acar_import_preview(page):
     """Upload an aCar CSV: the preview shows the costs and the sale, and nothing is saved."""
     page.goto(UI + "import/acar")
-    page.select_option("select[name=car_id]", index=1)
-    page.set_input_files("input[name=file]", {"name": "aCar-records.csv", "mimeType": "text/csv", "buffer": ACAR_CSV.encode()})
+    page.select_option("select[name=car_id]", index=2)      # after "Choose a car…" and "Create a new car from this file"
+    # The file box works as the Add page's does: its hint appears, and a file dropped on it is the one chosen.
+    expect(page.locator("#acar-drop-hint")).to_have_text("You can also drop the CSV file onto this box.")
+    page.evaluate("""(csv) => {
+        const box = document.getElementById("acar-drop");
+        const data = new DataTransfer();
+        data.items.add(new File([csv], "aCar-records.csv", {type: "text/csv"}));
+        box.dispatchEvent(new DragEvent("drop", {dataTransfer: data, bubbles: true, cancelable: true}));
+    }""", ACAR_CSV)
+    assert page.evaluate("document.querySelector('input[name=file]').files[0].name") == "aCar-records.csv"
+    shot(page, "acar-upload")
     page.click("button[type=submit]")
     expect(page.locator("table.import-table tbody tr")).to_have_count(2)
     assert "Sale of the car" in page.inner_text("table.import-table")
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
     shot(page, "acar-import")
+    page.goto(UI + "import/acar")                     # and again, making the car from the file
+    page.select_option("select[name=car_id]", value="new")
+    page.set_input_files("input[name=file]", {"name": "aCar-records.csv", "mimeType": "text/csv", "buffer": ACAR_CSV.encode()})
+    page.click("button[type=submit]")
+    expect(page.locator("#new-car input[name=car_name]")).to_have_value("Example")
+    expect(page.locator("#new-car input[name=car_make]")).to_have_value("Example")
+    shot(page, "acar-import-new-car")
     page.goto(UI)
     assert page.locator("tbody tr", has_text="Example Garage").count() == 0
+    page.goto(UI + "cars")
+    assert page.locator(".car", has_text="Hatch").count() == 0      # previewing made no car
 
 
 def test_odometer_autofills(page):

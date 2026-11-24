@@ -24,9 +24,16 @@
   <label>Import into
     <select name="car_id" required>
       <option value="">Choose a car…</option>
+      <option value="new" {{ 'selected' if car_id == 'new' }}>Create a new car from this file</option>
       {% for c in cars %}<option value="{{ c.id }}" {{ 'selected' if c.id|string == car_id|string }}>{{ c.name }}</option>{% endfor %}
     </select></label>
-  <label>aCar CSV file <input type="file" name="file" accept=".csv,text/csv" required></label>
+  <div class="field">
+    <label for="acar-file">aCar CSV file</label>
+    <div class="drop" id="acar-drop" data-drop-ext=".csv">
+      <input type="file" id="acar-file" name="file" accept=".csv,text/csv" required>
+      <small class="drop-hint" id="acar-drop-hint" hidden>You can also drop the CSV file onto this box.</small>
+    </div>
+  </div>
   <label class="inline"><input type="checkbox" name="fill_ups" value="1" checked>
     Include fill-ups (as <em>Fuel</em>)</label>
   <div class="row"><button type="submit" class="button">Read the file</button> <a href="{{ url_for('cars_page') }}">Cancel</a></div>
