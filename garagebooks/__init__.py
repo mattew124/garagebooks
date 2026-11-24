@@ -961,10 +961,11 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         overlay = overlay or {}
         with connect() as conn:
             cats = [{**c, **overlay.get(f"c{c['id']}", {})} for c in db.categories(conn)]
-            service = [{**i, "name": overlay.get(f"s{i['id']}", i["name"])} for i in db.service_items(conn)]
+            service = [{**i, "name": overlay.get(f"s{i['id']}", i["name"]),
+                        "applies_to": overlay.get(f"a{i['id']}", i["applies_to"])} for i in db.service_items(conn)]
             budgets_on = db.lease_budgets_on(conn)
         return render_template("categories.html", categories=cats, items=service, error=error, item_error=item_error,
-                               row_errors=row_errors or {}, pools=lease.POOLS, budgets_on=budgets_on,
+                               row_errors=row_errors or {}, pools=lease.POOLS, budgets_on=budgets_on, applies_to=db.APPLIES_TO,
                                message=message), status
 
     @app.route("/categories", methods=["GET", "POST"])
@@ -999,7 +1000,9 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         form = request.form
         with connect() as conn:
             cats = {c["id"]: c for c in db.categories(conn)}
-            service = {i["id"]: i["name"] for i in db.service_items(conn)}
+            service_rows = db.service_items(conn)
+        service = {i["id"]: i["name"] for i in service_rows}
+        item_applies = {i["id"]: i["applies_to"] for i in service_rows}
         errors, overlay, category_changes, renames = {}, {}, {}, {}
         for cid in (i for i in posted_ids("category_id") if i in cats):
             typed = {"gst_free": form.get(f"gst_partial_{cid}") == "1", "has_period": form.get(f"has_period_{cid}") == "1"}
@@ -1007,6 +1010,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 typed["upload_folder"] = form[f"upload_folder_{cid}"]
             if f"budget_pool_{cid}" in form:
                 typed["budget_pool"] = form[f"budget_pool_{cid}"]
+            if f"applies_to_{cid}" in form:
+                typed["applies_to"] = form[f"applies_to_{cid}"]
             overlay[f"c{cid}"] = typed
             try:
                 if "upload_folder" in typed:
@@ -1015,6 +1020,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                     typed["budget_pool"] = typed["budget_pool"].strip() or None
                     if typed["budget_pool"] is not None and typed["budget_pool"] not in lease.POOLS:
                         raise ValueError("Choose one of the pools listed.")
+                if typed.get("applies_to", "all") not in db.APPLIES_TO:
+                    raise ValueError("Choose which cars it applies to from the list.")
             except ValueError as exc:
                 errors[f"c{cid}"] = str(exc)
                 continue
@@ -1022,9 +1029,17 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             if changed:
                 category_changes[cid] = changed
         item_ids = [i for i in posted_ids("item_id") if i in service]
-        names = {}
+        names, applies_changes = {}, {}
         for iid in item_ids:
             overlay[f"s{iid}"] = form.get(f"item_name_{iid}", "")
+            if f"item_applies_to_{iid}" in form:
+                value = form[f"item_applies_to_{iid}"]
+                overlay[f"a{iid}"] = value
+                if value not in db.APPLIES_TO:
+                    errors[f"s{iid}"] = "Choose which cars it applies to from the list."
+                    continue
+                if value != item_applies[iid]:
+                    applies_changes[iid] = value
             try:
                 names[iid] = validation.parse_service_item_name(form.get(f"item_name_{iid}"))
             except ValueError as exc:
@@ -1042,7 +1057,9 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             for cid, changed in category_changes.items():
                 db.update_category(conn, cid, **changed)
             db.rename_service_items(conn, renames)
-        log.info("categories saved: %d categories, %d service items changed", len(category_changes), len(renames))
+            db.set_service_items_applies(conn, applies_changes)
+        log.info("categories saved: %d categories, %d service items changed", len(category_changes),
+                 len(set(renames) | set(applies_changes)))
         return redirect(url_for("categories", msg="categories_saved"), 303)
 
     # ---- cars ----------------------------------------------------------------
