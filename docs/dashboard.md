@@ -60,7 +60,7 @@ in), for queries of your own. The per-car report is described under [Leases](lea
 
 ## Cost after tax
 
-Two panels in a row below the others show what the running costs come to after tax, beside the invoices.
+A row of panels below the others shows what the running costs come to after tax, beside the invoices.
 They are on the dashboard only once a **tax bracket** is chosen for some income year in Settings and some car has a lease;
 saving either rewrites the dashboard, so they appear and go by themselves. An expense paid from the package
 has its GST claimed back and the rest comes from pre-tax salary; one paid personally costs its invoice. The
@@ -75,6 +75,11 @@ rules, the simplifications and a worked example are on
 - **After tax by category and FBT year** breaks each FBT year down by category: the invoices, what they cost
   after tax and how many were paid from the package. (The FBT year report in GarageBooks shows only the year's
   totals and the home charging reimbursement, and points here for the breakdown.)
+
+The home charging reimbursement needs the odometer, so it is **shown in the app only** (on the FBT year report),
+not on the dashboard. The existing total cost of ownership figures are unchanged: these panels sit beside them.
+
+<!-- screenshot: dashboard-after-tax - The Running costs after tax and After tax by FBT year panels -->
 
 ## After-tax cost of ownership
 
@@ -95,11 +100,6 @@ out. The panels read `garagebooks.after_tax_by_income_year(tz)`, built on `expen
 `lease_income_year()`, the same definitions the app uses.
 
 <!-- screenshot: dashboard-after-tax-tco - The After-tax cost of ownership row: cost by income year, the household total and the lease table -->
-
-The home charging reimbursement needs the odometer, so it is **shown in the app only** (on the FBT year report),
-not on the dashboard. The existing total cost of ownership figures are unchanged: these panels sit beside them.
-
-<!-- screenshot: dashboard-after-tax - The Running costs after tax and After tax by FBT year panels -->
 
 ## Reminders
 
