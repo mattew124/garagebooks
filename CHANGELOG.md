@@ -7,6 +7,11 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+- **Faster OneDrive folder scans.** Listing the PDFs in a car's OneDrive folder and its subfolders now asks
+  Microsoft Graph for the whole tree with one `delta` query (a few pages) instead of a call for every folder, so
+  an import page with many subfolders opens sooner. If Graph won't answer a delta query for a folder, the folders
+  are listed one by one as before. Mailbox scans are unchanged (a delta query can't include attachments, so it
+  would be slower). Nothing to do on upgrade.
 - **The kilometre pace counts the whole FBT year when it holds two leases.** When a lease ended and the next one started
   during an FBT year, the lease page and the dashboard's **Kilometre pace** panel were labelled with the FBT year but
   counted only the current lease's part of it. The distance driven under the earlier lease was left out, so a car on

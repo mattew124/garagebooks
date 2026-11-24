@@ -42,6 +42,7 @@ MAIL_SCOPES = "Mail.Read User.Read offline_access"
 BUSY_STATUSES = (429, 503)   # Microsoft throttling or a brief outage: worth a short wait
 RETRY_WAITS = (1, 3)         # seconds between tries; requests are bounded by gunicorn's timeout
 MAX_PAGES = 20   # of 200 children each, when listing a folder
+MAX_DELTA_PAGES = 100   # of 200 items each, when listing a folder tree with delta
 MAX_DEPTH = 4    # subfolders below a car's folder that are searched for PDFs
 MAX_PDF_BYTES = 20 * 1024 * 1024
 
@@ -317,7 +318,61 @@ class OneDrive:
     def pdfs(self, access_token, folder_id):
         """Every PDF in a folder and the folders below it (MAX_DEPTH deep), oldest
         name first: [{id, name, size, web_url, folder}]. `folder` is the path below
-        the one given, '' for files directly in it."""
+        the one given, '' for files directly in it.
+
+        One `driveItem: delta` query lists the whole subtree in pages of 200 items, where listing
+        `/children` costs a call for every folder as well as every page. If Graph won't answer a delta
+        query for the folder, the folders are walked with `/children` as before."""
+        try:
+            found = self._pdfs_by_delta(access_token, folder_id)
+        except OneDriveError as exc:
+            log.warning("delta listing of folder=%s refused (%s): listing it folder by folder", folder_id, exc)
+            found = self._pdfs_by_children(access_token, folder_id)
+        log.debug("list folder=%s pdfs=%d", folder_id, len(found))
+        return sorted(found, key=lambda f: (f["folder"].lower(), f["name"].lower()))
+
+    @staticmethod
+    def _is_listed_pdf(c):
+        return "file" in c and c["name"].lower().endswith(".pdf") and str(c.get("webUrl", "")).startswith("https://")
+
+    def _pdfs_by_delta(self, access_token, folder_id):
+        """The PDFs of pdfs(), from a delta query for the folder. Delta gives each item only its parent's id
+        (no path), in any order, so a file's folder is worked out by following the parents up to `folder_id`."""
+        url = (f"{GRAPH}/me/drive/items/{quote(folder_id, safe='')}/delta"
+               f"?$select=id,name,size,folder,file,webUrl,parentReference&$top=200")
+        items = []
+        for _ in range(MAX_DELTA_PAGES):
+            body = self._get(access_token, url)
+            items += [c for c in body.get("value", []) if "deleted" not in c and c.get("id")]
+            url = body.get("@odata.nextLink")
+            if not url or not url.startswith(GRAPH + "/"):
+                break
+        folders = {c["id"]: c for c in items if "folder" in c}
+        paths = {}
+
+        def below(fid):
+            """Names from `folder_id` down to the folder `fid`, or None when it isn't under it (or too deep)."""
+            if fid == folder_id:
+                return []
+            if fid not in paths:
+                paths[fid] = None           # also stops a loop of parents
+                here = folders.get(fid)
+                parent = below((here.get("parentReference") or {}).get("id")) if here else None
+                if parent is not None and len(parent) < MAX_DEPTH:
+                    paths[fid] = [*parent, here["name"]]
+            return paths[fid]
+
+        found = []
+        for c in items:
+            if not self._is_listed_pdf(c):
+                continue
+            names = below((c.get("parentReference") or {}).get("id"))
+            if names is not None:
+                found.append({"id": c["id"], "name": c["name"], "size": c.get("size", 0),
+                              "web_url": c["webUrl"], "folder": "/".join(names)})
+        return found
+
+    def _pdfs_by_children(self, access_token, folder_id):
         found = []
 
         def walk(fid, below, depth):
@@ -328,7 +383,7 @@ class OneDrive:
                 for c in body.get("value", []):
                     if "folder" in c and depth < MAX_DEPTH:
                         walk(c["id"], f"{below}/{c['name']}" if below else c["name"], depth + 1)
-                    elif "file" in c and c["name"].lower().endswith(".pdf") and str(c.get("webUrl", "")).startswith("https://"):
+                    elif self._is_listed_pdf(c):
                         found.append({"id": c["id"], "name": c["name"], "size": c.get("size", 0),
                                       "web_url": c["webUrl"], "folder": below})
                 url = body.get("@odata.nextLink")
@@ -336,8 +391,7 @@ class OneDrive:
                     break
 
         walk(folder_id, "", 0)
-        log.debug("list folder=%s pdfs=%d", folder_id, len(found))
-        return sorted(found, key=lambda f: (f["folder"].lower(), f["name"].lower()))
+        return found
 
     def download(self, access_token, item_id):
         """A file's bytes. Graph hands out a short-lived pre-authenticated address on

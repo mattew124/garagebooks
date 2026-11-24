@@ -709,10 +709,23 @@ def test_folder_listing_follows_every_page():
 
 def test_pdf_listing_follows_every_page():
     pdf = {"file": {}, "webUrl": "https://onedrive.live.com/f", "size": 1}
-    drive, _ = graph_of(
+    here = {"parentReference": {"id": "X"}}
+    drive, asked = graph_of(
+        (200, {"value": [{"id": "1", "name": "a.pdf", **pdf, **here}], "@odata.nextLink": NEXT}),
+        (200, {"value": [{"id": "2", "name": "b.pdf", **pdf, **here}]}))
+    assert [f["name"] for f in drive.pdfs("AT-1", "X")] == ["a.pdf", "b.pdf"]
+    assert "/items/X/delta?" in asked[0] and asked[1] == NEXT
+
+
+def test_pdf_listing_by_folders_follows_every_page():
+    """The fallback when Graph won't answer a delta query: `/children`, folder by folder and page by page."""
+    pdf = {"file": {}, "webUrl": "https://onedrive.live.com/f", "size": 1}
+    drive, asked = graph_of(
+        (400, {"error": {"code": "invalidRequest"}}),
         (200, {"value": [{"id": "1", "name": "a.pdf", **pdf}], "@odata.nextLink": NEXT}),
         (200, {"value": [{"id": "2", "name": "b.pdf", **pdf}]}))
     assert [f["name"] for f in drive.pdfs("AT-1", "X")] == ["a.pdf", "b.pdf"]
+    assert "/delta" in asked[0] and "/children" in asked[1] and asked[2] == NEXT
 
 
 def test_a_next_page_off_graph_is_not_followed():
