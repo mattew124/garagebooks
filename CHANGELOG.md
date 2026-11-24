@@ -7,6 +7,11 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+- **Faster OneDrive folder scans.** Listing the PDFs in a car's OneDrive folder and its subfolders now asks
+  Microsoft Graph for the whole tree with one `delta` query (a few pages) instead of a call for every folder, so
+  an import page with many subfolders opens sooner. If Graph won't answer a delta query for a folder, the folders
+  are listed one by one as before. Mailbox scans are unchanged (a delta query can't include attachments, so it
+  would be slower). Nothing to do on upgrade.
 - **Claims send an invoice kept in OneDrive.** Claiming an expense whose invoice is in OneDrive used to stop with
   "only a link: attach the invoice file first", which can't be done when OneDrive is the car's folder. The claim
   now downloads the file from OneDrive (up to 10 MB) and sends it, and says so plainly when the OneDrive sign-in
