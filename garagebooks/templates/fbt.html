@@ -97,6 +97,23 @@
     {% endif %}
   </div>
   {% endfor %}
+  {% if pace_year %}{% set t = pace_year %}
+  <div class="km-pace-lease km-pace-total" id="km-pace-total">
+    <h3>{{ report.label }} in total <small>{{ 'both leases' if t.leases == 2 else 'all ' ~ t.leases ~ ' leases' }} held in it, added up</small></h3>
+    <dl class="facts">
+      <div><dt>Days held</dt><dd data-figure="total-days">{{ t.days_held }} of {{ t.days_in_year }} days</dd></div>
+      <div><dt>Km expected by the end</dt><dd class="derived" data-figure="total-expected">{{ t.expected_km|km }}</dd></div>
+      {% if t.state != 'upcoming' %}
+      <div><dt>Km driven {{ 'so far' if t.state == 'current' else 'in the year' }}</dt><dd data-figure="total-driven">{{ known(t.driven, t.driven|km) }}</dd></div>
+      <div><dt>{{ 'Against the pro-rata pace today' if t.state == 'current' else 'Against the pro-rata pace' }}</dt><dd class="derived" data-figure="total-ahead">{% if t.ahead is none %}<strong class="unavailable">not known</strong>{% elif t.ahead > 0 %}{{ t.ahead|abs|km }} ahead{% elif t.ahead < 0 %}{{ t.ahead|abs|km }} behind{% else %}on pace{% endif %}</dd></div>
+      {% if t.state == 'current' %}
+      <div><dt>Km per day needed from today</dt><dd class="derived" data-figure="total-to-go">{{ known(t.per_day_to_go, t.per_day_to_go ~ ' km') }}</dd></div>
+      {% endif %}
+      {% endif %}
+    </dl>
+    <p class="km-pace-note"><small>Each lease counts its own days in this FBT year and its own estimate; the distances are added up.</small></p>
+  </div>
+  {% endif %}
   <p><small>Km expected = the lease's estimated km per year × days held ÷ days in the FBT year. The odometer is TeslaMate's where it
     is available, otherwise your latest reading (an expense's odometer counts) on or before that moment. Days so far are the whole days gone,
     so today still counts as to drive. These figures are for your own tracking, not tax advice.</small></p>

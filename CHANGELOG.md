@@ -15,6 +15,22 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
   amount read from the invoice or entered on the expense, and with none no GST is counted; the expense form and list
   say when to enter it. The sums are unchanged, and the database column keeps its name (`category.gst_free`).
   Nothing for installers to do.
+- **Claims send an invoice kept in OneDrive.** Claiming an expense whose invoice is in OneDrive used to stop with
+  "only a link: attach the invoice file first", which can't be done when OneDrive is the car's folder. The claim
+  now downloads the file from OneDrive (up to 10 MB) and sends it, and says so plainly when the OneDrive sign-in
+  has lapsed or the file has been moved or deleted. Nothing to do on upgrade.
+- **The kilometre pace counts the whole FBT year when it holds two leases.** When a lease ended and the next one started
+  during an FBT year, the lease page and the dashboard's **Kilometre pace** panel were labelled with the FBT year but
+  counted only the current lease's part of it. The distance driven under the earlier lease was left out, so a car on
+  pace looked thousands of km behind. Both now add up every lease held in the year, each with its own days and
+  estimate. The FBT year report keeps each lease's section and adds the year in total below them. Nothing to do: pull
+  the new image.
+- **A lease followed by the next one no longer says it is overdue.** When the next lease of the same car is already
+  entered, **Lease ends** is for your information only ("Next lease loaded", with the next lease's start date): never
+  due soon or overdue, never sent as a notification and not counted in the header, on the dashboard too. The lease
+  reminders also follow the app's own day (`APP_TZ`), not the database server's: on the server's UTC day a lease that
+  ended last night stayed current, and overdue, until mid-morning. The app saves `APP_TZ` in its settings on every
+  start for this. Nothing to do: pull the new image.
 - **`scripts/dev.sh setup` remakes a venv from another path.** A venv made before its checkout was moved or renamed
   has a `pip` that can't start; `setup` now makes it again. Nothing changes for installers.
 - **Dev stack: a real claims connector's key works, and the Dashboards link comes back.** The dev app joins the key

@@ -157,6 +157,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 if not db.has_schema(conn):
                     raise RuntimeError("SKIP_MIGRATE=1, but the 'garagebooks' schema in this database is from an "
                                        "older release. Run scripts/provision-db.sh again, then start the app.")
+        with db.connect() as conn:
+            db.save_app_tz(conn, tz)
     # Who made a change, for the change history. The sign-in gate in front of the app names the user in
     # a request header; AUTH_USER_HEADER says which. Unset (the default) the header is never read: it is
     # only trustworthy when the proxy strips it from client requests. Every database connection the
@@ -1202,6 +1204,17 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         found.update(start_reading=start, current_reading=now, reasons=list(dict.fromkeys(reasons)))
         return found
 
+    def km_pace_year(paces, rows, year, today):
+        """The FBT year's kilometre pace across its leases (lease.km_pace_year), from each lease's km_pace_for: None
+        unless two or more leases with an estimate are held in the year (one lease's own figures are the year's)."""
+        parts = [(row, p["start_reading"] and p["start_reading"].km, p["current_reading"] and p["current_reading"].km)
+                 for row, p in zip(rows, paces, strict=True)]
+        found = lease.km_pace_year(parts, year, today)
+        if found is None or found["leases"] < 2:
+            return None
+        found["reasons"] = list(dict.fromkeys(r for p in paces for r in p["reasons"]))
+        return found
+
     def render_lease(car, status=200):
         today = today_here()
         with connect() as conn:
@@ -1209,9 +1222,16 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             views = [lease_view(conn, row, today) for row in db.car_leases(conn, car["id"])]
             shown = next((v for v in views if current and v["id"] == current["id"]), None)
             if shown and shown["figures"]["status"] == "current":
-                shown["pace"] = km_pace_for(conn, car, shown, lease.fbt_year(today), today)
+                year = lease.fbt_year(today)
+                shown["pace"] = km_pace_for(conn, car, shown, year, today)
+                # The FBT year can hold an earlier (or a later) lease too: the short version then counts the whole year.
+                held = [v for v in views if lease.days_held(v, year)]
+                if len(held) > 1:
+                    paces = [shown["pace"] if v is shown else km_pace_for(conn, car, v, year, today) for v in held]
+                    shown["pace_year"] = km_pace_year(paces, held, year, today)
         others = [v for v in views if v is not shown]
-        return render_template("lease.html", **lease_context(car, shown=shown, others=others, today=today, fbt_label=lease.fbt_label)), status
+        return render_template("lease.html", **lease_context(car, shown=shown, others=others, today=today, fbt_label=lease.fbt_label,
+                                                            fbt_start=lease.fbt_start)), status
 
     def render_lease_form(car, lease_id, values, errors, status=200):
         return render_template("lease_form.html", **lease_context(car, lease_id=lease_id, values=values, errors=errors)), status
@@ -1469,10 +1489,11 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             report = lease.fbt_report(leases, costs, charging, year, today)
             after = fbt_after_tax(conn, car, leases, report, year, today, budgets_on)
             paces = [km_pace_for(conn, car, row, year, today) for row, _budgets, _figures in report["leases"]]
+            pace_year = km_pace_year(paces, [row for row, _b, _f in report["leases"]], year, today)
         earlier, later = [y for y in years if y < year], [y for y in years if y > year]
         return render_template("fbt.html", car=car, report=report, paces=paces, today=today, budgets_on=budgets_on, frequencies={k: v[0] for k, v in lease.FREQUENCIES.items()},
                                previous=earlier[-1] if earlier else None, following=later[0] if later else None,
-                               label=lease.fbt_label, after=after)
+                               label=lease.fbt_label, after=after, pace_year=pace_year)
     # ---- reminders (roadmap item 4) ------------------------------------------------
 
     def open_items(conn, car_id=None):
@@ -1681,15 +1702,31 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         return None
 
     def claim_invoice(row):
-        """-> (INVOICE object or None, blocking message or None, notice or None) for an expense's invoice file.
-        Only a file in the invoice folder can be read: a link into OneDrive is not a file this app can fetch."""
+        """-> (INVOICE object or None, blocking message or None, notice or None) for an expense's invoice file:
+        read from the invoice folder, or downloaded from OneDrive (with OneDrive's own sign-in) when the expense
+        keeps the file's OneDrive address. Any other link (an email in the mailbox, a web page) isn't a file this
+        app can send."""
+        too_large = "The invoice file is too large to send (the limit is 10 MB)."
+        if row["invoice_url"] and onedrive.is_drive_url(row["invoice_url"]):
+            store = store_for("onedrive")
+            if store is None:
+                return None, ("This expense's invoice is in OneDrive, which isn't set up here "
+                              "(GARAGEBOOKS_ENCRYPTION_KEY), so it can't be sent."), None
+            try:
+                name, content = store.fetch(row["invoice_url"], max_bytes=claim_lib.MAX_INVOICE_BYTES)
+            except onedrive.TooLarge:
+                return None, too_large, None
+            except storage.StorageError as exc:
+                log.warning("claim: the OneDrive invoice of expense %s couldn't be read: %s", row["id"], exc.user_message)
+                return None, exc.user_message, None
+            return claim_lib.invoice_payload(name, content), None, None
         if row["invoice_path"] and local is not None:
             try:
                 content = local.download(row["invoice_path"])
             except storage.StorageError as exc:
                 return None, exc.user_message, None
             if len(content) > claim_lib.MAX_INVOICE_BYTES:
-                return None, "The invoice file is too large to send (the limit is 10 MB).", None
+                return None, too_large, None
             name = row["invoice_path"].rsplit("/", 1)[-1]
             return claim_lib.invoice_payload(name, content), None, None
         if row["invoice_path"] or row["invoice_url"]:
