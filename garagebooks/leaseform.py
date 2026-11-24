@@ -23,6 +23,8 @@ ELIGIBLE_EV = re.compile(r"eligible\s+ev\b", re.I)
 KM = re.compile(r"(?:nominated|estimated)\s+annual(?:[^\n]*\n)?[^\n]*?kilomet(?:re|er)s\s*:?\s*([\d,]+)", re.I)
 PROVIDER = re.compile(r"mail\s+to\s*:\s*(\S.*?)\s*$", re.I | re.M)
 ASSOCIATE = re.compile(r"associate\s+lease", re.I)
+AGREEMENT = re.compile(r"lease\s+agreement", re.I)
+INVOICE_WORDS = re.compile(r"tax\s+invoice|amount\s+due|invoice\s+(?:no|number|date)", re.I)
 # The yearly budget section: a label, a dollar sign and the figure. The dollar sign keeps "Registration"
 # apart from the plate and the state it also labels.
 BUDGETS = {"maintenance": "maintenance", "registration": "registration", "insurance": "insurance",
@@ -102,6 +104,18 @@ def read(text):
         if amount is not None:
             found[f"budget_{pool}"] = f"{amount:.2f}"
     return found
+
+
+def document_kind(text):
+    """What a PDF's text is among a lease's documents: "form" (a provider's lease form with its dates or
+    figures, or titled an associate lease), "agreement" (a lease agreement that is not an invoice), else None.
+    Used by the import page to offer such a file as a lease document, not an expense."""
+    found = read(text)
+    if found and ("associate_lease" in found or ("start_date" in found and "end_date" in found)):
+        return "form"
+    if AGREEMENT.search(text) and not INVOICE_WORDS.search(text):
+        return "agreement"
+    return None
 
 
 def end_date(start, months):

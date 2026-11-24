@@ -59,6 +59,19 @@ A period can't end before it starts.
 
 <!-- screenshot: import-row-period - An import row for an insurance policy, with its notes and period -->
 
+## Lease forms and agreements
+
+A PDF that is an associate lease form (it states its lease start and end dates or is titled an associate lease)
+or a lease agreement isn't an invoice, so the import doesn't offer it as an expense. Its row says what it is.
+If the car has a lease starting on the date the form states, the row is ticked to **keep the file with that
+lease** as its lease form (an agreement goes to the car's lease when it has just one); the lease page then links
+to it. If there is no such lease yet, the row offers **Add a lease from this**, which opens the Add a lease page
+where you choose the file to fill in the boxes. A lease that already has that document isn't offered it again.
+Such a file is never renamed or moved: its row has no rename option. For an invoice, the **Rename** box
+starts unticked, so nothing is renamed unless you tick it.
+
+<!-- screenshot: import-lease-row - An import row for an associate lease form, ticked to keep it with the lease it matches -->
+
 ## Several PDFs in one expense
 
 An invoice and its service report, or a receipt and its photos, are one expense. On the import page, choose **Attach
