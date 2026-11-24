@@ -144,6 +144,67 @@
   },
   "panels": [
     {
+      "id": 6,
+      "type": "stat",
+      "title": "Average L/100 km",
+      "description": "All the measured tanks together: litres ÷ distance. Not the average of the individual figures, so a short tank counts for less.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "TeslaMate"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "noValue": "–",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "suffix: L/100 km",
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "textMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "TeslaMate"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT SUM(f.tank_litres) / NULLIF(SUM(f.tank_km), 0) * 100 FROM garagebooks.fuel_fill f WHERE f.car_id = $car_id AND f.l_per_100km IS NOT NULL AND $__timeFilter(f.occurred_at)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
       "id": 1,
       "type": "stat",
       "title": "Fuel cost",
@@ -154,8 +215,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
-        "x": 0,
+        "w": 6,
+        "x": 6,
         "y": 0
       },
       "fieldConfig": {
@@ -215,8 +276,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
-        "x": 4,
+        "w": 6,
+        "x": 12,
         "y": 0
       },
       "fieldConfig": {
@@ -276,8 +337,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
-        "x": 8,
+        "w": 6,
+        "x": 18,
         "y": 0
       },
       "fieldConfig": {
@@ -322,189 +383,6 @@
           "format": "table",
           "rawQuery": true,
           "rawSql": "SELECT COUNT(*) FROM garagebooks.fuel_fill f WHERE f.car_id = $car_id AND $__timeFilter(f.occurred_at)",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "id": 4,
-      "type": "stat",
-      "title": "Average price per litre",
-      "description": "Money spent ÷ litres, over the fill-ups in the time range.",
-      "datasource": {
-        "type": "grafana-postgresql-datasource",
-        "uid": "TeslaMate"
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 12,
-        "y": 0
-      },
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [],
-          "noValue": "–",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "blue",
-                "value": null
-              }
-            ]
-          },
-          "unit": "currency:financial:$",
-          "decimals": 3
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "textMode": "value",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "grafana-postgresql-datasource",
-            "uid": "TeslaMate"
-          },
-          "editorMode": "code",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT SUM(f.amount) / NULLIF(SUM(f.litres), 0) FROM garagebooks.fuel_fill f WHERE f.car_id = $car_id AND $__timeFilter(f.occurred_at)",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "id": 5,
-      "type": "stat",
-      "title": "Distance measured",
-      "description": "Distance covered by the tanks that L/100 km could be worked out for: from one full tank to the next, with no missed fuel-up.",
-      "datasource": {
-        "type": "grafana-postgresql-datasource",
-        "uid": "TeslaMate"
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 16,
-        "y": 0
-      },
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [],
-          "noValue": "–",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "blue",
-                "value": null
-              }
-            ]
-          },
-          "unit": "suffix: km",
-          "decimals": 0
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "textMode": "value",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "grafana-postgresql-datasource",
-            "uid": "TeslaMate"
-          },
-          "editorMode": "code",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT SUM(f.tank_km) FROM garagebooks.fuel_fill f WHERE f.car_id = $car_id AND f.l_per_100km IS NOT NULL AND $__timeFilter(f.occurred_at)",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "id": 6,
-      "type": "stat",
-      "title": "Average L/100 km",
-      "description": "All the measured tanks together: litres ÷ distance. Not the average of the individual figures, so a short tank counts for less.",
-      "datasource": {
-        "type": "grafana-postgresql-datasource",
-        "uid": "TeslaMate"
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 20,
-        "y": 0
-      },
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [],
-          "noValue": "–",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          },
-          "unit": "suffix: L/100 km",
-          "decimals": 1
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "textMode": "value",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "grafana-postgresql-datasource",
-            "uid": "TeslaMate"
-          },
-          "editorMode": "code",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT SUM(f.tank_litres) / NULLIF(SUM(f.tank_km), 0) * 100 FROM garagebooks.fuel_fill f WHERE f.car_id = $car_id AND f.l_per_100km IS NOT NULL AND $__timeFilter(f.occurred_at)",
           "refId": "A"
         }
       ]
@@ -754,6 +632,128 @@
       ]
     },
     {
+      "id": 4,
+      "type": "stat",
+      "title": "Average price per litre",
+      "description": "Money spent ÷ litres, over the fill-ups in the time range.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "TeslaMate"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "noValue": "–",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "currency:financial:$",
+          "decimals": 3
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "textMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "TeslaMate"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT SUM(f.amount) / NULLIF(SUM(f.litres), 0) FROM garagebooks.fuel_fill f WHERE f.car_id = $car_id AND $__timeFilter(f.occurred_at)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Distance measured",
+      "description": "Distance covered by the tanks that L/100 km could be worked out for: from one full tank to the next, with no missed fuel-up.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "TeslaMate"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "noValue": "–",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "suffix: km",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "textMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "TeslaMate"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT SUM(f.tank_km) FROM garagebooks.fuel_fill f WHERE f.car_id = $car_id AND f.l_per_100km IS NOT NULL AND $__timeFilter(f.occurred_at)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
       "id": 11,
       "type": "timeseries",
       "title": "L/100 km per fill-up",
@@ -766,7 +766,7 @@
         "h": 9,
         "w": 12,
         "x": 0,
-        "y": 8
+        "y": 12
       },
       "fieldConfig": {
         "defaults": {
@@ -827,7 +827,7 @@
         "h": 9,
         "w": 12,
         "x": 12,
-        "y": 8
+        "y": 12
       },
       "fieldConfig": {
         "defaults": {
@@ -888,7 +888,7 @@
         "h": 9,
         "w": 12,
         "x": 0,
-        "y": 17
+        "y": 21
       },
       "fieldConfig": {
         "defaults": {
@@ -949,7 +949,7 @@
         "h": 9,
         "w": 12,
         "x": 12,
-        "y": 17
+        "y": 21
       },
       "fieldConfig": {
         "defaults": {
@@ -1010,7 +1010,7 @@
         "h": 9,
         "w": 12,
         "x": 0,
-        "y": 26
+        "y": 30
       },
       "fieldConfig": {
         "defaults": {
@@ -1071,7 +1071,7 @@
         "h": 9,
         "w": 12,
         "x": 12,
-        "y": 26
+        "y": 30
       },
       "fieldConfig": {
         "defaults": {
@@ -1132,13 +1132,14 @@
         "h": 12,
         "w": 24,
         "x": 0,
-        "y": 35
+        "y": 39
       },
       "fieldConfig": {
         "defaults": {
           "custom": {
             "align": "auto",
-            "filterable": true
+            "filterable": true,
+            "minWidth": 80
           }
         },
         "overrides": [
@@ -1154,7 +1155,7 @@
               },
               {
                 "id": "custom.width",
-                "value": 210
+                "value": 190
               }
             ]
           },
@@ -1225,7 +1226,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Distance since last fuel-up"
+              "options": "Since last fill"
             },
             "properties": [
               {
@@ -1278,7 +1279,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT f.occurred_at AS \"Date\", e.vendor AS \"Vendor\", f.litres AS \"Litres\", f.amount AS \"Amount\", f.price_per_litre AS \"Price per litre\",\n       f.odometer_km AS \"Odometer\", f.distance_km AS \"Distance since last fuel-up\", f.l_per_100km AS \"L/100 km\",\n       CASE WHEN NOT f.full_tank THEN 'Partial fill' ELSE 'Full tank' END AS \"Fill\",\n       CASE WHEN f.missed_fill THEN 'Fuel-up missed before this' END AS \"Note\"\nFROM garagebooks.fuel_fill f JOIN garagebooks.expense e ON e.id = f.id\nWHERE f.car_id = $car_id AND $__timeFilter(f.occurred_at)\nORDER BY f.occurred_at DESC, f.id DESC",
+          "rawSql": "SELECT f.occurred_at AS \"Date\", e.vendor AS \"Vendor\", f.litres AS \"Litres\", f.amount AS \"Amount\", f.price_per_litre AS \"Price per litre\",\n       f.odometer_km AS \"Odometer\", f.distance_km AS \"Since last fill\", f.l_per_100km AS \"L/100 km\",\n       CASE WHEN NOT f.full_tank THEN 'Partial fill' ELSE 'Full tank' END AS \"Fill\",\n       CASE WHEN f.missed_fill THEN 'Missed one' END AS \"Note\"\nFROM garagebooks.fuel_fill f JOIN garagebooks.expense e ON e.id = f.id\nWHERE f.car_id = $car_id AND $__timeFilter(f.occurred_at)\nORDER BY f.occurred_at DESC, f.id DESC",
           "refId": "A"
         }
       ]

@@ -141,7 +141,7 @@ def test_a_partial_and_a_missed_fill_are_marked_in_the_list(client, admin, ute):
     assert post(admin, client, litres="15", partial="1", odometer_km="10200").status_code == 303
     assert post(admin, client, litres="30", missed="1", odometer_km="11000", date="2026-10-12", amount="95.00").status_code == 303
     page = client.get("/").data.decode()
-    assert "Partial fill" in page and "fuel-up missed" in page
+    assert "Partial fill" in page and "After a fuel-up missed" in page
     assert "L/100 km" not in page
 
 

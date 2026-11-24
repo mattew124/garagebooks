@@ -491,7 +491,9 @@ td .muted { color: var(--muted); }
 .pay-part, .pay-over { color: var(--bad, #b3261e); }
 
 /* Cost after tax: what a packaged expense costs, small beside its invoice amount. */
-small.fuel-note { display: block; font-weight: 400; color: var(--muted); font-size: .8rem; white-space: nowrap; }
+/* Wraps rather than being cut off: the list's columns have fixed widths. */
+small.fuel-note { display: block; font-weight: 400; color: var(--muted); font-size: .8rem; white-space: normal; overflow-wrap: anywhere; }
+small.fuel-note.economy { font-weight: 600; color: inherit; }
 .fuel-summary { margin: 0; display: grid; gap: .25rem; }
 .fuel-summary:empty { display: none; }
 small.after-tax { display: block; font-weight: 400; color: var(--muted); font-size: .8rem; white-space: nowrap; }
