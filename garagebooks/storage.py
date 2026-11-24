@@ -62,7 +62,7 @@ class OneDriveStore:
     name = "OneDrive"
     ref_field = "invoice_url"
     _CALLS = ("folder", "subfolders", "contents", "create_folder", "ensure_subfolder", "upload",
-              "pdfs", "download", "rename")
+              "pdfs", "download", "rename", "fetch")
 
     def __init__(self, drive, access_token):
         self.drive, self._access_token, self._token = drive, access_token, None

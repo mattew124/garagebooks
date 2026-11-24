@@ -10,7 +10,7 @@ GarageBooks can push a notice to your phone when something needs you. You give i
 |---|---|---|
 | **A reminder is due soon** | The first time a [reminder](reminders.md) comes inside its lead time (by date or by odometer). | No: once. |
 | **A reminder is overdue** | The first time it passes its date or odometer reading. | No: once. |
-| **Registration expires** and **Lease ends** | The same two reminders that a car's [lease](leases.md) creates. A registration the provider renews for you is not sent. | As for any reminder. |
+| **Registration expires** and **Lease ends** | The same two reminders that a car's [lease](leases.md) creates. A registration the provider renews for you is not sent, nor the end of a lease whose next lease is already entered. | As for any reminder. |
 | **Microsoft client secret expires** | 30 days and again 7 days before the expiry date you entered on the Invoice storage page. | No: once for each. |
 | **Microsoft client secret has expired** | Once the date has passed. | No: once. |
 | **OneDrive sign-in lost** | When the app finds that Microsoft no longer accepts the saved sign-in. | Once each time it is lost. |

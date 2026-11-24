@@ -440,9 +440,10 @@ document.addEventListener("DOMContentLoaded", () => {
     leaseForm.addEventListener("input", (ev) => { if (ev.isTrusted && ev.target.name) touched.add(ev.target.name); });
     leaseForm.addEventListener("change", (ev) => { if (ev.isTrusted && ev.target.name) touched.add(ev.target.name); });
 
-    const showAssociate = () => leaseForm.querySelectorAll("[data-not-associate]").forEach((box) => {
-      box.hidden = el.associate_lease.checked;
-    });
+    const showAssociate = () => {
+      leaseForm.querySelectorAll("[data-not-associate]").forEach((box) => { box.hidden = el.associate_lease.checked; });
+      leaseForm.querySelectorAll("[data-associate]").forEach((box) => { box.hidden = !el.associate_lease.checked; });
+    };
     el.associate_lease.addEventListener("change", showAssociate);
     showAssociate();
 

@@ -68,11 +68,12 @@ def _without_sold(dash):
             panel["gridPos"].update(x=i * width, w=width)
 
 
-AFTER_TAX_PANELS = ("Running costs after tax", "After tax by FBT year")
+AFTER_TAX_PANELS = ("Running costs after tax", "After tax by FBT year", "After-tax cost by income year", "Household cost after tax",
+                    "Lease after tax by income year", "After tax by category and FBT year")
 
 
 def _without_after_tax(dash):
-    """Leave the cost-after-tax panels out: they have nothing to show until a marginal rate is entered and a car has a lease.
+    """Leave the cost-after-tax panels out: they have nothing to show until a tax bracket is chosen for some income year and a car has a lease.
     They are the last row, so nothing needs to move."""
     dash["panels"] = [p for p in dash["panels"] if p["title"] not in AFTER_TAX_PANELS]
 
@@ -96,7 +97,7 @@ def render(tz, base_path, source=SOURCE, start=None, teslamate=None, sold=True, 
     `sold` is whether any car has been sold: with none, the Sold panel is left out (it would only ever
     say "not sold"), and it comes back when a sale is recorded. `pace` is whether any lease has an estimated
     km per year: with none, the Kilometre pace panel is left out, and it comes back when one is entered.
-    `after_tax` is whether the cost-after-tax panels have anything to show (a marginal rate is entered and
+    `after_tax` is whether the cost-after-tax panels have anything to show (a tax bracket is chosen and
     some car has a lease)."""
     dash = json.loads(Path(source).read_text())
     if not sold:

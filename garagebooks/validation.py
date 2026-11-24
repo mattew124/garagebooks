@@ -460,40 +460,6 @@ def parse_url_setting(raw):
     return url
 
 
-def parse_marginal_rate(raw):
-    """The owner's marginal tax rate (Medicare levy included) as a percentage from 0 to 100: '34', '34.5 %'.
-    Blank -> None (not entered). It is only ever a rate, never a salary."""
-    return _percent(raw, "The marginal tax rate", 2)
-
-
-MAX_CENTS_PER_KM = Decimal("9999.99")  # numeric(6,2)
-
-
-def parse_cents_per_km(raw):
-    """The ATO's home charging rate: '4.2', '5.47c' -> Decimal cents per km, never negative."""
-    cleaned = (raw or "").lower().replace("cents", "").replace("c", "").replace(",", "").strip()
-    if not cleaned:
-        raise ValueError("Enter the rate in cents per km, e.g. 4.20.")
-    try:
-        value = Decimal(cleaned)
-    except InvalidOperation:
-        raise ValueError("The rate in cents per km must be a number, e.g. 4.20.") from None
-    if not value.is_finite() or value < 0 or value > MAX_CENTS_PER_KM:
-        raise ValueError("The rate in cents per km must be between 0 and 9,999.99.")
-    return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-
-
-def parse_rate_year(raw):
-    """The FBT year a charging rate is for, as the year it starts in: 2026 is FBT 2026-27."""
-    try:
-        year = int((raw or "").strip())
-    except ValueError:
-        raise ValueError("Enter the FBT year as the year it starts in, e.g. 2026.") from None
-    if not 1990 <= year <= 2200:
-        raise ValueError("Enter the FBT year as the year it starts in, e.g. 2026.")
-    return year
-
-
 PAID_FROM = {"auto": None, "package": True, "personal": False}
 
 
@@ -721,6 +687,10 @@ def parse_lease_form(form, pools, frequencies, fbt_methods, tax_treatments, budg
         errors["pretax_payment"] = "Enter the payment, pre-tax or post-tax."
 
     money("car_cost", "the car's cost")
+    money("depreciation_value", "the value for depreciation")
+    if not associate:    # only the associate's depreciation uses it
+        values["depreciation_value"] = None
+        errors.pop("depreciation_value", None)
     money("residual_amount", "the residual amount")
     attempt("residual_percent", _percent, form.get("residual_percent"), "The residual percentage", 3)
     if associate:        # no balloon on an associate lease: whatever was in the hidden boxes is dropped

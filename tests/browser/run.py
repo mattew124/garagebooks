@@ -975,7 +975,7 @@ def test_settings_lists_the_scheduled_jobs(page):
     assert section.locator("h2").text_content() == "Scheduled jobs", section.locator("h2").text_content()
     assert section.locator("#jobs-where").inner_text().strip(), "it says where the jobs run"
     names = section.locator("li[data-job]").evaluate_all("els => els.map(e => e.dataset.job)")
-    assert names == ["dashboard", "mail", "notifications", "teslamate"], names
+    assert names == ["ato_rates", "dashboard", "mail", "notifications", "teslamate"], names
     states = section.locator("li[data-job]").evaluate_all("els => els.map(e => e.dataset.state)")
     assert set(states) <= {"never", "ok", "failed", "running"}, states
     assert "every hour" in section.locator('li[data-job="teslamate"]').inner_text()
@@ -1464,19 +1464,31 @@ def fbt_checks(page):
     assert page.get_by_role("link", name=re.compile(r"FBT \d{4}–\d\d →")).count() == 1, "no link on to a year with data"
 
 
-def set_marginal_rate(page, value):
-    """Settings > Marginal tax rate. Blank means not entered."""
+def this_income_year():
+    from datetime import date
+    today = date.today()
+    return today.year if today.month >= 7 else today.year - 1
+
+
+def set_tax_year(page, bracket, medicare="not_exempt"):
+    """Settings > Cost after tax: this income year's bracket (by its first dollar; "" follows the year before) and
+    Medicare levy status. -> what they were before."""
+    year = this_income_year()
     page.goto(UI + "settings")
-    page.fill("input[name=marginal_tax_rate]", value)
+    pick, levy = (page.locator(f"select[name=tax_employee_{year}_{part}]") for part in ("bracket", "medicare"))
+    before = (pick.input_value(), levy.input_value())
+    pick.select_option(bracket)
+    levy.select_option(medicare)
     page.click("button[type=submit].button")
     page.wait_for_url(re.compile(r"msg=settings"))
+    return before
 
 
 def after_tax_dashboard_checks(page):
     """With a rate and a lease the dashboard has both after-tax panels, and they sit below the Kilometre pace row
     without covering it (a tall viewport: Grafana only draws the panels in view)."""
     car_id = re.search(r"/cars/(\d+)/", page.url).group(1)
-    wide = page.context.browser.new_context(viewport={"width": 1280, "height": 3000})
+    wide = page.context.browser.new_context(viewport={"width": 1280, "height": 3600})   # down to the after-tax TCO row
     graf = wide.new_page()
     try:
         for _ in range(12):      # Grafana re-reads the provisioned dashboard every 60 seconds
@@ -1489,32 +1501,34 @@ def after_tax_dashboard_checks(page):
         shot(graf, "after-tax-dashboard")
         expect(graf.get_by_text("Running costs after tax", exact=True).first).to_be_visible(timeout=30000)
         expect(graf.get_by_text("After tax by FBT year", exact=True).first).to_be_visible()
+        for title in ("After-tax cost by income year", "Household cost after tax", "Lease after tax by income year",
+                      "After tax by category and FBT year"):
+            expect(graf.get_by_text(title, exact=True).first).to_be_visible()
     finally:
         wide.close()
 
 
 def test_cost_after_tax(page):
-    """The marginal rate in Settings, "Paid from" on the form, the after-tax figure in the list and the After tax
-    part of the FBT year report. The rate is put back as it was, and the car (and its expense) deleted, at the end."""
-    page.goto(UI + "settings")
-    before = page.input_value("input[name=marginal_tax_rate]")
+    """This income year's tax bracket in Settings, "Paid from" on the form, the after-tax figure in the list and the
+    After tax part of the FBT year report. The year's choice is put back as it was, and the car (and its expense)
+    deleted, at the end."""
+    before = set_tax_year(page, "45001")                 # $45,001 - $135,000 (30%), not exempt: 32%
     try:
-        cost_after_tax_checks(page, before)
+        cost_after_tax_checks(page)
     finally:
         remove_marked(page)
-        set_marginal_rate(page, before)
+        set_tax_year(page, *before)
 
 
-def cost_after_tax_checks(page, before):
+def cost_after_tax_checks(page):
     from datetime import date, timedelta
     today = date.today()
-    set_marginal_rate(page, "34")
-    assert page.input_value("input[name=marginal_tax_rate]").startswith("34"), "the rate wasn't kept"
+    year = this_income_year()
+    assert page.input_value(f"select[name=tax_employee_{year}_bracket]") == "45001", "the bracket wasn't kept"
+    expect(page.locator("#tax-years")).to_contain_text("$45,001 – $135,000 (30%)")
     expect(page.locator("#ev-rates")).to_contain_text("FBT 2026–27")        # the ATO's rates are listed, as data
+    expect(page.locator("#ev-rates input")).to_have_count(0)                # and not edited here
     shot(page, "settings-after-tax")
-    page.fill("input[name=marginal_tax_rate]", "101")
-    page.click("button[type=submit].button")
-    expect(page.locator("#after-tax-settings .error")).to_contain_text("between 0 and 100")
     add_marked_car(page).get_by_role("link", name="Lease").click()
     page.click("#add-lease-top")
     page.locator("#f-financier").fill("Example Finance")
@@ -1538,7 +1552,7 @@ def cost_after_tax_checks(page, before):
     page.click("button[type=submit].button")
     page.wait_for_url(re.compile(r"msg=saved"))
     row = page.locator("tr", has_text=MARKER)
-    expect(row.locator("small.after-tax")).to_contain_text("$681.25 after tax")
+    expect(row.locator("small.after-tax")).to_contain_text("$700.00 after tax")
     expect(page.locator("#after-tax-total")).to_contain_text("after tax")
     shot(page, "list-after-tax")
     row.get_by_role("link", name="Edit").click()                           # paid personally: no after-tax figure
@@ -1554,16 +1568,14 @@ def cost_after_tax_checks(page, before):
     page.locator(".car", has_text=MARKER).get_by_role("link", name="Lease").click()
     page.get_by_role("link", name="Costs, taxable value and contributions by FBT year").click()
     after = page.locator("#fbt-after-tax")
-    expect(after.locator("#fbt-after-tax-lines")).to_contain_text("$681.25")
+    expect(after.locator("#fbt-after-tax-running")).to_contain_text("$700.00")
     expect(after.locator("#fbt-reimbursement")).to_contain_text("Not known")     # no odometer: never counted as nothing
     expect(after.locator("#fbt-after-tax-total")).to_contain_text("unavailable")
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "sideways scroll on a phone"
     shot(page, "fbt-after-tax")
     after_tax_dashboard_checks(page)
-    set_marginal_rate(page, "")                                                  # no rate: pages say so, show nothing
-    page.goto(UI)
-    expect(page.locator("#no-tax-rate")).to_be_visible()
-    expect(page.locator("small.after-tax")).to_have_count(0)
+    # (With no year chosen at all the pages say so and show nothing: tests/test_after_tax.py. The dev stack may hold
+    # earlier years' choices, which a later year follows, so it isn't tried here.)
 
 
 def km_pace_checks(page, today, year):
@@ -1596,7 +1608,7 @@ def km_pace_checks(page, today, year):
     expect(page.locator("#lease-km-pace")).to_contain_text("0 km driven so far")
     shot(page, "km-pace-lease-phone")
     car_id = re.search(r"/cars/(\d+)/", report).group(1)
-    wide = page.context.browser.new_context(viewport={"width": 1280, "height": 3000})   # Grafana only draws the panels in view
+    wide = page.context.browser.new_context(viewport={"width": 1280, "height": 3600})   # Grafana only draws the panels in view
     graf = wide.new_page()
     for _ in range(12):      # Grafana re-reads the provisioned dashboard every 60 seconds: wait for the new panel
         graf.goto(GRAFANA + f"d/garagebooks-tco/cost-of-ownership?var-car_id={car_id}")
@@ -1855,6 +1867,50 @@ def test_list_with_a_claim_link_fits_a_phone(page):
         remove_marked(page)
 
 
+def test_real_onedrive_claim(page):
+    """An expense whose invoice is in the real OneDrive (the test folder only) is claimed with that file: the claim
+    page downloads it and previews through the stand-in connector, rather than asking for the file. Nothing is
+    submitted. The car, lease and expenses are removed at the end; the uploaded PDF stays in the test folder."""
+    from datetime import date
+    page.goto(UI + "storage")
+    if not page.locator("button:has-text('Disconnect')").count():
+        raise Skip("dev stack isn't connected to OneDrive (scripts/dev.sh onedrive-link)")
+    if not in_test_folder(page):
+        raise Skip(f"cars aren't pointed at /{TEST_FOLDER}, so nothing was written")
+    fake_connector(page)
+    try:
+        page.goto(UI + "new")                 # uploaded through a car whose folder is the test folder
+        page.set_input_files("input[name=invoice_file]", {
+            "name": "browser-test-claim.pdf", "mimeType": "application/pdf", "buffer": b"%PDF-1.4\n%%EOF\n"})
+        page.wait_for_load_state("networkidle")
+        page.select_option("select[name=category_id]", label="Tyres")
+        page.fill("input[name=amount]", "371.94")
+        page.fill("input[name=vendor]", MARKER)
+        page.fill("input[name=invoice_url]", "")
+        page.click("button[type=submit].button")
+        page.wait_for_url(re.compile(r"msg=saved"), timeout=60000)
+        page.goto(UI)
+        link = page.locator("tbody tr", has_text=MARKER).locator("a[href^='https://']").first.get_attribute("href")
+        assert "onedrive" in link or "1drv" in link, f"not a OneDrive address: {link[:40]}"
+
+        add_claimable_expense(page, date.today())
+        page.goto(UI)
+        row = page.locator("tbody tr", has_text=MARKER).filter(has_text="$1,200.00")
+        row.locator("a:has-text('Edit')").first.click()
+        page.fill("input[name=invoice_url]", link)
+        page.click("button[type=submit].button")
+        page.wait_for_url(re.compile(r"msg=updated"))
+        page.goto(UI)
+        page.locator("tbody tr", has_text=MARKER).filter(has_text="$1,200.00").locator("a.claim-link").click()
+        expect(page.locator("#claim-preview")).to_contain_text("Claim $1200.00 for Tyres", timeout=60000)
+        body = page.locator("main").inner_text()
+        assert "only a link" not in body and "No invoice is attached" not in body, "the OneDrive invoice wasn't sent"
+        expect(page.get_by_role("button", name="Submit claim")).to_be_visible()
+        shot(page, "claim-preview-onedrive")
+    finally:
+        remove_marked(page)
+
+
 def sync_provider_history(page):
     """Press Sync provider history: it starts in the background, the page shows it running and reloads itself when done."""
     page.get_by_role("button", name="Sync provider history").click()
@@ -2028,6 +2084,7 @@ def main():
         step("Connect OneDrive goes to Microsoft", test_connect_reaches_microsoft, page)
         step("folder browser (read-only)", test_folder_browser, page)
         step("real upload to the OneDrive test folder", test_real_upload, page)
+        step("a claim sends an invoice kept in the real OneDrive", test_real_onedrive_claim, page)
         step("OneDrive file picker on the Add form", test_onedrive_picker, page)
         step("import page shows progress", test_import_page_shows_progress, page)
         # The built-in PDF viewer only exists in full Chromium, not the headless shell the rest uses.

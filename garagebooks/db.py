@@ -274,10 +274,9 @@ def build_odometer_at(conn, use_teslamate):
 
 def get_settings(conn):
     row = conn.execute("SELECT app_url, grafana_url, invoice_date_format, invoice_name_format, multi_amount, "
-                       "lease_budgets, marginal_tax_rate FROM garagebooks.setting WHERE id = 1").fetchone()
+                       "lease_budgets FROM garagebooks.setting WHERE id = 1").fetchone()
     return row or {"app_url": None, "grafana_url": None, "invoice_date_format": None,
-                   "invoice_name_format": None, "multi_amount": None, "lease_budgets": False,
-                   "marginal_tax_rate": None}
+                   "invoice_name_format": None, "multi_amount": None, "lease_budgets": False}
 
 
 def get_notify(conn):
@@ -301,6 +300,21 @@ def save_notify_teslamate(conn, on):
     conn.execute("UPDATE garagebooks.setting SET notify_teslamate = %s WHERE id = 1", (bool(on),))
 
 
+def save_app_tz(conn, tz):
+    """Keep APP_TZ in the settings, so the database's views (the reminders derived from a lease) judge "today" on
+    the app's day, not the server's. Done on every start. False, and nothing saved, if the database does not know
+    the zone or can't save it (it then uses its own day, as before)."""
+    try:
+        with conn.transaction():
+            conn.execute("SELECT now() AT TIME ZONE %s", (tz,))
+            conn.execute("UPDATE garagebooks.setting SET app_tz = %s WHERE id = 1 AND app_tz IS DISTINCT FROM %s",
+                         (tz, tz))
+        return True
+    except psycopg.Error as exc:       # a zone the database doesn't know, or a schema from before this column
+        log.warning("APP_TZ (%s) could not be saved for the database's views, which use the server's day: %s", tz, exc)
+        return False
+
+
 def lease_budgets_on(conn):
     """Whether the owner tracks the provider's yearly budget pools (Settings). Off unless turned on."""
     return bool(get_settings(conn)["lease_budgets"])
@@ -313,9 +327,59 @@ def save_settings(conn, app_url, grafana_url, invoice_date_format, invoice_name_
                  (app_url, grafana_url, invoice_date_format, invoice_name_format, multi_amount, bool(lease_budgets)))
 
 
-def set_marginal_tax_rate(conn, rate):
-    """The owner's marginal tax rate as a percentage (None: not entered). Only ever a rate, never a salary."""
-    conn.execute("UPDATE garagebooks.setting SET marginal_tax_rate = %s WHERE id = 1", (rate,))
+def tax_brackets(conn):
+    """The ATO's income tax brackets, every year: rows of income_year, lower_income, threshold, base_tax, rate and
+    checked_at, oldest year and lowest bracket first."""
+    return conn.execute("SELECT * FROM garagebooks.tax_bracket ORDER BY income_year, lower_income").fetchall()
+
+
+def replace_tax_year(conn, year, rows, checked_at):
+    """Put one income year's brackets in place of what is there (rows of lower_income, threshold, base_tax, rate),
+    noting when they were read. A year whose brackets are unchanged only has checked_at moved."""
+    known = [(r["lower_income"], r["threshold"], r["base_tax"], r["rate"]) for r in conn.execute(
+        "SELECT * FROM garagebooks.tax_bracket WHERE income_year = %s ORDER BY lower_income", (year,))]
+    if known != [(r["lower_income"], r["threshold"], r["base_tax"], r["rate"]) for r in rows]:
+        conn.execute("DELETE FROM garagebooks.tax_bracket WHERE income_year = %s", (year,))
+        for r in rows:
+            conn.execute("INSERT INTO garagebooks.tax_bracket (income_year, lower_income, threshold, base_tax, rate) "
+                         "VALUES (%s, %s, %s, %s, %s)", (year, r["lower_income"], r["threshold"], r["base_tax"], r["rate"]))
+    conn.execute("UPDATE garagebooks.tax_bracket SET checked_at = %s WHERE income_year = %s", (checked_at, year))
+    return known != [(r["lower_income"], r["threshold"], r["base_tax"], r["rate"]) for r in rows]
+
+
+def tax_choices(conn):
+    """Each person's chosen bracket and Medicare status by income year: {(person, year): row}. Never a salary."""
+    return {(r["person"], r["income_year"]): r for r in conn.execute("SELECT * FROM garagebooks.tax_choice")}
+
+
+def set_tax_choice(conn, person, year, bracket_lower, medicare):
+    """Choose a person's bracket (by its first dollar) and Medicare status for an income year; bracket_lower None
+    removes the year's choice, so it follows the latest earlier one."""
+    if bracket_lower is None:
+        conn.execute("DELETE FROM garagebooks.tax_choice WHERE person = %s AND income_year = %s", (person, year))
+        return
+    conn.execute("INSERT INTO garagebooks.tax_choice (person, income_year, bracket_lower, medicare) VALUES (%s, %s, %s, %s) "
+                 "ON CONFLICT (person, income_year) DO UPDATE SET bracket_lower = excluded.bracket_lower, medicare = excluded.medicare",
+                 (person, year, bracket_lower, medicare))
+
+
+def tax_positions(conn, person, years):
+    """garagebooks.tax_position() for each year: {year: row or None}."""
+    return {y: conn.execute("SELECT * FROM garagebooks.tax_position(%s, %s)", (person, y)).fetchone() for y in years}
+
+
+def any_associate_lease(conn):
+    return conn.execute("SELECT EXISTS (SELECT 1 FROM garagebooks.lease WHERE associate_lease) AS x").fetchone()["x"]
+
+
+def lease_years(conn, car_id):
+    """garagebooks.lease_income_year() for one car's leases, by lease and income year."""
+    return conn.execute("SELECT * FROM garagebooks.lease_income_year() WHERE car_id = %s ORDER BY income_year, lease_id",
+                        (car_id,)).fetchall()
+
+
+def any_tax_choice(conn, person="employee"):
+    return conn.execute("SELECT EXISTS (SELECT 1 FROM garagebooks.tax_choice WHERE person = %s) AS x", (person,)).fetchone()["x"]
 
 
 def ev_charging_rates(conn):
@@ -324,10 +388,16 @@ def ev_charging_rates(conn):
         "SELECT fbt_year, cents_per_km FROM garagebooks.ev_charging_rate ORDER BY fbt_year")}
 
 
-def set_ev_charging_rate(conn, year, cents_per_km):
-    """Add a year's rate, or change it."""
-    conn.execute("INSERT INTO garagebooks.ev_charging_rate (fbt_year, cents_per_km) VALUES (%s, %s) "
-                 "ON CONFLICT (fbt_year) DO UPDATE SET cents_per_km = excluded.cents_per_km", (year, cents_per_km))
+def ev_charging_table(conn):
+    """The home charging rates with where they came from and when they were last checked, newest year first."""
+    return conn.execute("SELECT * FROM garagebooks.ev_charging_rate ORDER BY fbt_year DESC").fetchall()
+
+
+def set_ev_charging_rate(conn, year, cents_per_km, source_url=None, checked_at=None):
+    """Add a year's rate, or change it (the ato_rates job, with where it read it and when)."""
+    conn.execute("INSERT INTO garagebooks.ev_charging_rate (fbt_year, cents_per_km, source_url, checked_at) VALUES (%s, %s, %s, %s) "
+                 "ON CONFLICT (fbt_year) DO UPDATE SET cents_per_km = excluded.cents_per_km, source_url = excluded.source_url,"
+                 " checked_at = excluded.checked_at", (year, cents_per_km, source_url, checked_at))
 
 
 def categories(conn):
@@ -448,10 +518,12 @@ _SELECT = """
 """
 
 # What the cost after tax needs of an expense (lease.effective_cost works it out): its own choice, its
-# category's pool, kind and GST status, and the payments of the lease covering its date in time zone %(tz)s.
+# category's pool, kind and GST status, the payments of the lease covering its date in time zone %(tz)s, and the
+# marginal rate for the income year of that date (None when no tax bracket is chosen for it or before it).
 _AFTER_TAX_SELECT = """
     SELECT e.id, e.car_id, e.category_id, cat.name AS category, cat.kind, cat.budget_pool, cat.gst_free, e.amount,
-           e.gst_amount, e.occurred_at, e.packaged, l.id AS lease_id, l.pretax_payment, l.posttax_payment
+           e.gst_amount, e.occurred_at, e.packaged, l.id AS lease_id, l.pretax_payment, l.posttax_payment,
+           garagebooks.marginal_rate('employee', (e.occurred_at AT TIME ZONE %(tz)s)::date) AS marginal_rate
     FROM garagebooks.expense e
     JOIN garagebooks.category cat ON cat.id = e.category_id
     LEFT JOIN LATERAL (SELECT * FROM garagebooks.lease l WHERE l.car_id = e.car_id
@@ -758,7 +830,7 @@ LEASE_FIELDS = ("package_name", "financier", "start_date", "end_date", "refinanc
                 "pay_frequency", "pretax_payment", "posttax_payment", "admin_fee", "car_cost",
                 "residual_amount", "residual_percent", "fbt_base_value", "fbt_method", "statutory_percent",
                 "ev_exempt", "tax_treatment", "tax_treatment_note", "estimated_km_per_year",
-                "rego_expiry", "rego_renewed_by_provider", "associate_lease", "charging_reimbursed",
+                "rego_expiry", "rego_renewed_by_provider", "associate_lease", "charging_reimbursed", "depreciation_value",
                 "form_url", "form_path", "agreement_url", "agreement_path")
 
 

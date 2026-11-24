@@ -60,8 +60,8 @@ in), for queries of your own. The per-car report is described under [Leases](lea
 
 ## Cost after tax
 
-Two panels in a row below the others show what the running costs come to after tax, beside the invoices.
-They are on the dashboard only once a **marginal tax rate** is entered in Settings and some car has a lease;
+A row of panels below the others shows what the running costs come to after tax, beside the invoices.
+They are on the dashboard only once a **tax bracket** is chosen for some income year in Settings and some car has a lease;
 saving either rewrites the dashboard, so they appear and go by themselves. An expense paid from the package
 has its GST claimed back and the rest comes from pre-tax salary; one paid personally costs its invoice. The
 rules, the simplifications and a worked example are on
@@ -72,18 +72,41 @@ rules, the simplifications and a worked example are on
   TeslaMate, counts as paid personally. It shows a dash while a packaged expense can't be worked out.
 - **After tax by FBT year** lists each FBT year with the same two figures and the difference. It ignores the
   time range, so the years are whole.
+- **After tax by category and FBT year** breaks each FBT year down by category: the invoices, what they cost
+  after tax and how many were paid from the package. (The FBT year report in GarageBooks shows only the year's
+  totals and the home charging reimbursement, and points here for the breakdown.)
 
 The home charging reimbursement needs the odometer, so it is **shown in the app only** (on the FBT year report),
 not on the dashboard. The existing total cost of ownership figures are unchanged: these panels sit beside them.
 
 <!-- screenshot: dashboard-after-tax - The Running costs after tax and After tax by FBT year panels -->
 
+## After-tax cost of ownership
+
+A row below the cost-after-tax panels puts the whole after-tax cost of a car together, by **income year**
+(1 July to 30 June, the year tax is worked out in), with the same rule for when it is shown:
+
+- **After-tax cost by income year**: stacked bars of the running costs after tax and what the lease costs the
+  household after tax. For a lease through a financier that is the payments less the tax you save on them. For
+  an [associate lease](lease-calculations.md#in-garagebooks-an-associate-lease-after-tax) the payments stay in
+  the household, so it is the associate's extra tax (on the payments less depreciation, net of the small
+  business income tax offset) less the tax you save. Below zero is a saving.
+- **Household cost after tax**: the same, all years together, with the lease payments and your tax saved.
+- **Lease after tax by income year**: per year, the payments, your tax saved, the associate's depreciation and
+  extra tax, and the household figure.
+
+A figure that needs a bracket not chosen (yours or the associate's) is left blank, never 0. The purchase is left
+out. The panels read `garagebooks.after_tax_by_income_year(tz)`, built on `expense_after_tax()` and
+`lease_income_year()`, the same definitions the app uses.
+
+<!-- screenshot: dashboard-after-tax-tco - The After-tax cost of ownership row: cost by income year, the household total and the lease table -->
+
 ## Reminders
 
 The **Reminders** table, above the expenses, lists what is open for the selected car, most urgent
 first: the title, due date and due odometer reading, **Days left**, **Km left** and **Status**
 (Overdue, Due soon, Upcoming, Odometer unknown, or Provider renews for a registration the lease provider
-looks after). The rules are the same as in the app: see [Reminders](reminders.md#what-the-statuses-mean).
+looks after, or Next lease loaded for a lease end whose next lease is already entered). The rules are the same as in the app: see [Reminders](reminders.md#what-the-statuses-mean).
 It needs no TeslaMate table, so it is there with or without TeslaMate. The odometer it counts from is the
 car's latest known one (the same as **Distance** above). With none known, a reminder due by odometer says
 *Odometer unknown* and its **Km left** is empty. A reminder due today or later is *Due soon* inside its lead time; the days
@@ -92,11 +115,12 @@ and includes the registration and lease end from the car's [lease](leases.md).
 
 ## Kilometre pace
 
-The **Kilometre pace** table, at the bottom of the dashboard, shows the selected car's current lease against its
-estimated km per year, for the current FBT year: **Expected km** (pro rata for the days held), **Odometer at start** and
+The **Kilometre pace** table, at the bottom of the dashboard, shows the selected car's current FBT year against
+its estimated km per year. When a lease ends during the year and the next one starts, both leases are added up, each
+with its own days and estimate (see [Lease calculations](lease-calculations.md#kilometre-pace-l4)). The figures are: **Expected km** (pro rata for the days held), **Odometer at start** and
 **Odometer needed at end**, **Km per day needed**, **Driven so far**, **Km per day driven**, **Ahead (+) or behind (-)** the
 pro-rata pace and **Km per day needed from today**. They are the same figures as the
-[FBT year report](leases.md#kilometre-pace) works out. The table is empty for a car with no current lease or no estimate, and
+[FBT year report](leases.md#kilometre-pace) works out. The table is empty when no lease held in the current FBT year has an estimate, and
 the panel is left out of the dashboard altogether until a lease has an estimate. A figure that needs an odometer that isn't
 known is empty, not 0.
 

@@ -10,11 +10,11 @@
 <div class="page-head">
   <h1>{{ filtered.name if filtered else 'All expenses' }}</h1>
   <p class="total"><small>{{ totals.n }} item{{ '' if totals.n == 1 else 's' }}</small> <strong>{{ totals.total|money }}</strong>
-    {% if after.total is not none and after.packaged %}<span id="after-tax-total" title="What these cost after tax: a packaged expense has its GST claimed back and the rest comes from pre-tax salary, at the marginal tax rate in Settings. Not tax advice."><small>{{ after.total|money }} after tax</small></span>{% endif %}</p>
+    {% if after.total is not none and after.packaged %}<span id="after-tax-total" title="What these cost after tax: a packaged expense has its GST claimed back and the rest comes from pre-tax salary, at the marginal rate of each one's income year (Settings). Not tax advice."><small>{{ after.total|money }} after tax</small></span>{% endif %}</p>
 </div>
 {% if after.packaged and not after.rate_set %}
-<p class="notice" id="no-tax-rate" role="status">Some of these are paid from a lease package, but your marginal tax rate isn't set, so what they cost after tax isn't shown.
-  <a href="{{ url_for('settings') }}">Set it in Settings</a></p>
+<p class="notice" id="no-tax-rate" role="status">Some of these are paid from a lease package, but no tax bracket is chosen in Settings for any income year, so what they cost after tax isn't shown.
+  <a href="{{ url_for('settings') }}">Choose your brackets in Settings</a></p>
 {% endif %}
 {% include "_expense_list.html" %}
 {% endblock %}
