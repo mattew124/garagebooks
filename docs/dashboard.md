@@ -61,7 +61,7 @@ in), for queries of your own. The per-car report is described under [Leases](lea
 ## Cost after tax
 
 Two panels in a row below the others show what the running costs come to after tax, beside the invoices.
-They are on the dashboard only once a **marginal tax rate** is entered in Settings and some car has a lease;
+They are on the dashboard only once a **tax bracket** is chosen for some income year in Settings and some car has a lease;
 saving either rewrites the dashboard, so they appear and go by themselves. An expense paid from the package
 has its GST claimed back and the rest comes from pre-tax salary; one paid personally costs its invoice. The
 rules, the simplifications and a worked example are on

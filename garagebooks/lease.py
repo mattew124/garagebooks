@@ -374,6 +374,29 @@ def ev_rate(rates, year):
     return (max(earlier), rates[max(earlier)]) if earlier else None
 
 
+def rate_over_days(spans, rate_of_year):
+    """The marginal rate across some day ranges (first, last; both included), each day at the rate of the income year
+    (1 July to 30 June) it falls in, `rate_of_year(year)` (None: not known). -> the rate weighted by days, or None when
+    any day's rate isn't known or there are no days."""
+    total, weighted = 0, Decimal(0)
+    for first, last in spans:
+        day = first
+        while day <= last:
+            year = day.year if day.month >= 7 else day.year - 1
+            end = min(last, date(year + 1, 6, 30))
+            rate = rate_of_year(year)
+            if rate is None:
+                return None
+            days = (end - day).days + 1
+            total, weighted = total + days, weighted + Decimal(rate) * days
+            day = end + timedelta(days=1)
+    if not total:
+        return None
+    with localcontext() as ctx:
+        ctx.prec = 60
+        return weighted / total
+
+
 def charging_reimbursement(km, cents_per_km, rate_percent):
     """The home charging reimbursement for `km` driven at `cents_per_km`, and the tax saved on it (at the
     marginal rate). None when the distance or the rate isn't known, or the readings run backwards: never 0."""
@@ -398,15 +421,16 @@ def reimbursed_spans(leases, year, today):
     return sorted(spans)
 
 
-def after_tax_lines(rows, key, rate_percent):
-    """The year's after-tax part of the report, from its expenses (db.after_tax_facts): `key(row)` names the
-    line each belongs to. -> {line: {"invoice": total, "effective": total or None, "packaged": n}}. A line's
-    effective total is None while any of its packaged expenses has none (no rate)."""
+def after_tax_lines(rows, key):
+    """The year's after-tax part of the report, from its expenses (db.after_tax_facts, each with the marginal rate
+    of its date's income year): `key(row)` names the line each belongs to.
+    -> {line: {"invoice": total, "effective": total or None, "packaged": n}}. A line's effective total is None while
+    any of its packaged expenses has none (no bracket chosen for its year)."""
     lines = {}
     for row in rows:
         packaged = is_packaged(row["packaged"], row["lease_id"] is not None, row["budget_pool"], row["kind"])
         cost = effective_cost(row["amount"], packaged, row["gst_free"], row["pretax_payment"], row["posttax_payment"],
-                              rate_percent, gst_amount=row["gst_amount"])
+                              row["marginal_rate"], gst_amount=row["gst_amount"])
         line = lines.setdefault(key(row), {"invoice": Decimal(0), "effective": Decimal(0), "packaged": 0})
         line["invoice"] += row["amount"]
         line["packaged"] += 1 if packaged else 0

@@ -1160,6 +1160,266 @@ BEGIN
     COMMENT ON TABLE garagebooks.service_item IS 'service categories moved';
 END $$;
 
+-- The tax rate by income year (1 July to 30 June), replacing the single marginal rate of earlier releases.
+--   tax_bracket  the ATO's resident income tax brackets for each income year (the year it starts in: 2025 is
+--                2025-26), as data. Seeded with the published years; the app's ato_rates job reads the ATO's page
+--                and replaces a year's rows only when the page reads cleanly (checked_at: when it last did).
+--                The tax on an income in a bracket is base_tax + rate% x (income - threshold).
+--   tax_choice   each person's bracket and Medicare levy status for an income year, chosen on the Settings page.
+--                A bracket stands for an income (its middle, or $10,000 into the top one): never a salary. A year
+--                with no choice uses the latest earlier year's, by the income it stands for.
+--                person: 'employee' (the one packaging the car) or 'associate' (their partner, for an associate lease)
+--                medicare: not_exempt (2% levy), half_exempt (1%) or exempt (0)
+CREATE TABLE IF NOT EXISTS garagebooks.tax_bracket (
+    income_year  integer NOT NULL CHECK (income_year BETWEEN 1990 AND 2200),
+    lower_income integer NOT NULL CHECK (lower_income >= 0),
+    threshold    numeric(12, 2) NOT NULL CHECK (threshold >= 0),
+    base_tax     numeric(12, 2) NOT NULL CHECK (base_tax >= 0),
+    rate         numeric(5, 2) NOT NULL CHECK (rate BETWEEN 0 AND 100),
+    checked_at   timestamptz,
+    PRIMARY KEY (income_year, lower_income)
+);
+INSERT INTO garagebooks.tax_bracket (income_year, lower_income, threshold, base_tax, rate)
+SELECT y, b.lower_income, b.threshold, b.base_tax, b.rate
+FROM generate_series(2020, 2023) y,
+     (VALUES (0, 0, 0, 0), (18201, 18200, 0, 19), (45001, 45000, 5092, 32.5), (120001, 120000, 29467, 37),
+             (180001, 180000, 51667, 45)) b (lower_income, threshold, base_tax, rate)
+UNION ALL
+SELECT y, b.lower_income, b.threshold, b.base_tax, b.rate
+FROM generate_series(2024, 2025) y,
+     (VALUES (0, 0, 0, 0), (18201, 18200, 0, 16), (45001, 45000, 4288, 30), (135001, 135000, 31288, 37),
+             (190001, 190000, 51638, 45)) b (lower_income, threshold, base_tax, rate)
+UNION ALL
+SELECT 2026, b.lower_income, b.threshold, b.base_tax, b.rate
+FROM (VALUES (0, 0, 0, 0), (18201, 18200, 0, 15), (45001, 45000, 4020, 30), (135001, 135000, 31020, 37),
+             (190001, 190000, 51370, 45)) b (lower_income, threshold, base_tax, rate)
+ON CONFLICT (income_year, lower_income) DO NOTHING;
+CREATE TABLE IF NOT EXISTS garagebooks.tax_choice (
+    person        text NOT NULL CHECK (person IN ('employee', 'associate')),
+    income_year   integer NOT NULL CHECK (income_year BETWEEN 1990 AND 2200),
+    bracket_lower integer NOT NULL CHECK (bracket_lower >= 0),
+    medicare      text NOT NULL DEFAULT 'not_exempt' CHECK (medicare IN ('not_exempt', 'half_exempt', 'exempt')),
+    PRIMARY KEY (person, income_year)
+);
+-- The home charging rates gain where they came from and when the ato_rates job last confirmed them (NULL: the
+-- rate shipped with GarageBooks, not yet checked).
+ALTER TABLE garagebooks.ev_charging_rate ADD COLUMN IF NOT EXISTS source_url text
+    CHECK (source_url IS NULL OR source_url ~ '^https://www\.ato\.gov\.au/');
+ALTER TABLE garagebooks.ev_charging_rate ADD COLUMN IF NOT EXISTS checked_at timestamptz;
+
+-- The income year a date falls in, as the year it starts in (2025 is 2025-26), like fbt_year().
+CREATE OR REPLACE FUNCTION garagebooks.income_year(d date) RETURNS integer
+LANGUAGE sql IMMUTABLE PARALLEL SAFE STRICT
+AS $$ SELECT CASE WHEN EXTRACT(month FROM d) >= 7 THEN EXTRACT(year FROM d)::integer
+                  ELSE EXTRACT(year FROM d)::integer - 1 END $$;
+
+-- The ATO year whose brackets an income year uses: its own, else the newest earlier one (a year not published
+-- yet), else the oldest (a year before the first).
+CREATE OR REPLACE FUNCTION garagebooks.tax_table_year(y integer) RETURNS integer
+LANGUAGE sql STABLE
+AS $$ SELECT COALESCE((SELECT max(income_year) FROM garagebooks.tax_bracket WHERE income_year <= y),
+                      (SELECT min(income_year) FROM garagebooks.tax_bracket)) $$;
+
+-- A person's tax position in an income year: the choice it comes from (that year's, or the latest earlier one),
+-- the income its bracket stands for, and the bracket that income falls in this year. No row when nothing is
+-- chosen at or before the year, or the chosen bracket is no longer one of its year's.
+--   marginal_rate = the bracket's rate + the Medicare levy (2, 1 or 0), as a percentage.
+-- tests/test_tax_years.py holds it to tax.py's labels and the Settings page.
+CREATE OR REPLACE FUNCTION garagebooks.tax_position(who text, y integer)
+RETURNS TABLE (chosen_year integer, table_year integer, income numeric, lower_income integer, threshold numeric,
+               base_tax numeric, rate numeric, medicare text, levy numeric, marginal_rate numeric)
+LANGUAGE sql STABLE
+AS $fn$
+    WITH c AS (SELECT * FROM garagebooks.tax_choice WHERE person = who AND income_year <= y
+               ORDER BY income_year DESC LIMIT 1),
+    b AS (SELECT t.*, lead(t.lower_income) OVER (PARTITION BY t.income_year ORDER BY t.lower_income) AS next_lower
+          FROM garagebooks.tax_bracket t),
+    i AS (SELECT c.income_year, c.medicare,
+                 CASE WHEN b.next_lower IS NULL THEN b.lower_income + 10000
+                      ELSE (b.lower_income + b.next_lower - 1) / 2.0 END AS income
+          FROM c JOIN b ON b.income_year = garagebooks.tax_table_year(c.income_year) AND b.lower_income = c.bracket_lower)
+    SELECT i.income_year, t.income_year, i.income, t.lower_income, t.threshold, t.base_tax, t.rate, i.medicare, m.levy,
+           t.rate + m.levy
+    FROM i
+    CROSS JOIN LATERAL (SELECT CASE i.medicare WHEN 'not_exempt' THEN 2 WHEN 'half_exempt' THEN 1 ELSE 0 END::numeric AS levy) m
+    JOIN LATERAL (SELECT * FROM b WHERE b.income_year = garagebooks.tax_table_year(y) AND b.lower_income <= i.income
+                  ORDER BY b.lower_income DESC LIMIT 1) t ON true
+$fn$;
+
+-- The marginal rate (Medicare levy included, as a percentage) of a person on a date, by its income year; NULL
+-- when none is chosen for that year or any earlier one.
+CREATE OR REPLACE FUNCTION garagebooks.marginal_rate(who text, d date) RETURNS numeric
+LANGUAGE sql STABLE
+AS $$ SELECT marginal_rate FROM garagebooks.tax_position(who, garagebooks.income_year(d)) $$;
+
+-- The single rate of earlier releases, once: if one was entered, every income year from the first with brackets
+-- to the current one gets the bracket whose rate + 2% (not exempt) is nearest it (the lower on a tie), so the
+-- after-tax figures stay the same where a bracket matches. The old column is then cleared, and no longer read.
+DO $$
+DECLARE
+    old numeric;
+BEGIN
+    SELECT marginal_tax_rate INTO old FROM garagebooks.setting WHERE id = 1;
+    IF old IS NULL OR EXISTS (SELECT 1 FROM garagebooks.tax_choice WHERE person = 'employee') THEN
+        RETURN;
+    END IF;
+    INSERT INTO garagebooks.tax_choice (person, income_year, bracket_lower, medicare)
+    SELECT 'employee', y, (SELECT b.lower_income FROM garagebooks.tax_bracket b
+                           WHERE b.income_year = garagebooks.tax_table_year(y)
+                           ORDER BY abs(b.rate + 2 - old), b.rate LIMIT 1), 'not_exempt'
+    FROM generate_series((SELECT min(income_year) FROM garagebooks.tax_bracket),
+                         garagebooks.income_year(CURRENT_DATE)) y;
+    UPDATE garagebooks.setting SET marginal_tax_rate = NULL WHERE id = 1;
+END $$;
+
+-- The after-tax function again, with the rate by the expense's date: the employee's marginal rate for the
+-- income year its date (in `tz`) falls in (marginal_rate()). Its columns are as before.
+CREATE OR REPLACE FUNCTION garagebooks.expense_after_tax(tz text)
+RETURNS TABLE (expense_id bigint, car_id smallint, occurred_at timestamptz, amount numeric,
+               packaged boolean, effective_cost numeric)
+LANGUAGE sql STABLE
+AS $fn$
+    SELECT e.id, e.car_id, e.occurred_at, e.amount, p.packaged,
+           CASE WHEN NOT p.packaged THEN e.amount
+                WHEN r.rate IS NULL THEN NULL
+                WHEN e.gst_amount IS NOT NULL
+                    THEN round((e.amount - e.gst_amount) * (q.pre * (100 - r.rate) + 100 * q.post)
+                               / (100 * (q.pre + q.post)), 2)
+                ELSE round(e.amount * CASE WHEN k.gst_free THEN 1 ELSE 10 END
+                               * (q.pre * (100 - r.rate) + 100 * q.post)
+                               / ((CASE WHEN k.gst_free THEN 1 ELSE 11 END) * 100 * (q.pre + q.post)), 2) END
+    FROM garagebooks.expense e
+    JOIN garagebooks.category k ON k.id = e.category_id
+    LEFT JOIN LATERAL (SELECT l.pretax_payment, l.posttax_payment FROM garagebooks.lease l
+                       WHERE l.car_id = e.car_id
+                         AND (e.occurred_at AT TIME ZONE tz)::date BETWEEN l.start_date AND l.end_date
+                       ORDER BY l.start_date LIMIT 1) l ON true
+    CROSS JOIN LATERAL (SELECT COALESCE(e.packaged, l.pretax_payment IS NOT NULL AND k.budget_pool IS NOT NULL
+                                                    AND k.kind <> 'purchase') AS packaged) p
+    CROSS JOIN LATERAL (SELECT CASE WHEN COALESCE(l.pretax_payment, 0) + COALESCE(l.posttax_payment, 0) > 0
+                                    THEN l.pretax_payment ELSE 1 END AS pre,
+                                   CASE WHEN COALESCE(l.pretax_payment, 0) + COALESCE(l.posttax_payment, 0) > 0
+                                    THEN l.posttax_payment ELSE 0 END AS post) q
+    CROSS JOIN LATERAL (SELECT garagebooks.marginal_rate('employee', (e.occurred_at AT TIME ZONE tz)::date) AS rate) r
+$fn$;
+
+-- An associate lease after tax, for the household (roadmap L7, docs/lease-calculations.md "The what-if model").
+--   lease.depreciation_value  the car's value for depreciation at the lease's start (the associate owns it); NULL
+--                             uses the lease's car cost. Never more than the car limit counts.
+--   car_limit                 the ATO's car limit by income year (the year it starts in), as data: the most of a
+--                             car's cost that can be depreciated. A lease uses the limit of the income year it starts
+--                             in, or the latest earlier year's.
+ALTER TABLE garagebooks.lease ADD COLUMN IF NOT EXISTS depreciation_value numeric(12, 2)
+    CHECK (depreciation_value IS NULL OR depreciation_value >= 0);
+CREATE TABLE IF NOT EXISTS garagebooks.car_limit (
+    income_year integer PRIMARY KEY CHECK (income_year BETWEEN 1990 AND 2200),
+    amount      numeric(12, 2) NOT NULL CHECK (amount > 0)
+);
+INSERT INTO garagebooks.car_limit (income_year, amount) VALUES
+    (2020, 59136), (2021, 60733), (2022, 64741), (2023, 68108), (2024, 69674), (2025, 69674)
+ON CONFLICT (income_year) DO NOTHING;
+
+-- The income tax on a taxable income by an income year's brackets (base + rate% x (income - threshold)); 0 for
+-- an income of 0 or less. Unrounded: callers round once, at the end.
+CREATE OR REPLACE FUNCTION garagebooks.income_tax(table_year integer, income numeric) RETURNS numeric
+LANGUAGE sql STABLE
+AS $$ SELECT COALESCE((SELECT b.base_tax + b.rate / 100 * (income - b.threshold) FROM garagebooks.tax_bracket b
+                       WHERE b.income_year = table_year AND b.lower_income <= income AND income > 0
+                       ORDER BY b.lower_income DESC LIMIT 1), 0) $$;
+
+-- Each lease's figures for each income year (1 July to 30 June) it is held in: the one definition the FBT year
+-- report and the dashboard share. Money is rounded to the cent once per figure. A figure that needs something not
+-- entered (a bracket, the car's value) is NULL, never 0.
+--   pays              pay dates in the year, stepping from the lease's start by its frequency (as lease.pay_dates)
+--   payments          (pre-tax + post-tax payment) x pays: the lease payments. For an associate lease the associate
+--                     receives them.
+--   pretax            the pre-tax part of them, plus the admin fee x pays: what comes from pre-tax salary
+--   employee_saving   pretax x your marginal rate for the year
+--   depreciation      associate lease only: diminishing value, 25% a year (200% / 8 years) of the value at the
+--                     start of the year x days held / days in the year; the first year's value is the lower of
+--                     depreciation_value (or car_cost) and the car limit, each later year's is that less the
+--                     depreciation before it
+--   business_income   payments - depreciation (the associate's; a loss is negative)
+--   associate_tax     the associate's income tax on (the income their bracket stands for + business_income), less on
+--                     the income alone, by the year's brackets
+--   associate_medicare  their levy (2%, 1% or 0) x business_income
+--   small_business_offset  min(16% x their tax on the higher income x business_income / that income, $1,000); 0 for a loss
+--   associate_cost    associate_tax + associate_medicare - small_business_offset: their extra tax
+--   household_cost    associate lease: admin fees - employee_saving + associate_cost (the payments stay in the
+--                     household); otherwise payments + admin fees - employee_saving. Negative is a saving.
+-- Not modelled: the low income tax offset, the Medicare levy's low-income phase-in, GST on the payments, HELP.
+CREATE OR REPLACE FUNCTION garagebooks.lease_income_year()
+RETURNS TABLE (lease_id integer, car_id smallint, associate boolean, income_year integer, days_held integer,
+               days_in_year integer, pays integer, payments numeric, pretax numeric, admin_fees numeric,
+               employee_rate numeric, employee_saving numeric, depreciation numeric, business_income numeric,
+               associate_rate numeric, associate_tax numeric, associate_medicare numeric, small_business_offset numeric,
+               associate_cost numeric, household_cost numeric)
+LANGUAGE plpgsql STABLE
+AS $fn$
+#variable_conflict use_column
+DECLARE
+    l record;
+    y integer;
+    first_day date;
+    last_day date;
+    value numeric;
+    emp record;
+    asc_pos record;
+    net numeric;
+    higher numeric;
+BEGIN
+    FOR l IN SELECT * FROM garagebooks.lease ORDER BY id LOOP
+        value := least(COALESCE(l.depreciation_value, l.car_cost),
+                       (SELECT c.amount FROM garagebooks.car_limit c
+                        WHERE c.income_year <= garagebooks.income_year(l.start_date) ORDER BY c.income_year DESC LIMIT 1));
+        FOR y IN garagebooks.income_year(l.start_date) .. garagebooks.income_year(l.end_date) LOOP
+            first_day := greatest(l.start_date, make_date(y, 7, 1));
+            last_day := least(l.end_date, make_date(y + 1, 6, 30));
+            lease_id := l.id; car_id := l.car_id; associate := l.associate_lease; income_year := y;
+            days_held := last_day - first_day + 1;
+            days_in_year := make_date(y + 1, 7, 1) - make_date(y, 7, 1);
+            SELECT count(*) INTO pays FROM generate_series(0, 2000) n
+            CROSS JOIN LATERAL (SELECT CASE l.pay_frequency WHEN 'weekly' THEN l.start_date + 7 * n
+                                                            WHEN 'fortnightly' THEN l.start_date + 14 * n
+                                                            ELSE (l.start_date + make_interval(months => n))::date END AS d) p
+            WHERE p.d BETWEEN first_day AND last_day;
+            payments := round((l.pretax_payment + l.posttax_payment) * pays, 2);
+            admin_fees := round(l.admin_fee * pays, 2);
+            pretax := round((l.pretax_payment + l.admin_fee) * pays, 2);
+            SELECT * INTO emp FROM garagebooks.tax_position('employee', y);
+            employee_rate := emp.marginal_rate;
+            employee_saving := round(pretax * employee_rate / 100, 2);
+            depreciation := NULL; business_income := NULL; associate_rate := NULL; associate_tax := NULL;
+            associate_medicare := NULL; small_business_offset := NULL; associate_cost := NULL;
+            IF l.associate_lease THEN
+                IF value IS NOT NULL THEN
+                    depreciation := round(value * 0.25 * days_held / days_in_year, 2);
+                    value := value - depreciation;
+                    business_income := payments - depreciation;
+                END IF;
+                SELECT * INTO asc_pos FROM garagebooks.tax_position('associate', y);
+                IF asc_pos.income IS NOT NULL AND business_income IS NOT NULL THEN
+                    net := business_income;
+                    higher := asc_pos.income + net;
+                    associate_rate := asc_pos.marginal_rate;
+                    associate_tax := round(garagebooks.income_tax(asc_pos.table_year, higher)
+                                           - garagebooks.income_tax(asc_pos.table_year, asc_pos.income), 2);
+                    associate_medicare := round(asc_pos.levy / 100 * net, 2);
+                    small_business_offset := CASE WHEN net > 0 AND higher > 0
+                        THEN round(least(1000, 0.16 * garagebooks.income_tax(asc_pos.table_year, higher) * net / higher), 2)
+                        ELSE 0 END;
+                    associate_cost := associate_tax + associate_medicare - small_business_offset;
+                END IF;
+                household_cost := admin_fees - employee_saving + associate_cost;
+            ELSE
+                household_cost := payments + admin_fees - employee_saving;
+            END IF;
+            RETURN NEXT;
+        END LOOP;
+    END LOOP;
+END
+$fn$;
+
 -- The lease reminders on the app's own day, and a lease that is followed by the next one.
 --   setting.app_tz  APP_TZ, written by the app on every start, so the database judges "today" as the app does: on
 --                   the server's own day (UTC, usually) a lease that ended last night was still current for hours.
