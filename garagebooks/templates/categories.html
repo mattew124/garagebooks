@@ -4,67 +4,68 @@
 {% block main_attrs %} class="narrow"{% endblock %}
 {% block content %}
 <h1>Categories</h1>
+<form method="post" action="{{ url_for('categories_save') }}" id="categories-form">
 <ul class="plain category-list">
   {% for c in categories %}
-  <li>
+  <li id="category-{{ c.id }}">
+    <input type="hidden" name="category_id" value="{{ c.id }}">
     <span>{{ c.name }} <small>{{ {'purchase': 'capital cost', 'energy': 'charging and fuel'}.get(c.kind, 'running cost') }}</small></span>
     {% if uploads_enabled %}
-    <form method="post" action="{{ url_for('category_folder', category_id=c.id) }}" class="row">
+    <div class="row">
       <label><small>{% if local_enabled %}Invoice subfolder{% else %}{{ mark() }} OneDrive folder{% endif %}</small>
-        <input name="upload_folder" maxlength="255" value="{{ c.upload_folder or '' }}" placeholder="{{ c.name }}" autocomplete="off"></label>
-      <button type="submit" class="secondary">Save</button>
-      {% if folder_error and folder_error[0] == c.id %}<span class="error">{{ folder_error[1] }}</span>{% endif %}
-    </form>
+        <input name="upload_folder_{{ c.id }}" maxlength="255" value="{{ c.upload_folder or '' }}" placeholder="{{ c.name }}" autocomplete="off"></label>
+    </div>
     {% endif %}
-    <form method="post" action="{{ url_for('category_gst_free', category_id=c.id) }}" class="row">
-      <label class="check"><input type="checkbox" name="gst_free" value="1" {{ 'checked' if c.gst_free }}>
-        <span>GST-free <small>(this category's invoices carry no GST)</small></span></label>
-      <button type="submit" class="secondary">Save</button>
-    </form>
-    <form method="post" action="{{ url_for('category_has_period', category_id=c.id) }}" class="row">
-      <label class="check"><input type="checkbox" name="has_period" value="1" {{ 'checked' if c.has_period }}>
+    <div class="row">
+      <label class="check"><input type="checkbox" name="gst_partial_{{ c.id }}" value="1" {{ 'checked' if c.gst_free }}>
+        <span>GST only partly applies <small>(the GST on each invoice is read or entered, not assumed; with none, none is counted)</small></span></label>
+    </div>
+    <div class="row">
+      <label class="check"><input type="checkbox" name="has_period_{{ c.id }}" value="1" {{ 'checked' if c.has_period }}>
         <span>Has a period <small>(insurance or registration: it covers a start and an end date)</small></span></label>
-      <button type="submit" class="secondary">Save</button>
-    </form>
+    </div>
     {% if budgets_on %}
-    <form method="post" action="{{ url_for('category_pool', category_id=c.id) }}" class="row">
+    <div class="row">
       <label><small>Lease budget pool</small>
-        <select name="budget_pool">
+        <select name="budget_pool_{{ c.id }}">
           <option value="">None</option>
           {% for key, label in pools.items() %}<option value="{{ key }}" {{ 'selected' if c.budget_pool == key }}>{{ label }}</option>{% endfor %}
         </select></label>
-      <button type="submit" class="secondary">Save</button>
-    </form>
+    </div>
     {% endif %}
+    {% if row_errors.get('c' ~ c.id) %}<span class="error">{{ row_errors['c' ~ c.id] }}</span>{% endif %}
   </li>
   {% endfor %}
 </ul>
 {% if uploads_enabled %}<p><small>Uploaded invoices go into this subfolder of the car's {{ 'folder' if local_enabled else 'OneDrive folder' }}, made when first
   needed. Leave it blank to use a folder named after the category, e.g. Tyres and Service can both use “Maintenance”.</small></p>{% endif %}
-<p><small>Tick GST-free for a category whose invoices carry no GST, such as registration and CTP. It only changes what an expense paid from a lease package is shown to cost after tax: the GST on an invoice that isn't GST-free is taken to be a flat 1/11 of it.</small></p>
+<p><small>Tick GST only partly applies for a category where only part of an invoice carries GST, such as registration (the CTP part has GST, the registration fee doesn't). The GST isn't assumed to be 1/11 of the invoice: the amount read from the invoice, or entered on the expense, is used, and with none the expense is treated as having no GST. It only changes what an expense paid from a lease package is shown to cost after tax.</small></p>
 <p><small>Tick Has a period for a category whose expenses cover a stretch of time, such as insurance and registration: the Add and Edit form and the import page then ask for the period's start and end dates, and read them from the document when they can.</small></p>
 {% if budgets_on %}<p><small>A car on a novated lease has a yearly budget for each pool. Choose the pool each category's expenses are paid from, or None when the category isn't part of the package.</small></p>{% endif %}
 <h2 id="service-items">Service items</h2>
 <p><small>What a service covered, chosen on each expense in the Service category (and on the import page).
-  Renaming an item keeps it on the expenses that had it; removing one takes it off them.</small></p>
-<ul class="plain category-list">
-  {% for i in service_items() %}
-  <li>
-    <form method="post" action="{{ url_for('service_item_rename', item_id=i.id) }}" class="row">
+  Renaming an item keeps it on the expenses that had it; deleting one takes it off them.</small></p>
+<ul class="plain category-list service-list">
+  {% for i in items %}
+  <li id="item-{{ i.id }}">
+    <input type="hidden" name="item_id" value="{{ i.id }}">
+    <div class="item-row">
       <label><small class="visually-hidden">Name</small>
-        <input name="name" maxlength="60" value="{{ i.name }}" required autocomplete="off"></label>
-      <button type="submit" class="secondary">Rename</button>
-      {% if service_error and service_error[0] == i.id %}<span class="error">{{ service_error[1] }}</span>{% endif %}
-    </form>
-    <form method="post" action="{{ url_for('service_item_delete', item_id=i.id) }}" data-confirm="Remove {{ i.name }} from the list and from the expenses that have it?">
-      <button type="submit" class="danger">Remove</button>
-    </form>
+        <input name="item_name_{{ i.id }}" maxlength="60" value="{{ i.name }}" required autocomplete="off"></label>
+      <button type="submit" class="icon-button" form="remove-item-{{ i.id }}" aria-label="Delete {{ i.name }}" title="Delete {{ i.name }}">&times;</button>
+    </div>
+    {% if row_errors.get('s' ~ i.id) %}<span class="error">{{ row_errors['s' ~ i.id] }}</span>{% endif %}
   </li>
   {% endfor %}
 </ul>
+<button type="submit">Save</button>
+</form>
+{% for i in items %}
+<form id="remove-item-{{ i.id }}" method="post" action="{{ url_for('service_item_delete', item_id=i.id) }}" data-confirm="Delete {{ i.name }} from the list and from the expenses that have it?"></form>
+{% endfor %}
 <form method="post" action="{{ url_for('service_item_add') }}" class="card stack">
   <label>New service item <input name="name" maxlength="60" required placeholder="e.g. Spark plugs">
-    {% if service_error and service_error[0] is none %}<span class="error">{{ service_error[1] }}</span>{% endif %}</label>
+    {% if item_error %}<span class="error">{{ item_error }}</span>{% endif %}</label>
   <button type="submit" class="button">Add item</button>
 </form>
 <form method="post" class="card stack">

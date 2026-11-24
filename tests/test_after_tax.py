@@ -392,8 +392,8 @@ def test_the_history_names_the_new_fields(app):
                        headers=ORIGIN).status_code == 303
     shown = text(client.get("/history"))
     assert "Paid from" in shown and "The package" in shown and "Personally" in shown
-    client.post(f"/categories/{insurance}/gst_free", data={"gst_free": "1"}, headers=ORIGIN)
-    assert "GST-free" in text(client.get("/history"))
+    client.post("/categories/save", data={"category_id": str(insurance), f"gst_partial_{insurance}": "1"}, headers=ORIGIN)
+    assert "GST only partly applies" in text(client.get("/history"))
 
 
 # ---- the list ------------------------------------------------------------------------------------------
@@ -448,7 +448,7 @@ def test_an_expense_outside_the_lease_dates_is_personal_and_a_purchase_is_never_
 
 # ---- the categories ---------------------------------------------------------------------------------------
 
-def test_a_category_can_be_marked_gst_free_and_the_cost_follows(app):
+def test_a_category_can_be_marked_as_only_partly_gst_and_the_cost_follows(app):
     client, url, car_id = app
     add_lease(client, car_id)
     set_rate(client, "34")
@@ -456,13 +456,13 @@ def test_a_category_can_be_marked_gst_free_and_the_cost_follows(app):
         expense(conn, car_id, "Insurance", "2025-11-10T09:00+10", 1100)
         insurance = category(conn, "Insurance")
     page = client.get("/categories").data.decode()
-    assert f'/categories/{insurance}/gst_free' in page and "GST-free" in page
+    assert f'name="gst_partial_{insurance}"' in page and "GST only partly applies" in page
     assert "$681.25" in text(client.get("/"))
-    assert client.post(f"/categories/{insurance}/gst_free", data={"gst_free": "1"}, headers=ORIGIN).status_code == 303
-    assert "$749.38" in text(client.get("/"))
-    client.post(f"/categories/{insurance}/gst_free", data={}, headers=ORIGIN)           # an unticked box sends nothing
+    assert client.post("/categories/save", data={"category_id": str(insurance), f"gst_partial_{insurance}": "1"},
+                       headers=ORIGIN).status_code == 303
+    assert "$749.38" in text(client.get("/"))           # no GST read or entered: none is counted
+    client.post("/categories/save", data={"category_id": str(insurance)}, headers=ORIGIN)   # an unticked box sends nothing
     assert "$681.25" in text(client.get("/"))
-    assert client.post("/categories/99999/gst_free", data={"gst_free": "1"}, headers=ORIGIN).status_code == 404
 
 
 # ---- the lease form ----------------------------------------------------------------------------------------

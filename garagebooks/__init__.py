@@ -68,11 +68,8 @@ MESSAGES = {
                                      "wasn't created: add it yourself.",
     "reminder_reopened": "Reminder reopened. The next one it had added was removed.",
     "reminder_reopened_kept": "Reminder reopened. The next one had been edited or resolved, so it was left as it is.",
-    "category_pool": "Budget pool saved.",
-    "category_gst_free": "GST-free setting saved.",
-    "category_has_period": "Period setting saved.",
+    "categories_saved": "Changes saved.",
     "service_added": "Service item added.",
-    "service_renamed": "Service item renamed.",
     "service_deleted": "Service item removed. Expenses that had it keep their other items.",
     "settings": "Settings saved.",
     "folders": "Folders saved.",
@@ -82,7 +79,6 @@ MESSAGES = {
     "mail_connected": "Mailbox connected. Now choose a mailbox folder for each car.",
     "mail_disconnected": "Mailbox disconnected.",
     "imported": "Invoices imported.",
-    "category_folder": "OneDrive folder saved.",
     "learned_deleted": "Removed.",
     "claim_forgotten": "Claim record removed. The provider still has the claim, if one was made there.",
     "claims_refreshed": "Claim statuses refreshed.",
@@ -506,7 +502,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         """What the list shows of the cost after tax, from db.after_tax_facts rows: each packaged expense's cost
         ({id: cost}), how many are packaged, and the total of every expense after tax (None while a packaged one
         can't be worked out, which is whenever no rate is entered)."""
-        costs, packaged, total = {}, 0, Decimal(0)
+        costs, packaged, total, needs_gst = {}, 0, Decimal(0), set()
         for row in rows:
             paid_from_package = lease.is_packaged(row["packaged"], row["lease_id"] is not None, row["budget_pool"], row["kind"])
             cost = lease.effective_cost(row["amount"], paid_from_package, row["gst_free"], row["pretax_payment"],
@@ -514,8 +510,10 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             if paid_from_package:
                 packaged += 1
                 costs[row["id"]] = cost
+                if row["gst_free"] and row["gst_amount"] is None:       # GST only partly applies: it must be entered
+                    needs_gst.add(row["id"])
             total = None if cost is None or total is None else total + cost
-        return {"costs": costs, "packaged": packaged, "total": total, "rate_set": rate is not None}
+        return {"costs": costs, "packaged": packaged, "total": total, "rate_set": rate is not None, "needs_gst": needs_gst}
 
     def form_context(values=None, errors=None, expense_id=None):
         with connect() as conn:
@@ -957,6 +955,18 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         log.info("expense %s deleted", expense_id)
         return redirect(url_for("index", **list_view(), msg="deleted"), 303)
 
+    def render_categories_page(row_errors=None, overlay=None, error=None, item_error=None, status=200, message=None):
+        """The Categories page. After a refused save, `overlay` holds what was typed ({"c<id>": {field: value}},
+        {"s<id>": name}) so it is shown again, and `row_errors` says which row is wrong ({"c<id>": text})."""
+        overlay = overlay or {}
+        with connect() as conn:
+            cats = [{**c, **overlay.get(f"c{c['id']}", {})} for c in db.categories(conn)]
+            service = [{**i, "name": overlay.get(f"s{i['id']}", i["name"])} for i in db.service_items(conn)]
+            budgets_on = db.lease_budgets_on(conn)
+        return render_template("categories.html", categories=cats, items=service, error=error, item_error=item_error,
+                               row_errors=row_errors or {}, pools=lease.POOLS, budgets_on=budgets_on,
+                               message=message), status
+
     @app.route("/categories", methods=["GET", "POST"])
     def categories():
         error = None
@@ -970,11 +980,70 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 return redirect(url_for("categories", msg="category"), 303)
             except ValueError as exc:
                 error = str(exc)
+        return render_categories_page(error=error, status=400 if error else 200,
+                                      message=MESSAGES.get(request.args.get("msg", "")))
+
+    def posted_ids(name):
+        """The ids a form lists under `name`, once each; anything that isn't a number is ignored."""
+        got = []
+        for raw in request.form.getlist(name):
+            if raw.strip().isdigit() and int(raw) not in got and int(raw) < 2 ** 31:
+                got.append(int(raw))
+        return got
+
+    @app.post("/categories/save")
+    def categories_save():
+        """Every category and service item on the page, saved together: each changed row, or nothing if any row
+        is wrong. A field the form doesn't carry (the folder box without uploads, the pool without budgets) is
+        left alone, and so is a row that is no longer there."""
+        form = request.form
         with connect() as conn:
-            cats = db.categories(conn)
-            budgets_on = db.lease_budgets_on(conn)
-        return render_template("categories.html", categories=cats, error=error, pools=lease.POOLS, budgets_on=budgets_on,
-                               message=MESSAGES.get(request.args.get("msg", ""))), (400 if error else 200)
+            cats = {c["id"]: c for c in db.categories(conn)}
+            service = {i["id"]: i["name"] for i in db.service_items(conn)}
+        errors, overlay, category_changes, renames = {}, {}, {}, {}
+        for cid in (i for i in posted_ids("category_id") if i in cats):
+            typed = {"gst_free": form.get(f"gst_partial_{cid}") == "1", "has_period": form.get(f"has_period_{cid}") == "1"}
+            if f"upload_folder_{cid}" in form:
+                typed["upload_folder"] = form[f"upload_folder_{cid}"]
+            if f"budget_pool_{cid}" in form:
+                typed["budget_pool"] = form[f"budget_pool_{cid}"]
+            overlay[f"c{cid}"] = typed
+            try:
+                if "upload_folder" in typed:
+                    typed["upload_folder"] = validation.parse_upload_folder(typed["upload_folder"])
+                if "budget_pool" in typed:
+                    typed["budget_pool"] = typed["budget_pool"].strip() or None
+                    if typed["budget_pool"] is not None and typed["budget_pool"] not in lease.POOLS:
+                        raise ValueError("Choose one of the pools listed.")
+            except ValueError as exc:
+                errors[f"c{cid}"] = str(exc)
+                continue
+            changed = {k: v for k, v in typed.items() if cats[cid][k] != v}
+            if changed:
+                category_changes[cid] = changed
+        item_ids = [i for i in posted_ids("item_id") if i in service]
+        names = {}
+        for iid in item_ids:
+            overlay[f"s{iid}"] = form.get(f"item_name_{iid}", "")
+            try:
+                names[iid] = validation.parse_service_item_name(form.get(f"item_name_{iid}"))
+            except ValueError as exc:
+                errors[f"s{iid}"] = str(exc)
+        taken = {}
+        for iid, name in {**{i: n for i, n in service.items() if i not in names}, **names}.items():
+            other = taken.setdefault(name.lower(), iid)
+            if other != iid:
+                later = iid if iid in names else other           # blame a row that was edited, not one left alone
+                errors.setdefault(f"s{later}", f"“{name}” already exists.")
+        renames = {i: n for i, n in names.items() if n != service[i] and f"s{i}" not in errors}
+        if errors:
+            return render_categories_page(row_errors=errors, overlay=overlay, status=400)
+        with connect() as conn:
+            for cid, changed in category_changes.items():
+                db.update_category(conn, cid, **changed)
+            db.rename_service_items(conn, renames)
+        log.info("categories saved: %d categories, %d service items changed", len(category_changes), len(renames))
+        return redirect(url_for("categories", msg="categories_saved"), 303)
 
     # ---- cars ----------------------------------------------------------------
 
@@ -1573,15 +1642,6 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         log.info("expense %s resolved %d reminder(s)", expense_id, len(results))
         return redirect(url_for("reminders_page", msg=resolved_message(results)), 303)
 
-    @app.post("/categories/<int:category_id>/pool")
-    def category_pool(category_id):
-        pool = (request.form.get("budget_pool") or "").strip() or None
-        if pool is not None and pool not in lease.POOLS:
-            abort(400)
-        with connect() as conn:
-            if not db.set_budget_pool(conn, category_id, pool):
-                abort(404)
-        return redirect(url_for("categories", msg="category_pool"), 303)
     # ---- claims: sending an expense to the salary packaging provider ----------------------------
 
     def need_connector():
@@ -1932,21 +1992,6 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             return failed
         return jsonify(ok=True, state=signin_view({"signin": {"state": reply.body.get("state")}})["state"])
 
-    @app.post("/categories/<int:category_id>/gst_free")
-    def category_gst_free(category_id):
-        """An unticked box sends nothing, so the form saying it is ticked is exactly "1"."""
-        with connect() as conn:
-            if not db.set_gst_free(conn, category_id, request.form.get("gst_free") == "1"):
-                abort(404)
-        return redirect(url_for("categories", msg="category_gst_free"), 303)
-
-    def render_categories_page(service_error=None, status=200):
-        with connect() as conn:
-            cats = db.categories(conn)
-            budgets_on = db.lease_budgets_on(conn)
-        return render_template("categories.html", categories=cats, error=None, pools=lease.POOLS, budgets_on=budgets_on,
-                               service_error=service_error, message=None), status
-
     @app.post("/categories/services")
     def service_item_add():
         try:
@@ -1955,25 +2000,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 if db.add_service_item(conn, name) is None:
                     raise ValueError(f"“{name}” already exists.")
         except ValueError as exc:
-            return render_categories_page((None, str(exc)), 400)
+            return render_categories_page(item_error=str(exc), status=400)
         return redirect(url_for("categories", msg="service_added"), 303)
-
-    @app.post("/categories/services/<int:item_id>/rename")
-    def service_item_rename(item_id):
-        try:
-            name = validation.parse_service_item_name(request.form.get("name"))
-            with connect() as conn:
-                done = db.rename_service_item(conn, item_id, name)
-            if done is None:
-                raise ValueError(f"“{name}” already exists.")
-        except ValueError as exc:
-            with connect() as conn:
-                if db.service_item(conn, item_id) is None:
-                    abort(404)
-            return render_categories_page((item_id, str(exc)), 400)
-        if not done:
-            abort(404)
-        return redirect(url_for("categories", msg="service_renamed"), 303)
 
     @app.post("/categories/services/<int:item_id>/delete")
     def service_item_delete(item_id):
@@ -1999,15 +2027,6 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             item = db.service_item_named(conn, name)
         return jsonify(id=item["id"], name=item["name"], existing=True)
 
-    @app.post("/categories/<int:category_id>/has_period")
-    def category_has_period(category_id):
-        """Whether the category's expenses cover a period (insurance, registration): the add and edit form and the
-        import page then ask for its start and end."""
-        with connect() as conn:
-            if not db.set_has_period(conn, category_id, request.form.get("has_period") == "1"):
-                abort(404)
-        return redirect(url_for("categories", msg="category_has_period"), 303)
-
     # ---- change history ---------------------------------------------------------
 
     # Field -> label, in the order they are shown. id and the created/updated stamps are never shown.
@@ -2017,7 +2036,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                     ("invoice_url", "Invoice link"), ("invoice_path", "Invoice file"), ("packaged", "Paid from"),
                     ("period_start", "Period start"), ("period_end", "Period end"), ("gst_amount", "GST")),
         "category": (("name", "Name"), ("kind", "Kind"), ("sort_order", "Sort order"),
-                     ("upload_folder", "Invoice subfolder"), ("gst_free", "GST-free"), ("has_period", "Has a period")),
+                     ("upload_folder", "Invoice subfolder"), ("gst_free", "GST only partly applies"), ("has_period", "Has a period")),
         "expense_claim": (("provider", "Provider"), ("reference", "Reference"), ("status", "Status"),
                           ("amount", "Amount"), ("gst", "GST"), ("approved_amount", "Approved amount"),
                           ("paid_date", "Paid on")),
@@ -2107,20 +2126,6 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         with connect() as conn:
             db.delete_vendor(conn, request.form.get("vendor", ""))
         return redirect(url_for("learned_page", msg="learned_deleted"), 303)
-
-    @app.post("/categories/<int:category_id>/folder")
-    def category_folder(category_id):
-        try:
-            folder = validation.parse_upload_folder(request.form.get("upload_folder"))
-        except ValueError as exc:
-            with connect() as conn:
-                cats = db.categories(conn)
-            return render_template("categories.html", categories=cats, error=None, pools=lease.POOLS,
-                                   folder_error=(category_id, str(exc)), message=None), 400
-        with connect() as conn:
-            if not db.set_upload_folder(conn, category_id, folder):
-                abort(404)
-        return redirect(url_for("categories", msg="category_folder"), 303)
 
     # ---- OneDrive ---------------------------------------------------------------
 

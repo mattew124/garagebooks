@@ -41,14 +41,14 @@ def test_the_categories_page_lists_the_items_and_edits_them(client, admin):  # n
         resp = client.post("/categories/services", data={"name": bad}, headers=ORIGIN)
         assert resp.status_code == 400 and b"error" in resp.data
     item = items(admin)["Spark plugs"]
-    assert client.post(f"/categories/services/{item}/rename", data={"name": "Spark plug set"},
+    assert client.post("/categories/save", data={"item_id": str(item), f"item_name_{item}": "Spark plug set"},
                        headers=ORIGIN).status_code == 303
     assert "Spark plug set" in items(admin) and "Spark plugs" not in items(admin)
-    assert client.post(f"/categories/services/{item}/rename", data={"name": "Brakes"}, headers=ORIGIN).status_code == 400
+    assert client.post("/categories/save", data={"item_id": str(item), f"item_name_{item}": "Brakes"},
+                       headers=ORIGIN).status_code == 400
     assert client.post(f"/categories/services/{item}/delete", headers=ORIGIN).status_code == 303
     assert "Spark plug set" not in items(admin)
     assert client.post("/categories/services/99999/delete", headers=ORIGIN).status_code == 404
-    assert client.post("/categories/services/99999/rename", data={"name": "X"}, headers=ORIGIN).status_code == 404
 
 
 def service_form(admin, *names, **over):
@@ -87,7 +87,8 @@ def test_removing_an_item_unlinks_it_and_renaming_keeps_the_link(client, admin):
     expense_id = rows(admin)[0]["id"]
     ids = items(admin)
     try:
-        client.post(f"/categories/services/{ids['Brakes']}/rename", data={"name": "Brake pads"}, headers=ORIGIN)
+        client.post("/categories/save", data={"item_id": str(ids["Brakes"]), f"item_name_{ids['Brakes']}": "Brake pads"},
+                    headers=ORIGIN)
         client.post(f"/categories/services/{ids['Coolant']}/delete", headers=ORIGIN)
         assert linked(admin, expense_id) == ["Brake pads"]
     finally:                  # the seeded items are shared by every test
