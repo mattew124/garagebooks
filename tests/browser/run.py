@@ -537,6 +537,46 @@ def test_acar_import_preview(page):
     assert "Sale of the car" in page.inner_text("table.import-table")
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
     shot(page, "acar-import")
+    # The service items sit under the category, not beside it, and what doesn't suit the car stays hidden.
+    cell = page.locator("tr#row-0 td[data-label=Category]")
+    under, above = cell.locator("[data-service-fields]").bounding_box(), cell.locator("select[name^=category_id_]").bounding_box()
+    assert under["y"] >= above["y"] + above["height"] and above["height"] < 60, (above, under)
+    assert page.evaluate("""[...document.querySelectorAll('.service-items label[hidden]')]
+        .every((label) => label.offsetParent === null)""")
+
+    # A category made from a row's own list: saved, chosen on that row and offered on the others, nothing lost.
+    # The two requests are answered here: the app can't delete a category, so this test must not make one
+    # (tests/test_acar_import.py covers the real ones).
+    def made(name, ident):
+        return {"id": ident, "name": name, "applies": "all", "period": False, "service": False, "gstfree": False, "purchase": False}
+    page.route("**/api/categories", lambda route: route.fulfill(status=201, json=made(MARKER + " category", 32001)))
+    page.route("**/api/import-lists", lambda route: route.fulfill(json={
+        "categories": [made(MARKER + " elsewhere", 32002)], "service_items": []}))
+    first = page.locator("table.import-table tbody tr").first
+    first.locator("input[name^=vendor_]").fill("Typed before adding")
+    first.locator("select[name^=category_id_]").select_option(value="__new__")
+    expect(page.locator("#category-dialog")).to_be_visible()
+    page.fill("#category-dialog input[name=name]", MARKER + " category")
+    page.click("#category-dialog button[type=submit]")
+    expect(page.locator("#category-dialog")).to_be_hidden()
+    expect(first.locator("select[name^=category_id_] option:checked")).to_have_text(MARKER + " category")
+    assert first.locator("input[name^=vendor_]").input_value() == "Typed before adding"
+    # One made elsewhere turns up when the page comes back into view.
+    page.evaluate("window.dispatchEvent(new Event('focus'))")
+    expect(first.locator("select[name^=category_id_] option", has_text=MARKER + " elsewhere")).to_have_count(1)
+
+    # A wrong row: the page comes back at the list of errors, whose link goes to the row. Nothing is saved.
+    first.locator("input[name^=include_]").check()
+    first.locator("input[name^=amount_]").fill("abc")
+    page.get_by_role("button", name=re.compile("^Import")).click()
+    expect(page.locator("#error-summary")).to_be_focused()
+    shot(page, "acar-errors")
+    page.locator("#error-summary a").first.click()
+    expect(page.locator("tr#row-0")).to_be_in_viewport()
+
+    page.unroute("**/api/categories")
+    page.unroute("**/api/import-lists")
+
     page.goto(UI + "import/acar")                     # and again, making the car from the file
     page.select_option("select[name=car_id]", value="new")
     page.set_input_files("input[name=file]", {"name": "aCar-records.csv", "mimeType": "text/csv", "buffer": ACAR_CSV.encode()})
@@ -2125,7 +2165,6 @@ def main():
         remove_marked(page)
 
         step("form renders on a phone", test_form, page)
-        step("aCar import previews without saving", test_acar_import_preview, page)
         step("odometer fills itself in", test_odometer_autofills, page)
         step("odometer button uses the chosen date", test_odometer_button_for_past_date, page)
         step("a bad invoice link is explained, input kept", test_bad_link_is_explained, page)
@@ -2133,6 +2172,7 @@ def main():
         step("delete can be cancelled", test_delete_can_be_cancelled, page)
         step("amount field works out sums", test_amount_calculator, page)
         step("payment calculator works out the true cost", test_payment_calculator, page)
+        step("aCar import previews without saving", test_acar_import_preview, page)
         step("list: tiles or rows, sorting, and back to the same view", test_list_toggle_sort_and_return, page)
         step("rows on a phone show whole dates, categories and amounts", test_rows_on_a_phone_show_whole_values, page)
         step("no sideways scroll on a phone", test_phone_layout_has_no_sideways_scroll, page)

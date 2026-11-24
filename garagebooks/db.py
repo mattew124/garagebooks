@@ -500,6 +500,11 @@ def expense_service_ids(conn, expense_id):
         "SELECT item_id FROM garagebooks.expense_service_item WHERE expense_id = %s", (expense_id,))]
 
 
+def category_id_named(conn, name):
+    row = conn.execute("SELECT id FROM garagebooks.category WHERE lower(name) = lower(%s)", (name,)).fetchone()
+    return row["id"] if row else None
+
+
 def add_category(conn, name):
     """Returns the id, or None if the name already exists (case-insensitive)."""
     existing = conn.execute(

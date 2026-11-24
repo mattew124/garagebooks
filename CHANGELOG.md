@@ -12,6 +12,11 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
   offers **Attach this invoice to** it, selected by default, rather than creating a second expense. The invoice goes on
   that expense, a blank odometer and vendor are filled, and nothing else on it changes. A match that already has an
   invoice is flagged and left unticked, as before.
+- **aCar import: every cost gets a category, and services get their items.** Costs that match no category go to your
+  catch-all (*Expenses*, *Other* and the like; **Expenses** is made if you have none). Services tick a service item for
+  each thing done, making missing ones and naming them afterwards. Both import pages can add a category from a row,
+  pick up ones made in another tab, and list errors at the top with a link to each row. Every file box takes a dropped
+  file, the lease documents included.
 - **Import from aCar.** **Cars → Import costs from aCar** reads the CSV that the aCar app exports (its Records file):
   services, expenses, purchases and, if you like, fill-ups, into a car you have or into a new one made from the
   vehicle's details in the file (name, type, make, model, year, body type and VIN, all editable first). A preview lists every cost to check, categorise and untick,

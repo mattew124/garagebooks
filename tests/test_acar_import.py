@@ -17,7 +17,7 @@ def engine_car(admin):
     """The test car is electric, which has no Fuel: these tests import fill-ups, so it has an engine too."""
     admin.execute("UPDATE garagebooks.car SET kind = 'PHEV' WHERE id = 1")
     yield
-    admin.execute("UPDATE garagebooks.car SET kind = 'BEV' WHERE id = 1")
+    admin.execute("UPDATE garagebooks.car SET kind = 'BEV', sold_at = NULL, sale_price = NULL WHERE id = 1")
 
 
 def upload(client, name="acar-records.csv", **over):
@@ -36,7 +36,7 @@ def preview_fields(html):
         if name and 'type="checkbox"' not in tag:
             data[name.group(1)] = value.group(1) if value else ""
     for select in re.finditer(r'<select name="([^"]+)"[^>]*>(.*?)</select>', form, re.S):
-        chosen = re.search(r'<option value="([^"]*)" selected', select.group(2))
+        chosen = re.search(r'<option value="([^"]*)"[^>]*?\sselected', select.group(2))
         data[select.group(1)] = chosen.group(1) if chosen else ""
     return data
 
@@ -74,14 +74,6 @@ def test_the_preview_lists_every_cost_oldest_first_and_saves_nothing(client, adm
     assert rows(admin) == []
 
 
-def test_a_row_with_a_category_is_ticked_and_one_without_is_not(client):
-    html = upload(client).data.decode()
-    tolls = re.search(r'<tr[^>]*>(?:(?!</tr>).)*Toll(?:(?!</tr>).)*</tr>', html, re.S).group(0)
-    insurance = re.search(r'<tr[^>]*>(?:(?!</tr>).)*aCar expense: Insurance(?:(?!</tr>).)*</tr>', html, re.S).group(0)
-    assert "checked" not in re.search(r'<input type="checkbox" name="include_\d+"[^>]*>', tolls).group(0)
-    assert "checked" in re.search(r'<input type="checkbox" name="include_\d+"[^>]*>', insurance).group(0)
-
-
 def test_what_was_left_out_is_said(client):
     html = upload(client).data.decode()
     assert "1 trip" in html and "sale" not in html.split("Left out:")[1].split("</p>")[0]
@@ -112,6 +104,7 @@ def test_untouched_rows_are_not_saved(client, admin):
 
 def test_a_row_that_is_ticked_but_has_no_category_is_refused_with_the_page_kept(client, admin):
     data = tick_all(preview_fields(upload(client).data.decode()))
+    data["category_id_1"] = ""
     resp = client.post("/import/acar/confirm", data=data, headers=ORIGIN)
     assert resp.status_code == 400 and "Choose a category" in resp.data.decode()
     assert rows(admin) == []
@@ -254,8 +247,8 @@ def test_an_electric_car_is_not_offered_fuel_and_a_forced_fuel_row_is_refused(cl
     admin.execute("UPDATE garagebooks.car SET kind = 'BEV' WHERE id = 1")
     html = upload(client).data.decode()
     assert "<option value=\"%s\"" % category_id(admin, "Fuel") not in html
-    fill_up = re.search(r'<tr>(?:(?!</tr>).)*aCar fill-up(?:(?!</tr>).)*</tr>', html, re.S).group(0)
-    assert re.search(r'name="category_id_\d+">\s*<option value="" selected', fill_up) or 'selected' not in fill_up
+    fill_up = re.search(r'<tr[^>]*>(?:(?!</tr>).)*aCar fill-up(?:(?!</tr>).)*</tr>', html, re.S).group(0)
+    assert re.search(r'<option value="new:catchall"[^>]*\sselected', fill_up)       # it still comes in, under the catch-all
     data = tick_all(preview_fields(html))
     key = next(k for k in data if k.startswith("category_id_"))
     data[key] = str(category_id(admin, "Fuel"))
@@ -340,7 +333,8 @@ def test_a_bad_car_detail_makes_nothing_and_keeps_what_was_typed(client, admin, 
 
 
 def test_a_bad_row_makes_no_car_either(client, admin, made):
-    data = tick_all(preview_fields(upload(client, car_id="new").data.decode()))        # the Toll has no category
+    data = tick_all(preview_fields(upload(client, car_id="new").data.decode()))
+    data["amount_1"] = "abc"
     assert client.post("/import/acar/confirm", data=data, headers=ORIGIN).status_code == 400
     assert new_cars(admin) == []
 
@@ -364,3 +358,152 @@ def test_two_vehicles_ask_which_then_make_that_one(client, admin, made):
     page = client.post("/import/acar", data={"car_id": "new", "fill_ups": "1", "vehicle": "Old Example", "csv_text": text},
                        headers=ORIGIN).data.decode()
     assert preview_fields(page)["car_name"] == "Old Example" and preview_fields(page)["car_model"] == "Ute"
+
+
+# ---- every cost gets a category, and a service gets its items -----------------------------
+
+def ticked(html):
+    return {n for n in re.findall(r'<input type="checkbox" name="include_(\d+)"[^>]*checked', html)}
+
+
+def item_names(admin, expense_id):
+    return [r["name"] for r in admin.execute(
+        "SELECT i.name FROM garagebooks.expense_service_item l JOIN garagebooks.service_item i ON i.id = l.item_id "
+        "WHERE l.expense_id = %s ORDER BY i.name", (expense_id,))]
+
+
+def as_previewed(client, **over):
+    """Import exactly what the preview proposes, ticked rows only, as a person pressing Import straight away does."""
+    html = upload(client, **over).data.decode()
+    data = preview_fields(html)
+    for n in ticked(html):
+        data[f"include_{n}"] = "on"
+    for box in re.finditer(r'<input type="checkbox" name="(service_item_\d+)" value="([^"]*)"\s*checked', html):
+        data.setdefault(box.group(1), [])
+        data[box.group(1)].append(box.group(2))
+    return html, client.post("/import/acar/confirm", data=data, headers=ORIGIN)
+
+
+def test_pressing_import_straight_away_brings_in_every_cost(client, admin):
+    html, resp = as_previewed(client)
+    assert resp.status_code == 303, resp.data.decode()[:3000]
+    assert len(ticked(html)) == 10
+    assert len(rows(admin)) == 9                                     # and the sale, on the car
+
+
+def test_what_fits_no_category_goes_to_a_new_catch_all_made_only_on_import(client, admin):
+    upload(client)
+    assert not admin.execute("SELECT 1 FROM garagebooks.category WHERE name = 'Expenses'").fetchone()
+    _, resp = as_previewed(client)
+    toll = [r for r in rows(admin) if str(r["amount"]) == "4.50"][0]
+    assert toll["category_id"] == category_id(admin, "Expenses")
+    assert "Created the category Expenses" in client.get(resp.headers["Location"]).data.decode()
+
+
+def test_the_persons_own_catch_all_is_used_when_there_is_one(client, admin):
+    own = admin.execute("INSERT INTO garagebooks.category (name, kind) VALUES ('Other', 'running') RETURNING id").fetchone()["id"]
+    html = upload(client).data.decode()
+    assert "new:catchall" not in html
+    as_previewed(client)
+    assert [r["category_id"] for r in rows(admin) if str(r["amount"]) == "4.50"] == [own]
+
+
+def test_a_service_ticks_its_items_and_makes_the_missing_ones_only_on_import(client, admin):
+    html = upload(client).data.decode()
+    assert "Inspection (new)" in html and "New service items" in html
+    assert not admin.execute("SELECT 1 FROM garagebooks.service_item WHERE name = 'Inspection'").fetchone()
+    _, resp = as_previewed(client)
+    service = [r for r in rows(admin) if str(r["amount"]) == "429.30"][0]
+    assert service["category_id"] == category_id(admin, "Service")
+    assert item_names(admin, service["id"]) == ["Engine oil", "Inspection", "Oil filter"]
+    page = client.get(resp.headers["Location"]).data.decode()
+    assert "Created 1 new service item: Inspection." in page
+
+
+def test_an_item_is_not_made_for_a_row_left_unticked(client, admin):
+    html = upload(client).data.decode()
+    data = preview_fields(html)
+    toll = re.search(r'name="include_(\d+)"(?:(?!</tr>).)*?Toll', html, re.S).group(1)
+    data[f"include_{toll}"] = "on"
+    for key in [k for k in data if k.startswith("category_id_")]:
+        data[key] = data[key] or str(category_id(admin, "Registration"))
+    data[f"category_id_{toll}"] = str(category_id(admin, "Registration"))
+    assert client.post("/import/acar/confirm", data=data, headers=ORIGIN).status_code == 303
+    assert not admin.execute("SELECT 1 FROM garagebooks.service_item WHERE name = 'Inspection'").fetchone()
+
+
+def test_merging_a_service_gives_an_expense_with_no_items_its_items(client, admin):
+    existing = admin.execute(
+        "INSERT INTO garagebooks.expense (car_id, category_id, occurred_at, amount) VALUES (1, %s, '2026-02-19 04:10+00', 429.30) RETURNING id",
+        (category_id(admin, "Service"),)).fetchone()["id"]
+    as_previewed(client)
+    assert item_names(admin, existing) == ["Engine oil", "Inspection", "Oil filter"]
+
+
+# ---- finding what is wrong -------------------------------------------------------------
+
+def broken(client, admin):
+    html = upload(client).data.decode()
+    data = tick_all(preview_fields(html))
+    data["amount_2"], data["date_5"] = "abc", ""
+    return client.post("/import/acar/confirm", data=data, headers=ORIGIN)
+
+
+def test_errors_are_listed_at_the_top_each_linking_to_its_row(client, admin):
+    resp = broken(client, admin)
+    page = resp.data.decode()
+    assert resp.status_code == 400 and rows(admin) == []
+    summary = page[page.index('id="error-summary"'):page.index("<table")]
+    assert 'role="alert"' in page and 'tabindex="-1"' in summary
+    assert "2 rows need fixing" in summary and "Nothing has been saved" in summary
+    assert 'href="#row-2"' in summary and 'href="#row-5"' in summary
+    assert '<tr id="row-2" class="has-error">' in page and '<tr id="row-5" class="has-error">' in page
+
+
+def test_each_wrong_row_leads_to_the_next(client, admin):
+    page = broken(client, admin).data.decode()
+    row2 = page[page.index('<tr id="row-2"'):page.index('<tr id="row-3"')]
+    assert 'href="#row-5">Next error' in row2 and 'href="#error-summary"' in row2
+
+
+def test_a_merge_choice_survives_an_error_elsewhere(client, admin):
+    existing = seed_invoice(admin)
+    html = upload(client).data.decode()
+    data = tick_all(preview_fields(html))
+    merge_row = next(k for k, v in data.items() if k.startswith("action_") and v == str(existing)).split("_")[1]
+    other = "0" if merge_row != "0" else "1"
+    data[f"amount_{other}"] = "abc"
+    page = client.post("/import/acar/confirm", data=data, headers=ORIGIN).data.decode()
+    assert f'<option value="{existing}" selected>Add the odometer' in page
+
+
+def test_service_ticks_and_new_items_survive_an_error(client, admin):
+    html = upload(client).data.decode()
+    data = tick_all(preview_fields(html))
+    n = re.search(r'name="service_item_(\d+)" value="new:Inspection"\s*checked', html).group(1)
+    data[f"service_item_{n}"] = ["new:Inspection"]
+    data["amount_0"] = "abc"
+    page = client.post("/import/acar/confirm", data=data, headers=ORIGIN).data.decode()
+    assert re.search(rf'name="service_item_{n}" value="new:Inspection"\s*checked', page)
+
+
+# ---- categories added while the page is open ---------------------------------------------
+
+def test_a_category_can_be_added_from_the_import_page(client, admin):
+    resp = client.post("/api/categories", json={"name": "Accessories"}, headers=ORIGIN)
+    assert resp.status_code == 201 and resp.get_json()["name"] == "Accessories"
+    again = client.post("/api/categories", json={"name": "accessories"}, headers=ORIGIN)
+    assert again.status_code == 200 and again.get_json()["existing"] is True
+    assert client.post("/api/categories", json={"name": "  "}, headers=ORIGIN).status_code == 400
+
+
+def test_the_lists_can_be_read_again_for_categories_made_in_another_tab(client, admin):
+    admin.execute("INSERT INTO garagebooks.category (name, kind) VALUES ('Accessories', 'running')")
+    got = client.get("/api/import-lists").get_json()
+    assert "Accessories" in [c["name"] for c in got["categories"]]
+    assert "Engine oil" in [i["name"] for i in got["service_items"]]
+
+
+def test_both_dialogs_are_on_the_acar_preview(client):
+    html = upload(client).data.decode()
+    assert 'id="category-dialog"' in html and 'id="service-dialog"' in html and "data-lists-url" in html

@@ -886,8 +886,17 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             text = (f"Created the car {request.args.get('new_car', '')[:100]}. " if request.args.get("new_car") else "") \
                 + f"Imported {n} cost{'' if n == 1 else 's'} from aCar."
             if merged:
-                text += f" Added the odometer reading to {merged} existing expense{'' if merged == 1 else 's'}."
-            return text + (" Recorded the sale." if sale else "")
+                text += f" Added what was missing to {merged} existing expense{'' if merged == 1 else 's'}."
+            skipped = request.args.get("skipped", 0, type=int)
+            if skipped:
+                text += f" Left {skipped} that {'was' if skipped == 1 else 'were'} already saved."
+            text += " Recorded the sale." if sale else ""
+            if request.args.get("new_category"):
+                text += f" Created the category {request.args['new_category'][:60]}."
+            made = [name[:60] for name in request.args.getlist("new_item")]
+            if made:
+                text += f" Created {len(made)} new service item{'' if len(made) == 1 else 's'}: {', '.join(made)}."
+            return text
         attached = request.args.get("attached", 0, type=int)
         text = f"Imported {n} invoice{'' if n == 1 else 's'}." if n else ("" if attached else MESSAGES["imported"])
         if attached:
@@ -2568,7 +2577,9 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             categories = db.categories(conn)
             if skipped is None:
                 skipped = len(db.skipped_import_urls(conn, car["id"]))
-        return import_page(store, car, rows=rows, remaining=remaining, errors=errors or {}, categories=categories,
+        by_n = {r["n"]: r for r in rows}
+        error_list = [{"href": f"#row-{n}", "text": f"{by_n[n]['name']}: {message}"} for n, message in sorted((errors or {}).items())]
+        return import_page(store, car, rows=rows, remaining=remaining, errors=errors or {}, error_list=error_list, categories=categories,
                            notice=notice, skipped=skipped, **extra), status
 
     def new_car_folder(kind):
@@ -3173,39 +3184,95 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
     def acar_import_page():
         return acar_page()
 
-    def acar_preview_rows(export, car, categories):
-        """One row per record, oldest first. A cost that matches an expense already saved (same amount,
-        within the duplicate window) is offered as a merge into it where that would add an odometer reading."""
-        names = {c["name"]: c["id"] for c in categories if db.applies(c["applies_to"], car["kind"])}
-        out = []
+    ACAR_CATCHALL = "new:catchall"      # the catch-all category that is made on import when there is none
+    ACAR_CATCHALL_NAME = "Expenses"
+    ACAR_CATCHALL_ID = -1               # stands in for it while rows are checked
+
+    def acar_lists(categories, car_kind, new_items, with_catchall):
+        """The categories and service items the preview offers: what suits the car, plus what the import
+        would make (the catch-all and the new service items), which don't exist until Import is pressed."""
+        offered = [c for c in categories if db.applies(c["applies_to"], car_kind)]
+        if with_catchall:
+            offered.append({"id": ACAR_CATCHALL, "name": f"{ACAR_CATCHALL_NAME} (new category)", "kind": "running",
+                            "applies_to": "all", "has_period": False, "gst_free": False})
         with connect() as conn:
+            items = list(db.service_items(conn))
+        items += [{"id": f"new:{name}", "name": f"{name} (new)", "applies_to": "all"} for name in new_items]
+        return {"categories": offered, "items": items, "car_kind": car_kind, "new_items": new_items,
+                "with_catchall": with_catchall}
+
+    def acar_matches(conn, car_id, when, amount, also=None):
+        """-> (expenses that look like this cost, how the preview shows them, the merge choices). `also` is an
+        expense already chosen to merge into, kept as a choice even if the row no longer matches it."""
+        found = db.find_duplicates(conn, car_id, when, amount) if when is not None and amount is not None else []
+        shown = dup_view(found)
+        choices = list(found) if amount else []
+        if also is not None and also not in {m["id"] for m in choices}:
+            chosen = db.get_expense(conn, also)
+            if chosen is not None and chosen["car_id"] == car_id:
+                choices.append(chosen)
+        candidates = [{"id": m["id"], "text": f"{d['date']} · {d['category']}"
+                       + (f" · {d['vendor']}" if d["vendor"] else "") + f" · {d['amount_text']}"
+                       + (" · has an invoice" if m["invoice_url"] or m["invoice_path"] else "")
+                       + (f" · {m['odometer_km']:.0f} km" if m["odometer_km"] is not None else " · no odometer")}
+                      for m, d in zip(choices, dup_view(choices))]
+        return found, shown, candidates
+
+    def acar_preview_rows(export, car, categories):
+        """One row per record, oldest first, every one with a category (what fits none goes to the catch-all)
+        and, for a service, its service items ticked. A cost that matches an expense already saved (same
+        amount, within the duplicate window) is offered as a merge where that would add an odometer reading,
+        and is otherwise left unticked. -> (rows, the new service items' names, whether a catch-all is to be made)."""
+        offered = [c for c in categories if db.applies(c["applies_to"], car["kind"])]
+        names = {c["name"]: c["id"] for c in offered}
+        own = acar.catch_all([c["name"] for c in offered if c["kind"] == "running"])
+        catch_value = str(names[own]) if own else ACAR_CATCHALL
+        out, new_items = [], {}
+        with connect() as conn:
+            items = {i["name"]: i for i in db.service_items(conn)}
             for n, rec in enumerate(sorted(export.records, key=lambda r: (r.date, r.time))):
                 when = datetime.combine(rec.date, rec.time, tzinfo=ZoneInfo(tz))
                 row = {"n": n, "kind": "sale" if rec.kind == "sale" else "expense", "include": True, "action": "new",
                        "date": rec.date.isoformat(), "time": rec.time.strftime("%H:%M"), "category_id": "", "vendor": rec.vendor,
                        "amount": f"{rec.amount:.2f}", "odometer_km": "" if rec.odometer_km is None else f"{rec.odometer_km:.1f}",
-                       "notes": rec.notes, "label": rec.label, "duplicates": [], "candidates": [], "note": ""}
+                       "notes": rec.notes, "label": rec.label, "duplicates": [], "candidates": [], "services": [], "note": ""}
                 if rec.kind == "sale":
                     row["include"] = car["sold_at"] is None
                     row["note"] = "" if row["include"] else "This car already has a sale recorded; importing this replaces it."
                     out.append(row)
                     continue
                 match = acar.match_category(rec, list(names))
-                row["category_id"] = str(names[match]) if match else ""
-                found = db.find_duplicates(conn, car["id"], when, rec.amount)
-                row["duplicates"] = dup_view(found)
-                row["include"] = bool(match) and not found
-                if rec.amount:
-                    row["candidates"] = [{"id": m["id"], "text": f"{d['date']} · {d['category']}"
-                                          + (f" · {d['vendor']}" if d["vendor"] else "") + f" · {d['amount_text']}"
-                                          + (" · has an invoice" if m["invoice_url"] or m["invoice_path"] else "")
-                                          + (f" · {m['odometer_km']:.0f} km" if m["odometer_km"] is not None else " · no odometer")}
-                                         for m, d in zip(found, row["duplicates"])]
-                    fill = next((m for m in found if m["odometer_km"] is None), None) if rec.odometer_km is not None else None
+                row["category_id"] = str(names[match]) if match else catch_value
+                if match == db.SERVICE_CATEGORY:
+                    for subtype in rec.service_subtypes:
+                        known = acar.match_service_item(subtype, list(items))
+                        if known is None:
+                            name = acar.new_item_name(subtype)
+                            value = "new:" + new_items.setdefault(name.lower(), name)
+                        elif db.applies(items[known]["applies_to"], car["kind"]):
+                            value = str(items[known]["id"])
+                        else:
+                            continue        # the notes still say it was done
+                        if value not in row["services"]:
+                            row["services"].append(value)
+                found, row["duplicates"], row["candidates"] = acar_matches(conn, car["id"], when, rec.amount)
+                row["include"] = not found
+                if rec.amount and rec.odometer_km is not None:
+                    fill = next((m for m in found if m["odometer_km"] is None), None)
                     if fill is not None:
                         row["action"], row["include"] = str(fill["id"]), True
                 out.append(row)
-        return out
+        return out, list(new_items.values()), any(r["category_id"] == ACAR_CATCHALL for r in out)
+
+    def acar_error_list(rows, errors, car_errors):
+        """What is wrong, in page order, each with where to go: for the summary at the top of the preview."""
+        listed = [{"href": "#new-car", "text": f"New car: {message}"} for message in (car_errors or {}).values()]
+        by_n = {r["n"]: r for r in rows}
+        for n in sorted(errors):
+            r = by_n[n]
+            listed.append({"href": f"#row-{n}", "text": f"{r['label'] or 'Row ' + str(n + 1)} · {r['date'] or 'no date'} · "
+                                                         f"{r['amount'] or 'no amount'}: {errors[n]}"})
+        return listed
 
     @app.post("/import/acar")
     def acar_import_preview():
@@ -3247,9 +3314,10 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             car = {"id": 0, "kind": new_car["kind"], "sold_at": None}
         else:
             car = next(c for c in cars if c["id"] == car_id)
-        rows = acar_preview_rows(export, car, categories)
-        log.debug("acar preview car=%d records=%d left_out=%s", car_id, len(rows), dict(export.left_out))
-        return acar_page("acar_preview.html", rows=rows, categories=[c for c in categories if db.applies(c["applies_to"], car["kind"])], errors={}, left_out=acar_left_out(export.left_out),
+        rows, new_items, with_catchall = acar_preview_rows(export, car, categories)
+        log.debug("acar preview car=%d records=%d left_out=%s new_items=%d", car_id, len(rows), dict(export.left_out), len(new_items))
+        return acar_page("acar_preview.html", rows=rows, **acar_lists(categories, car["kind"], new_items, with_catchall),
+                         errors={}, error_list=[], left_out=acar_left_out(export.left_out),
                          vehicle=vehicle or (export.vehicles[0]["name"] if export.vehicles else ""), new_car=new_car,
                          car_errors={}, kinds=db.CAR_KINDS, **keep)
 
@@ -3270,13 +3338,18 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             car_id = request.form.get("car_id", type=int)
             if car_id not in car_ids:
                 abort(400)
-        categories = [c for c in all_categories if db.applies(c["applies_to"], cars[car_id]["kind"])]
+        car_kind = cars[car_id]["kind"]
         cats_by_id = {c["id"]: c for c in all_categories}
+        cats_by_id[ACAR_CATCHALL_ID] = {"id": ACAR_CATCHALL_ID, "name": ACAR_CATCHALL_NAME, "applies_to": "all"}
         cat_ids = set(cats_by_id)
+        proposed = request.form.getlist("proposed_item")[:ACAR_MAX_ROWS]
+        with_catchall = bool(request.form.get("proposed_catchall"))
         count = min(request.form.get("count", type=int) or 0, ACAR_MAX_ROWS)
         rows, new, merges, sales, errors = [], [], [], [], {}
         with connect() as conn:
             own = {r["id"] for r in conn.execute("SELECT id FROM garagebooks.expense WHERE car_id = %s", (car_id,))}
+            items = list(db.service_items(conn))
+            service_category = db.service_category_id(conn)
         now = datetime.now(ZoneInfo(tz))
         for n in range(count):
             def f(key, n=n):
@@ -3285,7 +3358,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             row = {"n": n, "kind": f("kind") if f("kind") == "sale" else "expense", "include": bool(f("include")), "date": f("date"),
                    "time": f("time"), "category_id": f("category_id"), "vendor": f("vendor"), "amount": f("amount"),
                    "odometer_km": f("odometer_km"), "notes": f("notes"), "label": f("label"), "action": f("action") or "new",
-                   "duplicates": [], "candidates": [], "note": ""}
+                   "services": request.form.getlist(f"service_item_{n}"), "duplicates": [], "candidates": [], "note": ""}
             rows.append(row)
             if not row["include"]:
                 continue
@@ -3308,43 +3381,135 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 except ValueError as exc:
                     errors[n] = str(exc) if "odometer" in str(exc) or "expense" in str(exc) else "Choose which expense to merge into."
                 else:
-                    merges.append((target, km, row["vendor"].strip()[:validation.MAX_TEXT_LEN]))
+                    merges.append((target, km, row["vendor"].strip()[:validation.MAX_TEXT_LEN], row["services"]))
             else:
-                values, row_errors = validation.parse_expense_form(
-                    {"car_id": car_id, **{k: row[k] for k in ("category_id", "date", "time", "amount", "odometer_km", "vendor", "notes")}},
-                    tz, car_ids, cat_ids)
+                posted = {k: row[k] for k in ("category_id", "date", "time", "amount", "odometer_km", "vendor", "notes")}
+                if posted["category_id"] == ACAR_CATCHALL:
+                    posted["category_id"] = str(ACAR_CATCHALL_ID)
+                values, row_errors = validation.parse_expense_form({"car_id": car_id, **posted}, tz, car_ids, cat_ids)
                 if not row_errors:
-                    row_errors.update(powertrain_errors(cars[car_id]["kind"], values["category_id"], [], cats_by_id, []))
+                    row_errors.update(powertrain_errors(car_kind, values["category_id"], row["services"], cats_by_id, items))
+                if not row_errors and values["category_id"] == service_category:
+                    try:
+                        for value in row["services"]:
+                            if value.startswith("new:"):
+                                validation.parse_service_item_name(value[4:])
+                    except ValueError as exc:
+                        row_errors["service_item"] = str(exc)
                 if row_errors:
                     errors[n] = " ".join(row_errors.values())
                 else:
-                    new.append(values)
-        keep = {"car_id": "new" if making else str(car_id), "new_car": new_car, "kinds": db.CAR_KINDS}
+                    new.append((values, row["services"]))
+        def again(notice=None):
+            """The preview as it was sent, with its choices, to put right."""
+            with connect() as conn:
+                for row in rows:
+                    if row["kind"] == "sale":
+                        continue
+                    try:
+                        when = validation.parse_local_datetime(row["date"], row["time"], tz)
+                        amount = validation.parse_amount(row["amount"])
+                    except ValueError:
+                        when = amount = None
+                    also = int(row["action"]) if row["action"].isdigit() else None
+                    _, row["duplicates"], row["candidates"] = acar_matches(conn, car_id, when, amount, also)
+            return acar_page("acar_preview.html", rows=rows, **acar_lists(all_categories, car_kind, proposed, with_catchall),
+                             errors=errors, car_errors=car_errors, error_list=acar_error_list(rows, errors, car_errors),
+                             left_out="", vehicle="", status=400, error=notice, new_car=new_car, kinds=db.CAR_KINDS,
+                             car_id="new" if making else str(car_id))
+
         if errors or car_errors:
-            return acar_page("acar_preview.html", rows=rows, categories=categories, errors=errors, car_errors=car_errors,
-                             left_out="", vehicle="", status=400, **keep)
+            return again()
         if not (new or merges or sales):
-            return acar_page("acar_preview.html", rows=rows, categories=categories, errors={}, car_errors={}, left_out="", vehicle="",
-                             status=400, error="Tick at least one cost to import.", **keep)
-        saved = merged = 0
+            return again("Tick at least one cost to import.")
+        saved = merged = skipped = 0
+        created_items, created_category = [], None
         with connect() as conn:
+            def item_ids(chosen):
+                """The ids of a row's ticked service items, making the new ones now that they are needed."""
+                ids = []
+                for value in chosen:
+                    if not value.startswith("new:"):
+                        ids.append(value)
+                        continue
+                    name = validation.parse_service_item_name(value[4:])
+                    made = db.add_service_item(conn, name)
+                    if made is not None:
+                        created_items.append(made["name"])
+                    ids.append(str((made or db.service_item_named(conn, name))["id"]))
+                return ids
+
             if making:
                 car_id = db.add_car(conn, car_values)
-                for values in new:
-                    values["car_id"] = car_id
-            for values in new:
+            catch_id = None
+            for values, chosen in new:
+                values["car_id"] = car_id
+                if values["category_id"] == ACAR_CATCHALL_ID:
+                    if catch_id is None:
+                        made = db.add_category(conn, ACAR_CATCHALL_NAME)
+                        created_category = ACAR_CATCHALL_NAME if made is not None else None
+                        catch_id = made if made is not None else db.category_id_named(conn, ACAR_CATCHALL_NAME)
+                    values["category_id"] = catch_id
                 if db.expense_exists(conn, values):      # a double submit imports once
+                    skipped += 1
                     continue
-                db.insert_expense(conn, values)
+                expense_id = db.insert_expense(conn, values)
+                if values["category_id"] == db.service_category_id(conn):
+                    save_services(conn, expense_id, values["category_id"], item_ids(chosen))
                 saved += 1
-            for target, km, vendor in merges:
-                merged += db.merge_into_expense(conn, car_id, target, km, vendor)
+            for target, km, vendor, chosen in merges:
+                changed = db.merge_into_expense(conn, car_id, target, km, vendor)
+                existing = db.get_expense(conn, target)
+                if (chosen and existing is not None and existing["category"] == db.SERVICE_CATEGORY
+                        and not db.expense_service_ids(conn, target)):      # blank only, like the rest of a merge
+                    save_services(conn, target, existing["category_id"], item_ids(chosen))
+                    changed = 1
+                merged += changed
             for sale in sales:
                 db.set_sale(conn, car_id, sale["sold_at"], sale["sale_price"], sale["sale_km"])
-        log.info("acar import car=%d%s saved=%d merged=%d sale=%d", car_id, " (made)" if making else "", saved, merged, len(sales))
+        log.info("acar import car=%d%s saved=%d merged=%d sale=%d new_items=%d new_category=%s", car_id,
+                 " (made)" if making else "", saved, merged, len(sales), len(created_items), bool(created_category))
         refresh_dashboard()
-        return redirect(url_for("index", msg="imported", n=saved, merged=merged, sale=len(sales),
-                                **({"new_car": car_values["name"]} if making else {}), **{"from": "acar"}), 303)
+        extra = {"new_car": car_values["name"]} if making else {}
+        if created_items:
+            extra["new_item"] = created_items
+        if created_category:
+            extra["new_category"] = created_category
+        return redirect(url_for("index", msg="imported", n=saved, merged=merged, sale=len(sales), skipped=skipped,
+                                **extra, **{"from": "acar"}), 303)
+
+    @app.get("/api/import-lists")
+    def api_import_lists():
+        """The categories and service items as they are now, so an open import page picks up what was added
+        elsewhere without losing what has been typed on it."""
+        with connect() as conn:
+            return jsonify(categories=[category_json(c) for c in db.categories(conn)],
+                           service_items=[{"id": i["id"], "name": i["name"], "applies": i["applies_to"]}
+                                          for i in db.service_items(conn)])
+
+    @app.post("/api/categories")
+    def api_categories():
+        """Add a category from an import page's dialog. One that exists (ignoring case) is returned as it is."""
+        body = request.get_json(silent=True)
+        raw = body.get("name") if isinstance(body, dict) else None
+        try:
+            name = validation.parse_category_name(raw if isinstance(raw, str) else "")
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
+        with connect() as conn:
+            made = db.add_category(conn, name)
+            wanted = made if made is not None else db.category_id_named(conn, name)
+            row = next(c for c in db.categories(conn) if c["id"] == wanted)
+        if made is None:
+            return jsonify(**category_json(row), existing=True)
+        log.info("category added")
+        refresh_dashboard()
+        return jsonify(**category_json(row)), 201
+
+    def category_json(c):
+        """A category with what an import row's choice needs to know about it (see _category_choice.html)."""
+        return {"id": c["id"], "name": c["name"], "applies": c["applies_to"], "period": bool(c["has_period"]),
+                "service": c["name"] == db.SERVICE_CATEGORY, "gstfree": bool(c["gst_free"]), "purchase": c["kind"] == "purchase"}
 
     def name_example(values):
         """What an uploaded file would be called under the saved (or just-typed, if valid) settings."""

@@ -24,18 +24,15 @@ KM_PER_MILE = Decimal("1.609344")
 SECTIONS = ("Metadata", "Vehicles", "Fill-Up Records", "Event Records", "Trip Records")
 DEFAULT_DATE_FORMAT = "d/M/yyyy"
 
-# aCar's own sub-type names (lower case) -> the category they usually belong to here. Anything
-# else is matched against the category names the person has (`match_category`) or left to choose.
-SUBTYPE_CATEGORY = {
-    "insurance": "Insurance",
-    "registration": "Registration",
-    "new tires": "Tyres", "new tyres": "Tyres",
-    "tire a": "Tyres", "tire b": "Tyres", "tire c": "Tyres", "tire d": "Tyres",
-    "tire rotation": "Tyre rotation", "tyre rotation": "Tyre rotation",
-    "wheel alignment": "Wheel alignment",
-    "cabin air filter": "Cabin air filter",
-    "air filter": "Air filter",
-}
+# aCar's own sub-type names (lower case) -> the category they belong to here. A tyre purchase is Tyres;
+# otherwise a service (and a key's battery) is a Service, with a service item for each sub-type. Anything else
+# is matched against the category names the person has (`match_category`) or goes to the catch-all.
+SUBTYPE_CATEGORY = {"insurance": "Insurance", "registration": "Registration"}
+TYRE_PURCHASE = {"new tires", "new tyres", "tire a", "tire b", "tire c", "tire d"}
+SERVICE_EXPENSES = {"key battery"}
+# Categories that take what fits nowhere else, best first.
+CATCH_ALL = ("expenses", "other expenses", "other", "miscellaneous", "general", "accessories")
+MAX_ITEM = 60
 MONTHS = {m: i for i, m in enumerate(("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"), 1)}
 
 
@@ -56,6 +53,11 @@ class Record:
     vendor: str = ""
     notes: str = ""
     category_hint: str | None = None
+
+    @property
+    def service_subtypes(self):
+        """The sub-types that are this record's service items: those of a record filed under Service."""
+        return self.subtypes if self.category_hint == "Service" else []
 
     @property
     def label(self):
@@ -151,29 +153,67 @@ def guess_kind(engine):
 
 
 def category_hint(event_type, subtypes):
-    """The seeded category name aCar's own type and sub-types point to, or None."""
+    """The category name aCar's own type and sub-types point to, or None."""
     if event_type == "Purchased":
         return "Initial purchase"
-    for sub in subtypes:
-        name = SUBTYPE_CATEGORY.get(sub.strip().lower())
-        if name:
-            return name
-    return None
+    lower = [s.strip().lower() for s in subtypes]
+    if TYRE_PURCHASE.intersection(lower):
+        return "Tyres"
+    if event_type == "Service" or SERVICE_EXPENSES.intersection(lower):
+        return "Service"
+    return next((SUBTYPE_CATEGORY[s] for s in lower if s in SUBTYPE_CATEGORY), None)
+
+
+def _key(text):
+    """A name as compared: case, American spellings and a trailing '(rear)' don't matter."""
+    text = re.sub(r"\s*\([^)]*\)$", "", text.strip().lower())
+    return re.sub(r"\btire(s?)\b", r"tyre\1", text.replace("windshield", "windscreen"))
 
 
 def match_category(record, names):
     """The name in `names` this record belongs under: its hint, else a category named like one of its
-    sub-types or its type ('Toll', 'Service'), ignoring case and tire/tyre. None when there is none."""
-    def key(text):
-        return re.sub(r"\btire(s?)\b", r"tyre\1", text.strip().lower())
-
-    by_key = {key(n): n for n in names}
+    sub-types or its type ('Toll'), ignoring case and American spelling. None when there is none."""
+    by_key = {_key(n): n for n in names}
     wanted = [record.category_hint] if record.category_hint else []
     wanted += record.subtypes + ([record.event_type] if record.event_type else [])
-    for candidate in wanted:
-        if key(candidate) in by_key:
-            return by_key[key(candidate)]
-    return None
+    return next((by_key[_key(c)] for c in wanted if _key(c) in by_key), None)
+
+
+def catch_all(names):
+    """The category in `names` meant for whatever fits no other, or None."""
+    by_name = {n.strip().lower(): n for n in names}
+    return next((by_name[n] for n in CATCH_ALL if n in by_name), None)
+
+
+def split_subtypes(cell):
+    """aCar joins sub-types with commas, and two of its names have one: 'Brakes, Rear' is one sub-type."""
+    got = []
+    for part in (p.strip() for p in (cell or "").split(",")):
+        if part.lower() in ("front", "rear") and got and got[-1].lower().startswith("brake"):
+            got[-1] += f" ({part.lower()})"
+        elif part:
+            got.append(part)
+    return got
+
+
+def match_service_item(subtype, names):
+    """The service item in `names` that aCar's sub-type is, or None."""
+    by_key = {_key(n): n for n in names}
+    return by_key.get(_key(subtype))
+
+
+def new_item_name(subtype):
+    """What a service item made from aCar's sub-type is called: Australian spelling, sentence case,
+    initials (PCV) left as they are."""
+    words = []
+    for i, word in enumerate(subtype.split()):
+        if not (len(word) > 1 and word.isupper() and word.isalpha() and len(word) <= 5):
+            word = re.sub(r"^tire", "tyre", word.lower().replace("windshield", "windscreen"))
+            if i == 0:
+                word = word[:1].upper() + word[1:]
+        words.append(word)
+    name = " ".join(words)
+    return name[:MAX_ITEM] if len(name) > MAX_ITEM else name
 
 
 def _clip(text, limit):
@@ -273,7 +313,7 @@ def parse(data, vehicle=None, fill_ups=True):
             left_out["unreadable"] += 1
             continue
         amount = _number(get(row, "Total Cost")) or Decimal(0)
-        subtypes = [s.strip() for s in get(row, "Sub Types").split(",") if s.strip()]
+        subtypes = split_subtypes(get(row, "Sub Types"))
         notes = [f"aCar {kind.lower()}" + (f": {', '.join(subtypes)}" if subtypes else "")]
         if get(row, "Payment"):
             notes.append(f"Paid with {get(row, 'Payment')}")

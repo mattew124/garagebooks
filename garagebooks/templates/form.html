@@ -61,14 +61,14 @@
   {{ car_field() }}
   <div class="field">
     <label for="invoice-file">Invoice PDF</label>
-    <div class="drop" id="invoice-drop">
+    <div class="drop" id="invoice-drop" data-drop-ext=".pdf">
       <input type="file" id="invoice-file" name="invoice_file" accept="application/pdf,.pdf">
       <span class="or-pick"><span>or</span>
         <button type="button" id="onedrive-pick" class="secondary">
           {% if onedrive_enabled %}<span data-storage-label="onedrive"{{ ' hidden' if picked != 'onedrive' }}>{{ mark() }} Choose from {{ storage.name }}</span>{% endif %}
           {% if local_enabled %}<span data-storage-label="local"{{ ' hidden' if picked != 'local' }}>Choose from the invoice folder</span>{% endif %}
         </button></span>
-      <small id="invoice-drop-hint" hidden>You can also drop the PDF onto this box.</small>
+      <small class="drop-hint" id="invoice-drop-hint" hidden>You can also drop the PDF onto this box.</small>
     </div>
     {{ err('invoice_file') }}
     <small id="onedrive-pick-hint">Already in {{ 'the car\'s folder' if local_enabled else storage.name }}? Pick it there instead of uploading it again.</small>

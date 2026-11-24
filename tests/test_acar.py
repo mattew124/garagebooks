@@ -70,19 +70,60 @@ def test_a_service_takes_its_category_from_the_first_sub_type_that_has_one_and_k
     assert tyres.vendor == "Example Tyres Pty Ltd"
 
 
-@pytest.mark.parametrize("subtypes, expected", [
-    (["Registration", "Stamp Duty"], "Registration"),
-    (["Tire Rotation"], "Tyre rotation"),
-    (["Wheel Alignment"], "Wheel alignment"),
-    (["Cabin Air Filter"], "Cabin air filter"),
-    (["Air Filter", "Engine Oil"], "Air filter"),
-    (["Tire A", "Tire B"], "Tyres"),
-    (["Tire Pressure"], None),
-    (["Toll"], None),
-    ([], None),
+@pytest.mark.parametrize("event_type, subtypes, expected", [
+    ("Expense", ["Registration", "Stamp Duty"], "Registration"),
+    ("Expense", ["Insurance"], "Insurance"),
+    ("Expense", ["Key Battery"], "Service"),
+    ("Expense", ["Toll"], None),
+    ("Expense", [], None),
+    ("Service", ["Tire Rotation"], "Service"),
+    ("Service", ["Wheel Alignment"], "Service"),
+    ("Service", ["Engine Oil", "Air Filter"], "Service"),
+    ("Service", [], "Service"),
+    ("Service", ["Tire A", "Tire B"], "Tyres"),
+    ("Service", ["New Tires", "Wheel Alignment"], "Tyres"),
 ])
-def test_sub_types_map_to_the_seeded_categories(subtypes, expected):
-    assert acar.category_hint("Service", subtypes) == expected
+def test_what_each_record_is_filed_under(event_type, subtypes, expected):
+    assert acar.category_hint(event_type, subtypes) == expected
+
+
+ITEMS = ["Engine oil", "Oil filter", "Tyre rotation", "Windscreen washer fluid", "Windscreen wipers", "Brakes", "Wheel alignment"]
+
+
+@pytest.mark.parametrize("sub, item", [
+    ("Engine Oil", "Engine oil"), ("Tire Rotation", "Tyre rotation"), ("Windshield Washer Fluid", "Windscreen washer fluid"),
+    ("Windshield Wipers", "Windscreen wipers"), ("Brakes (rear)", "Brakes"), ("Inspection", None), ("Brake Pads", None),
+])
+def test_a_sub_type_finds_the_service_item_it_is(sub, item):
+    assert acar.match_service_item(sub, ITEMS) == item
+
+
+@pytest.mark.parametrize("sub, name", [
+    ("Inspection", "Inspection"), ("Tire Pressure", "Tyre pressure"), ("Windshield Cracks", "Windscreen cracks"),
+    ("Injection Cleaner", "Injection cleaner"), ("PCV Valve", "PCV valve"), ("Key Battery", "Key battery"),
+    ("x" * 80, "X" + "x" * 59),
+])
+def test_a_new_service_item_is_named_the_way_the_others_are(sub, name):
+    assert acar.new_item_name(sub) == name
+
+
+def test_a_sub_type_with_a_comma_in_its_name_stays_one_sub_type():
+    assert acar.split_subtypes("Brakes, Rear, Tire Rotation, Brakes, Front") == ["Brakes (rear)", "Tire Rotation", "Brakes (front)"]
+    assert acar.split_subtypes(" ") == []
+
+
+def test_service_items_come_only_with_a_service_record():
+    by_amount = {str(r.amount): r for r in load().records}
+    assert by_amount["429.30"].service_subtypes == ["Engine Oil", "Inspection", "Oil Filter"]
+    assert by_amount["1377.00"].service_subtypes == []          # a tyre purchase is filed under Tyres
+    assert by_amount["4.50"].service_subtypes == []
+
+
+@pytest.mark.parametrize("names, expected", [
+    (["Insurance", "Expenses"], "Expenses"), (["Other", "Accessories"], "Other"), (["general"], "general"), (["Tyres"], None),
+])
+def test_the_catch_all_category_is_found_by_name(names, expected):
+    assert acar.catch_all(names) == expected
 
 
 def test_an_unknown_sub_type_is_still_shown_so_it_can_be_matched_to_a_category():

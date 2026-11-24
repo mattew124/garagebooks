@@ -1,0 +1,16 @@
+{# What is wrong on a long form, listed at the top with a link to each place (the GOV.UK error summary
+   pattern): app.js moves focus here when the page opens. `row_links` goes under a wrong row's message, to
+   the next one and back. #}
+{% macro summary(entries) %}
+{% if entries %}
+<div id="error-summary" class="error-summary" role="alert" tabindex="-1">
+  <h2>{{ entries|length }} {{ 'row needs' if entries|length == 1 else 'rows need' }} fixing</h2>
+  <p>Nothing has been saved. Fix {{ 'it' if entries|length == 1 else 'each one' }}, or untick it, then press Import again.</p>
+  <ul>{% for e in entries %}<li><a href="{{ e.href }}">{{ e.text }}</a></li>{% endfor %}</ul>
+</div>
+{% endif %}
+{%- endmacro %}
+{% macro row_links(n, errors) %}
+{%- set later = errors|sort|select('gt', n)|list %}
+<small class="error-nav">{% if later %}<a href="#row-{{ later[0] }}">Next error ↓</a> · {% endif %}<a href="#error-summary">Back to the list ↑</a></small>
+{%- endmacro %}

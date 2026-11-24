@@ -1,8 +1,10 @@
 {% extends "base.html" %}
+{% from "_error_summary.html" import summary %}
 {% block title %}Import from aCar{% endblock %}
 {% block content %}
 <h1>Import from aCar{% if vehicle %}: {{ vehicle }}{% endif %}</h1>
 {% if error %}<p class="notice bad" role="alert">{{ error }}</p>{% endif %}
+{{ summary(error_list) }}
 {% if new_car is not none and new_car %}
 <section class="card stack" id="new-car">
   <h2>New car</h2>
@@ -35,13 +37,20 @@
 </section>
 {% endif %}
 {% if rows %}
-<p>Category, vendor, amount and odometer come from aCar; a category is chosen only where it matches one you have
-  (Insurance, Registration, Tyres and so on, or one named like aCar's own), so <strong>choose the rest</strong>.
-  Rows that look like an expense you already have are flagged and left unticked. Nothing is saved until you press Import.
+<p>Date, vendor, amount and odometer come from aCar, and <strong>every cost has a category</strong>: the one of yours
+  it matches, or the catch-all for what matches none. A service has its service items ticked. Rows that look like an
+  expense you already have are flagged, or offered as a merge. Check them over; to make a category without leaving
+  this page, choose <em>New category…</em> in a row's list. Nothing is saved until you press Import.
   {% if left_out %}Left out: {{ left_out }}.{% endif %}</p>
-<form method="post" action="{{ url_for('acar_import_confirm') }}" class="import" id="import-form">
+{% if with_catchall %}<p class="notice" id="catchall-notice">You have no catch-all category, so costs that match none go in
+  <strong>Expenses</strong>, which is made when you press Import.</p>{% endif %}
+{% if new_items %}<p class="notice" id="new-items-notice"><strong>New service items</strong> ({{ new_items|length }}), made when you
+  press Import, for the rows you import: {{ new_items|join(', ') }}.</p>{% endif %}
+<form method="post" action="{{ url_for('acar_import_confirm') }}" class="import" id="import-form" data-car-kind="{{ car_kind }}">
   <input type="hidden" name="count" value="{{ rows|length }}">
   <input type="hidden" name="car_id" value="{{ car_id }}">
+  {% for name in new_items %}<input type="hidden" name="proposed_item" value="{{ name }}">{% endfor %}
+  {% if with_catchall %}<input type="hidden" name="proposed_catchall" value="1">{% endif %}
   <div class="table-wrap">
   <table class="import-table">
     <thead><tr><th>Import</th><th>What</th><th>Date</th><th>Category</th><th>Vendor</th>
@@ -56,6 +65,7 @@
     <a href="{{ url_for('acar_import_page', car_id=car_id) }}">Cancel</a>
   </div>
 </form>
+{% include "_import_dialogs.html" %}
 {% else %}
 <p class="empty">There are no costs in that file to import. <a href="{{ url_for('acar_import_page', car_id=car_id) }}">Back</a></p>
 {% endif %}

@@ -471,3 +471,19 @@ small.after-tax { display: block; font-weight: 400; color: var(--muted); font-si
 .import-table .row-extras .period { display: grid; gap: .4rem; }
 .import-table .row-extras input[type=date] { min-width: 0; }
 [data-view=tiles] .import-table td.extras { flex-direction: column; align-items: stretch; gap: .25rem; }
+
+/* A long form that came back with errors: the list of them, and each wrong row marked and easy to jump to. */
+.error-summary { border: 2px solid var(--bad); border-radius: var(--r); background: var(--bad-soft); padding: .8rem 1rem; margin: 0 0 1rem; scroll-margin-top: 1rem; }
+.error-summary h2 { margin: 0 0 .4rem; font-size: 1.05rem; color: var(--bad); }
+.error-summary ul { margin: .4rem 0 0; padding-left: 1.2rem; max-height: 14rem; overflow-y: auto; }
+.error-summary li { margin: .2rem 0; overflow-wrap: anywhere; }
+.import-table tr.has-error { outline: 2px solid var(--bad); outline-offset: -2px; }
+.import-table tr[id^=row-] { scroll-margin-top: 1rem; }
+.import-table tr:target { outline: 3px solid var(--accent); outline-offset: -3px; }
+.import-table .error-nav { white-space: nowrap; }
+
+/* Whatever a page hides stays hidden: the label styles above would otherwise show it again (a service item
+   that doesn't suit the car, say). */
+.service-items [hidden], .import-table [hidden] { display: none !important; }
+.import-table .row-extras .service-items label.inline { display: inline-flex; align-items: center; gap: .25rem; margin: 0 .6rem .15rem 0; }
+.import-table .service-items input[type=checkbox] { width: auto; }

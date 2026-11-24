@@ -189,15 +189,32 @@ and an odometer of 0 (aCar's "none entered") is left blank.
 
 **Merging into expenses you already have.** When a cost has the same car and amount as an expense within 14 days, the row
 offers **Add the odometer reading to** that expense, and does so by default where the expense has no odometer
-(typically one imported from an invoice PDF). A merge fills in the odometer, and the vendor if it's blank, and
+(typically one imported from an invoice PDF). A merge fills in the odometer, the vendor if it's blank and, for a service with no items ticked, its items, and
 changes nothing else: the category, amount, date, invoice link and any reading already there stay as they are.
 Choose **Add as a new expense** to keep both instead.
 
-A category is chosen only where it matches one you have: aCar's Insurance, Registration, Tyres, Tyre rotation,
-Wheel alignment, Cabin air filter and Air filter map to the categories of the same name, and any other sub-type
-(Toll, say) is matched to a category with that name if you have one. Everything else is left for you to choose and
-starts unticked. Anything aCar had in a record's other sub-types, its payment method and its own notes go into
-the expense's notes.
+**Every cost gets a category,** so all of them can be imported without sorting any out by hand:
+
+- Insurance, Registration and Initial purchase go to the categories of those names, and a tyre purchase (aCar's
+  *New Tires* or *Tire A* to *D*) to **Tyres**.
+- Services, and a key's battery, go to **Service**.
+- Anything else goes to a category named like aCar's sub-type (Toll, say) if you have one, and otherwise to your
+  **catch-all**: the category called *Expenses*, *Other*, *Miscellaneous*, *General* or *Accessories*. With none of
+  those, the import makes **Expenses** when you press Import.
+
+**Service items.** Each of a service's sub-types is ticked as a [service item](setup.md). aCar's American spellings
+match (*Tire Rotation* is Tyre rotation, *Windshield Wipers* is Windscreen wipers). A sub-type with no item yet is
+shown as **(new)** and listed above the table; it is made when you press Import, only if a row that has it is
+imported, and the message afterwards names the new items.
+
+**Adding a category while you check.** Choose **New category…** in any row's list: it is saved, chosen on that row and
+offered on all the others, and nothing typed on the page is lost. Categories and service items made in another tab
+also appear when you come back to the page. The invoice import works the same way.
+
+**If something is wrong** when you press Import, nothing is saved, and the page comes back with a list of the problems
+at the top. Each is a link to its row; the row is outlined, and has links to the next error and back to the list.
+
+Anything aCar had in a record's sub-types, its payment method and its own notes go into the expense's notes.
 
 **Creating the car.** aCar's export describes the vehicle, so the import can make the car for you: choose
 **Create a new car from this file** and the preview opens with a **New car** card holding the name, type, make, model,

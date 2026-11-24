@@ -102,7 +102,9 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("service-dialog-cancel").addEventListener("click", () => serviceDialog.close());
     const addToRow = (fields, item, tick) => {
       const list = fields.querySelector("[data-service-list]");
-      let box = [...list.querySelectorAll("input")].find((i) => i.value === String(item.id));
+      const wanted = item.name.toLowerCase();
+      let box = [...list.querySelectorAll("input")].find((i) => i.value === String(item.id)
+        || i.value.toLowerCase() === "new:" + wanted);
       if (!box) {
         const label = document.createElement("label");
         label.className = "inline";
@@ -117,6 +119,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       if (tick) box.checked = true;
     };
+    importForm.addServiceItem = addToRow;
     dialogForm.addEventListener("submit", async (e) => {
       e.preventDefault();
       dialogStatus.textContent = "Adding…";
@@ -501,22 +504,6 @@ document.addEventListener("DOMContentLoaded", () => {
       const body = new FormData();
       body.append("form_file", el.form_file.files[0]);
       prefill(body);
-    });
-
-    // Dropping a PDF onto either box is the same as choosing it with the button.
-    leaseForm.querySelectorAll("[data-lease-document] .drop").forEach((drop) => {
-      const input = drop.querySelector("input[type=file]");
-      ["dragenter", "dragover"].forEach((name) => drop.addEventListener(name, (ev) => { ev.preventDefault(); drop.classList.add("over"); }));
-      ["dragleave", "drop"].forEach((name) => drop.addEventListener(name, () => drop.classList.remove("over")));
-      drop.addEventListener("drop", (ev) => {
-        ev.preventDefault();
-        const pdf = [...((ev.dataTransfer && ev.dataTransfer.files) || [])].find((x) => x.type === "application/pdf" || /\.pdf$/i.test(x.name));
-        if (!pdf) return;
-        const chosen = new DataTransfer();
-        chosen.items.add(pdf);
-        input.files = chosen.files;
-        input.dispatchEvent(new Event("change", { bubbles: true }));
-      });
     });
 
     // A PDF already in the car's storage: it isn't copied, the lease keeps its link (or its path in the folder).
@@ -955,27 +942,6 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Dropping a PDF onto the invoice box is the same as choosing it with the button.
-  const dropBox = document.getElementById("invoice-drop");
-  if (dropBox && pdfInput) {
-    document.getElementById("invoice-drop-hint").hidden = false;
-    ["dragenter", "dragover"].forEach((name) => dropBox.addEventListener(name, (ev) => {
-      ev.preventDefault();
-      dropBox.classList.add("over");
-    }));
-    ["dragleave", "drop"].forEach((name) => dropBox.addEventListener(name, () => dropBox.classList.remove("over")));
-    dropBox.addEventListener("drop", (ev) => {
-      ev.preventDefault();
-      const pdf = [...((ev.dataTransfer && ev.dataTransfer.files) || [])]
-        .find((f) => f.type === "application/pdf" || /\.pdf$/i.test(f.name));
-      if (!pdf) return;
-      const chosen = new DataTransfer();
-      chosen.items.add(pdf);
-      pdfInput.files = chosen.files;
-      pdfInput.dispatchEvent(new Event("change", { bubbles: true }));
-    });
-  }
-
   // Choose a PDF that is already in the car's storage (OneDrive, or the invoice folder on the server):
   // a window over the form, so there's no page to come back from. It opens in the car's folder and can
   // go up from there. The file isn't copied: it becomes the expense's invoice (its link, or its path in
@@ -1111,7 +1077,8 @@ document.addEventListener("DOMContentLoaded", () => {
     ["dragleave", "drop"].forEach((name) => box.addEventListener(name, () => box.classList.remove("over")));
     box.addEventListener("drop", (ev) => {
       ev.preventDefault();
-      const file = [...((ev.dataTransfer && ev.dataTransfer.files) || [])].find((f) => f.name.toLowerCase().endsWith(ext));
+      const file = [...((ev.dataTransfer && ev.dataTransfer.files) || [])]
+        .find((f) => f.name.toLowerCase().endsWith(ext) || (ext === ".pdf" && f.type === "application/pdf"));
       if (!file) return;
       const chosen = new DataTransfer();
       chosen.items.add(file);
@@ -1119,4 +1086,90 @@ document.addEventListener("DOMContentLoaded", () => {
       input.dispatchEvent(new Event("change", { bubbles: true }));
     });
   });
+});
+
+// Import pages: a category made without leaving the page ("New category…" in a row's list), and the lists read
+// again when the page comes back into view, for categories and service items made in another tab. Only options
+// are added: nothing chosen or typed on the page changes.
+document.addEventListener("DOMContentLoaded", () => {
+  // A long form that came back with errors: start at the list of them.
+  const summary = document.getElementById("error-summary");
+  if (summary) summary.focus();
+
+  const form = document.getElementById("import-form");
+  const lists = document.getElementById("import-lists");
+  const dialog = document.getElementById("category-dialog");
+  if (!form || !lists || !dialog) return;
+  const NEW = "__new__";
+  const carKind = form.dataset.carKind || "";
+  const suits = { electric: ["BEV", "PHEV"], combustion: ["ICE", "PHEV", "HEV"] };
+  const selects = () => [...form.querySelectorAll("select[name^=category_id_]")];
+  const addCategory = (select, c) => {
+    const wanted = c.name.toLowerCase();
+    if ([...select.options].some((o) => o.value === String(c.id) || o.textContent.trim().toLowerCase() === wanted)) return;
+    if (carKind && suits[c.applies] && !suits[c.applies].includes(carKind)) return;
+    const option = new Option(c.name, String(c.id));
+    Object.assign(option.dataset, { period: c.period ? "1" : "0", service: c.service ? "1" : "0",
+      gstfree: c.gstfree ? "1" : "0", purchase: c.purchase ? "1" : "0", applies: c.applies });
+    select.add(option, select.querySelector(`option[value="${NEW}"]`));
+  };
+  // Rows are also added while a folder is being read, so each list gets its "New category…" as it appears.
+  const decorate = () => selects().forEach((select) => {
+    if (!select.querySelector(`option[value="${NEW}"]`)) select.add(new Option("New category…", NEW));
+    if (select.dataset.last === undefined) select.dataset.last = select.value;
+  });
+  decorate();
+  new MutationObserver(decorate).observe(form, { childList: true, subtree: true });
+
+  const dialogForm = document.getElementById("category-dialog-form");
+  const status = document.getElementById("category-dialog-status");
+  let opener = null;
+  // Captured first, so nothing else takes "New category…" for a category.
+  form.addEventListener("change", (e) => {
+    const select = e.target;
+    if (!/^category_id_\d+$/.test(select.name || "")) return;
+    if (select.value !== NEW) { select.dataset.last = select.value; return; }
+    e.stopPropagation();
+    select.value = select.dataset.last || "";
+    opener = select;
+    dialogForm.reset();
+    status.textContent = "";
+    dialog.showModal();
+    dialogForm.elements.name.focus();
+  }, true);
+  document.getElementById("category-dialog-cancel").addEventListener("click", () => dialog.close());
+  dialogForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    status.textContent = "Adding…";
+    try {
+      const res = await fetch(dialog.dataset.categoryUrl, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: dialogForm.elements.name.value }),
+      });
+      const made = await res.json();
+      if (!res.ok) { status.textContent = made.error || "Couldn't add it."; return; }
+      selects().forEach((select) => addCategory(select, made));
+      const match = [...opener.options].find((o) => o.value === String(made.id));
+      if (match) {
+        opener.value = match.value;
+        opener.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      dialog.close();
+    } catch (err) {
+      status.textContent = "Couldn't add it. Try again.";
+    }
+  });
+
+  const refresh = async () => {
+    try {
+      const res = await fetch(lists.dataset.listsUrl);
+      if (!res.ok) return;
+      const got = await res.json();
+      selects().forEach((select) => got.categories.forEach((c) => addCategory(select, c)));
+      form.querySelectorAll("[data-service-fields]").forEach((fields) =>
+        got.service_items.forEach((item) => form.addServiceItem && form.addServiceItem(fields, item, false)));
+    } catch (err) { /* offline: the lists stay as they are */ }
+  };
+  window.addEventListener("focus", refresh);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
 });

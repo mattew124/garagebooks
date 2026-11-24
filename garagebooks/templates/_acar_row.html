@@ -1,4 +1,7 @@
-<tr>
+{% import "_category_choice.html" as choice with context %}
+{% from "_service_items_field.html" import field as service_field with context %}
+{% from "_error_summary.html" import row_links %}
+<tr id="row-{{ n }}"{% if errors.get(n) %} class="has-error"{% endif %}>
       <td data-label="Import"><input type="checkbox" name="include_{{ n }}" {{ 'checked' if r.include }}></td>
       <td data-label="What"><div class="file">
         <strong>{{ 'Sale of the car' if r.kind == 'sale' else r.label }}</strong>
@@ -10,18 +13,20 @@
             {% for c in r.candidates %}<option value="{{ c.id }}" {{ 'selected' if r.action == c.id|string }}>Add the odometer reading to {{ c.text }}</option>{% endfor %}
           </select></label>{% endif %}
         {% for d in r.duplicates %}{% if not r.candidates %}<br><small class="dup">Possible duplicate: <a href="{{ d.edit_url }}" target="_blank" rel="noopener noreferrer">{{ d.date }} · {{ d.category }}{% if d.vendor %} · {{ d.vendor }}{% endif %} · {{ d.amount_text }}</a></small>{% endif %}{% endfor %}
-        {% if errors.get(n) %}<br><span class="error">{{ errors[n] }}</span>{% endif %}
+        {% if errors.get(n) %}<br><span class="error">{{ errors[n] }}</span><br>{{ row_links(n, errors) }}{% endif %}
         <input type="hidden" name="kind_{{ n }}" value="{{ r.kind }}">
         <input type="hidden" name="time_{{ n }}" value="{{ r.time }}">
         <input type="hidden" name="notes_{{ n }}" value="{{ r.notes }}">
         <input type="hidden" name="label_{{ n }}" value="{{ r.label }}">
       </div></td>
       <td data-label="Date"><input type="date" name="date_{{ n }}" value="{{ r.date }}"></td>
-      <td data-label="Category">{% if r.kind == 'sale' %}<small>Recorded on the car</small>{% else %}
+      <td data-label="Category" class="extras">{% if r.kind == 'sale' %}<small>Recorded on the car</small>{% else %}<div class="row-extras">
         <select name="category_id_{{ n }}">
           <option value="">Choose…</option>
-          {% for c in categories %}<option value="{{ c.id }}" {{ 'selected' if c.id|string == r.category_id }}>{{ c.name }}</option>{% endfor %}
-        </select>{% endif %}</td>
+          {{ choice.category_options(categories, r.category_id, car_kind) }}
+        </select>
+        {% set is_service = categories|selectattr('id', 'equalto', r.category_id|int(0))|selectattr('name', 'equalto', 'Service')|list %}
+        {{ service_field(n, items, r.services, car_kind, not is_service) }}</div>{% endif %}</td>
       <td data-label="Vendor"><input name="vendor_{{ n }}" maxlength="500" value="{{ r.vendor }}"></td>
       <td class="num" data-label="Amount"><input name="amount_{{ n }}" inputmode="decimal" value="{{ r.amount }}"></td>
       <td class="num" data-label="Odometer"><input name="odometer_km_{{ n }}" inputmode="decimal" value="{{ r.odometer_km }}"></td>
