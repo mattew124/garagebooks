@@ -378,8 +378,7 @@ associate: $45,001 – $135,000 (30%), not exempt, which stands for $90,000.50.
          associate's extra tax = 1,350.00 + 90.00 − 143.77 = 1,296.23; household −3,383.77
 ```
 
-The FBT year report shows these for the two income years the FBT year runs across, and the dashboard every
-year. The one definition is `garagebooks.lease_income_year()` in the database.
+The FBT year report shows these for the two income years the FBT year runs across. The one definition is `garagebooks.lease_income_year()` in the database.
 
 ### Tax tables
 
