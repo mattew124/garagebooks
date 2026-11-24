@@ -329,7 +329,7 @@ def budget_for_year(lease, budgets, pool, year):
 
 # ---- cost after tax (roadmap L5) ----------------------------------------------------------------------
 # What an expense paid from pre-tax salary costs once the GST is claimed back. Deliberate simplifications,
-# set out in docs/lease-calculations.md: GST is a flat 1/11 of an invoice that is not GST-free, and the
+# set out in docs/lease-calculations.md: GST is a flat 1/11 of an invoice unless the category's GST only partly applies (`gst_free`, see below), and the
 # post-tax share is the lease's own split of payments. Not tax advice. The same definition is in SQL as
 # garagebooks.expense_after_tax(); a test holds the two together.
 
@@ -347,8 +347,9 @@ def effective_cost(amount, packaged, gst_free, pretax, posttax, rate_percent, gs
     covering lease's payments (None with no lease; payments summing to nothing count as no post-tax share);
     `rate_percent` is the marginal rate as a percentage (None: not entered). An expense paid personally costs
     its invoice. A packaged one with no rate has no after-tax cost: None, never the invoice standing in.
-    `gst_amount` is the GST the document states, when it was read: it replaces the GST rule (`gst_free`, or one
-    eleventh), so what is left is `amount - gst_amount`."""
+    `gst_amount` is the GST the document states, when it was read: it replaces the GST rule, so what is left is
+    `amount - gst_amount`. `gst_free` is the category's "GST only partly applies" option (the column kept its old
+    name): the GST is not assumed to be one eleventh, so with no `gst_amount` known none is counted."""
     if not packaged:
         return amount
     if rate_percent is None:

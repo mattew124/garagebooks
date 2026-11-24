@@ -98,7 +98,7 @@
   <label id="gst-field" {{ '' if gst_on else 'hidden' }}>GST in the amount <small>(optional, as the document states it)</small>
     <span class="affix"><span>$</span>
       <input name="gst_amount" inputmode="decimal" autocomplete="off" value="{{ values.gst_amount }}"></span>{{ err('gst_amount') }}
-    <small>Leave it empty to use the category's GST rule. A registration's GST is only on its CTP insurance part, so it is read from the notice and replaces that rule.</small>
+    <small>This category's GST only partly applies (a registration's is only on its CTP insurance part), so it isn't taken to be 1/11 of the amount: enter the GST the notice states. With none entered, no GST is counted.</small>
   </label>
 
   {# What a service covered: shown by app.js while the category is Service. Items are edited on the Categories page. #}

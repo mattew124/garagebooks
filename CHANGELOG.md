@@ -13,6 +13,14 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 - **The import recognises lease forms and agreements.** A PDF that is an associate lease form or a lease agreement
   is offered to keep with the matching lease (or to add a lease from it) instead of as an expense, and is never
   renamed or moved. A kept file isn't offered for import again. Nothing changes for installers.
+- **The Categories page saves everything at once, and GST can be "only partly applies".** Every category and service
+  item is edited in one form with one **Save** button at the bottom: each changed row is saved in one go, a wrong row
+  is flagged beside it and nothing is saved until it is fixed. A service item is deleted with a small **×** on its row
+  (it asks first, and never wraps onto a second line, on a phone as well). The category option **GST-free** is now
+  **GST only partly applies** (registration: only its CTP part has GST): the GST isn't taken to be 1/11, it is the
+  amount read from the invoice or entered on the expense, and with none no GST is counted; the expense form and list
+  say when to enter it. The sums are unchanged, and the database column keeps its name (`category.gst_free`).
+  Nothing for installers to do.
 - **An after-tax cost of ownership on the dashboard.** A new row of panels puts a car's after-tax cost together
   by income year: the running costs after tax plus what its lease costs the household after tax (for an
   associate lease, the associate's extra tax less the tax you save, as the payments stay in the household), a

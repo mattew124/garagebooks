@@ -72,7 +72,7 @@ def test_unmapped_category_gets_a_folder_named_after_it(client, ms, admin):
 def test_mapping_is_edited_on_the_categories_page(client, ms, admin):
     cid = category_id(admin, "Tyres")
     assert "Maintenance" in client.get("/categories").data.decode()
-    resp = client.post(f"/categories/{cid}/folder", data={"upload_folder": " Tyres & wheels "}, headers=ORIGIN)
+    resp = client.post("/categories/save", data={"category_id": str(cid), f"upload_folder_{cid}": " Tyres & wheels "}, headers=ORIGIN)
     assert resp.status_code == 303
     assert admin.execute("SELECT upload_folder FROM garagebooks.category WHERE id = %s", (cid,)).fetchone()[
         "upload_folder"] == "Tyres & wheels"
@@ -84,7 +84,7 @@ def test_mapping_is_edited_on_the_categories_page(client, ms, admin):
 
 def test_blank_mapping_falls_back_to_the_category_name(client, ms, admin):
     cid = category_id(admin, "Tyres")
-    client.post(f"/categories/{cid}/folder", data={"upload_folder": ""}, headers=ORIGIN)
+    client.post("/categories/save", data={"category_id": str(cid), f"upload_folder_{cid}": ""}, headers=ORIGIN)
     sign_in(client, ms)
     choose_folder(client)
     upload(client, admin)
@@ -94,14 +94,15 @@ def test_blank_mapping_falls_back_to_the_category_name(client, ms, admin):
 def test_folder_names_onedrive_refuses_are_rejected(client, admin):
     cid = category_id(admin, "Tyres")
     for bad in ("a/b", "a:b", "x" * 300, "trailing."):
-        resp = client.post(f"/categories/{cid}/folder", data={"upload_folder": bad}, headers=ORIGIN)
+        resp = client.post("/categories/save", data={"category_id": str(cid), f"upload_folder_{cid}": bad}, headers=ORIGIN)
         assert resp.status_code == 400, bad
     assert admin.execute("SELECT upload_folder FROM garagebooks.category WHERE id = %s", (cid,)).fetchone()[
         "upload_folder"] == "Maintenance"
 
 
-def test_unknown_category_404s(client):
-    assert client.post("/categories/9999/folder", data={"upload_folder": "x"}, headers=ORIGIN).status_code == 404
+def test_an_unknown_category_is_ignored(client):
+    assert client.post("/categories/save", data={"category_id": "9999", "upload_folder_9999": "x"},
+                       headers=ORIGIN).status_code == 303
 
 
 def test_a_folder_that_cant_be_made_fails_the_save_without_a_row(client, ms, admin):

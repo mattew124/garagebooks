@@ -257,7 +257,8 @@ def test_a_category_upload_folder_saves_only_a_legal_name(world, category_id, fo
     client = world.prepare() if world.client is None else world.client
     world.reset()
     category_id = world.category("Tyres") if category_id == 1 else category_id
-    resp = client.post(f"/categories/{category_id}/folder", data={"upload_folder": folder}, headers=ORIGIN)
+    resp = client.post("/categories/save", data={"category_id": str(category_id), f"upload_folder_{category_id}": folder},
+                       headers=ORIGIN)
     assert resp.status_code in OK
     saved = world.db.execute("SELECT upload_folder FROM garagebooks.category WHERE name = 'Tyres'").fetchone()["upload_folder"]
     if saved:
@@ -266,11 +267,12 @@ def test_a_category_upload_folder_saves_only_a_legal_name(world, category_id, fo
 
 @EXAMPLES
 @given(st.one_of(ids, st.just(1)), text)
-def test_a_category_gst_free_tick_is_a_yes_or_no_and_never_a_crash(world, category_id, tick):
+def test_a_category_gst_tick_is_a_yes_or_no_and_never_a_crash(world, category_id, tick):
     client = world.prepare() if world.client is None else world.client
     world.reset()
     category_id = world.category("Tyres") if category_id == 1 else category_id
-    assert client.post(f"/categories/{category_id}/gst_free", data={"gst_free": tick}, headers=ORIGIN).status_code in OK
+    assert client.post("/categories/save", data={"category_id": str(category_id), f"gst_partial_{category_id}": tick},
+                       headers=ORIGIN).status_code in OK
     assert world.db.execute("SELECT gst_free FROM garagebooks.category WHERE name = 'Tyres'").fetchone()["gst_free"] in (True, False)
     world.db.execute("UPDATE garagebooks.category SET gst_free = false WHERE name = 'Tyres'")
 
