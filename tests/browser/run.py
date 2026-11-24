@@ -576,6 +576,41 @@ def test_phone_layout_has_no_sideways_scroll(page):
     shot(page, "categories-phone")
 
 
+def test_categories_save_together_and_delete_is_a_small_button(page):
+    """One Save for the whole page, and a service item's x stays on its row, on a phone too."""
+    page.goto(UI + "categories")
+    expect(page.get_by_role("button", name="Save", exact=True)).to_have_count(1)
+    name, original = "Browser test item", page.viewport_size
+    page.fill("input[name=name][placeholder='e.g. Spark plugs']", name)
+    page.get_by_role("button", name="Add item").click()
+    try:
+        row = page.locator("li", has=page.locator(f"input[value='{name}']"))
+        delete = row.get_by_role("button", name=f"Delete {name}")
+        for size in ({"width": 360, "height": 740}, {"width": 1200, "height": 800}):
+            page.set_viewport_size(size)
+            field, button = row.locator("input[name^=item_name_]").bounding_box(), delete.bounding_box()
+            assert abs((field["y"] + field["height"] / 2) - (button["y"] + button["height"] / 2)) < 6, (size, field, button)
+            assert button["width"] < 60, button
+        row.locator("input[name^=item_name_]").fill(name + " 2")
+        page.get_by_role("button", name="Save", exact=True).click()
+        expect(page.locator(f"input[value='{name} 2']")).to_have_count(1)
+        page.set_viewport_size({"width": 360, "height": 740})
+        page.locator(f"input[value='{name} 2']").scroll_into_view_if_needed()
+        shot(page, "categories-service-items-phone")
+    finally:
+        page.set_viewport_size(original)
+        page.goto(UI + "categories")
+        for n in ("Browser test item", "Browser test item 2"):     # also sweeps what an aborted earlier run left
+            btn = page.get_by_role("button", name=f"Delete {n}", exact=True)
+            if btn.count():
+                asked = []
+                page.once("dialog", lambda d: (asked.append(d.message), d.accept()))
+                btn.click()
+                page.wait_for_url(re.compile(r"msg=service_deleted"))
+                assert asked and asked[0].startswith(f"Delete {n} "), asked
+                page.wait_for_load_state()
+
+
 def test_header_stays_tidy_on_a_phone(page):
     """Every header link is one line, and the links share rows rather than wrapping inside."""
     page.goto(UI)
@@ -2002,6 +2037,7 @@ def main():
         step("list: tiles or rows, sorting, and back to the same view", test_list_toggle_sort_and_return, page)
         step("rows on a phone show whole dates, categories and amounts", test_rows_on_a_phone_show_whole_values, page)
         step("no sideways scroll on a phone", test_phone_layout_has_no_sideways_scroll, page)
+        step("categories: one Save, and a small delete button", test_categories_save_together_and_delete_is_a_small_button, page)
         step("cars: TeslaMate's are listed, one is added by hand, read and deleted", test_cars_page, page)
         step("cars: a car with no name is listed by make and model, bought and sold details", test_car_without_a_name, page)
         step("lease: add from a statement, see the figures, edit, delete", test_lease_page, page)
