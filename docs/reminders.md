@@ -47,6 +47,8 @@ Each reminder shows a word as well as a colour:
 | **Due soon** | Within its lead time of the date or the reading (a reminder due today is due soon until the day is over). |
 | **Upcoming** | Neither is close yet. |
 | **Odometer unknown** | It is due by odometer, but no odometer is known for the car. It is listed with the due-soon ones and counted in the header: it is never treated as "not due". With a date as well, the date decides, and the page says the odometer is unknown. |
+| **Provider renews** | A registration the lease provider renews: for your information, not counted in the header. |
+| **Next lease loaded** | A lease end whose next lease is already entered: for your information, not counted in the header (see [below](#registration-and-lease-end)). |
 | **Resolved** | Done. Resolved reminders are kept. |
 
 The page shows the car's current odometer and where it came from. That is TeslaMate's, when it tracks
@@ -89,6 +91,14 @@ each time, so change the date on the lease and they follow; they disappear when 
 can't be resolved or deleted here, and link to the lease page. When the provider renews the registration
 (the lease's "The provider renews it" box), **Registration expires** is for your information only and
 is not counted in the header.
+
+They come from the car's current lease: the one that hasn't ended yet, judged on the app's own day (`APP_TZ`),
+so a lease that ended yesterday is gone this morning. When the next lease of the same car is already entered
+(it starts no later than a week after this one ends), **Lease ends** is for your information only: it shows
+**Next lease loaded**, says when the next lease starts ("next lease already loaded (starts 21 Nov 2026)"), is
+never due soon or overdue, is not sent as a [notification](notifications.md) and is not counted in the header.
+
+<!-- screenshot: reminders-next-lease-loaded - The Reminders page with a lease end whose next lease is already loaded -->
 
 ## On the dashboard
 

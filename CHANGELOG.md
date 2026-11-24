@@ -13,6 +13,12 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
   pace looked thousands of km behind. Both now add up every lease held in the year, each with its own days and
   estimate. The FBT year report keeps each lease's section and adds the year in total below them. Nothing to do: pull
   the new image.
+- **A lease followed by the next one no longer says it is overdue.** When the next lease of the same car is already
+  entered, **Lease ends** is for your information only ("Next lease loaded", with the next lease's start date): never
+  due soon or overdue, never sent as a notification and not counted in the header, on the dashboard too. The lease
+  reminders also follow the app's own day (`APP_TZ`), not the database server's: on the server's UTC day a lease that
+  ended last night stayed current, and overdue, until mid-morning. The app saves `APP_TZ` in its settings on every
+  start for this. Nothing to do: pull the new image.
 - **`scripts/dev.sh setup` remakes a venv from another path.** A venv made before its checkout was moved or renamed
   has a `pip` that can't start; `setup` now makes it again. Nothing changes for installers.
 - **Dev stack: a real claims connector's key works, and the Dashboards link comes back.** The dev app joins the key

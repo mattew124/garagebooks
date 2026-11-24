@@ -83,7 +83,7 @@ not on the dashboard. The existing total cost of ownership figures are unchanged
 The **Reminders** table, above the expenses, lists what is open for the selected car, most urgent
 first: the title, due date and due odometer reading, **Days left**, **Km left** and **Status**
 (Overdue, Due soon, Upcoming, Odometer unknown, or Provider renews for a registration the lease provider
-looks after). The rules are the same as in the app: see [Reminders](reminders.md#what-the-statuses-mean).
+looks after, or Next lease loaded for a lease end whose next lease is already entered). The rules are the same as in the app: see [Reminders](reminders.md#what-the-statuses-mean).
 It needs no TeslaMate table, so it is there with or without TeslaMate. The odometer it counts from is the
 car's latest known one (the same as **Distance** above). With none known, a reminder due by odometer says
 *Odometer unknown* and its **Km left** is empty. A reminder due today or later is *Due soon* inside its lead time; the days
