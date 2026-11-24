@@ -12,6 +12,14 @@ from tests.test_app import ORIGIN, category_id, client, rows  # noqa: F401  (fix
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
+@pytest.fixture(autouse=True)
+def engine_car(admin):
+    """The test car is electric, which has no Fuel: these tests import fill-ups, so it has an engine too."""
+    admin.execute("UPDATE garagebooks.car SET kind = 'PHEV' WHERE id = 1")
+    yield
+    admin.execute("UPDATE garagebooks.car SET kind = 'BEV' WHERE id = 1")
+
+
 def upload(client, name="acar-records.csv", **over):
     data = {"car_id": "1", "fill_ups": "1", "file": (io.BytesIO((FIXTURES / name).read_bytes()), name), **over}
     return client.post("/import/acar", data=data, headers=ORIGIN, content_type="multipart/form-data")
@@ -232,3 +240,17 @@ def test_a_merge_into_another_cars_expense_is_refused(client, admin):
     finally:
         admin.execute("DELETE FROM garagebooks.expense WHERE car_id = 2")
         admin.execute("DELETE FROM garagebooks.car WHERE id = 2")
+
+
+def test_an_electric_car_is_not_offered_fuel_and_a_forced_fuel_row_is_refused(client, admin):
+    admin.execute("UPDATE garagebooks.car SET kind = 'BEV' WHERE id = 1")
+    html = upload(client).data.decode()
+    assert "<option value=\"%s\"" % category_id(admin, "Fuel") not in html
+    fill_up = re.search(r'<tr>(?:(?!</tr>).)*aCar fill-up(?:(?!</tr>).)*</tr>', html, re.S).group(0)
+    assert re.search(r'name="category_id_\d+">\s*<option value="" selected', fill_up) or 'selected' not in fill_up
+    data = tick_all(preview_fields(html))
+    key = next(k for k in data if k.startswith("category_id_"))
+    data[key] = str(category_id(admin, "Fuel"))
+    resp = client.post("/import/acar/confirm", data=data, headers=ORIGIN)
+    assert resp.status_code == 400 and "does not apply to this kind of car" in resp.data.decode()
+    assert rows(admin) == []

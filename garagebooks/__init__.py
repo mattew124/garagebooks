@@ -3175,7 +3175,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
     def acar_preview_rows(export, car, categories):
         """One row per record, oldest first. A cost that matches an expense already saved (same amount,
         within the duplicate window) is offered as a merge into it where that would add an odometer reading."""
-        names = {c["name"]: c["id"] for c in categories}
+        names = {c["name"]: c["id"] for c in categories if db.applies(c["applies_to"], car["kind"])}
         out = []
         with connect() as conn:
             for n, rec in enumerate(sorted(export.records, key=lambda r: (r.date, r.time))):
@@ -3235,20 +3235,24 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             return acar_page(error=f"That has {len(export.records)} costs, more than one import takes "
                                    f"({ACAR_MAX_ROWS}). Leave the fill-ups out, or import one vehicle at a time.",
                              status=400, **keep)
-        rows = acar_preview_rows(export, next(c for c in cars if c["id"] == car_id), categories)
+        car = next(c for c in cars if c["id"] == car_id)
+        rows = acar_preview_rows(export, car, categories)
         log.debug("acar preview car=%d records=%d left_out=%s", car_id, len(rows), dict(export.left_out))
-        return acar_page("acar_preview.html", rows=rows, categories=categories, errors={}, left_out=acar_left_out(export.left_out),
+        return acar_page("acar_preview.html", rows=rows, categories=[c for c in categories if db.applies(c["applies_to"], car["kind"])], errors={}, left_out=acar_left_out(export.left_out),
                          vehicle=vehicle or (export.vehicles[0]["name"] if export.vehicles else ""), **keep)
 
     @app.post("/import/acar/confirm")
     def acar_import_confirm():
         with connect() as conn:
-            car_ids = {c["id"] for c in db.cars(conn)}
-            categories = db.categories(conn)
-        cat_ids = {c["id"] for c in categories}
+            cars = {c["id"]: c for c in db.cars(conn)}
+            all_categories = db.categories(conn)
+        car_ids = set(cars)
         car_id = request.form.get("car_id", type=int)
         if car_id not in car_ids:
             abort(400)
+        categories = [c for c in all_categories if db.applies(c["applies_to"], cars[car_id]["kind"])]
+        cats_by_id = {c["id"]: c for c in all_categories}
+        cat_ids = set(cats_by_id)
         count = min(request.form.get("count", type=int) or 0, ACAR_MAX_ROWS)
         rows, new, merges, sales, errors = [], [], [], [], {}
         with connect() as conn:
@@ -3289,6 +3293,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 values, row_errors = validation.parse_expense_form(
                     {"car_id": car_id, **{k: row[k] for k in ("category_id", "date", "time", "amount", "odometer_km", "vendor", "notes")}},
                     tz, car_ids, cat_ids)
+                if not row_errors:
+                    row_errors.update(powertrain_errors(cars[car_id]["kind"], values["category_id"], [], cats_by_id, []))
                 if row_errors:
                     errors[n] = " ".join(row_errors.values())
                 else:
