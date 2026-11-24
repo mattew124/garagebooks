@@ -75,7 +75,15 @@ statement can't show, from the odometer (TeslaMate's, or the latest reading ente
 | (n) | Km per day needed from today | (g − j) ÷ (f − k), at least 0; blank when no days remain |
 
 Days held count both ends of the period, so (f) is one more than d − b. Each figure is rounded to 0.1 km once,
-at the end. A figure that needs an odometer that isn't known is blank (shown as *not known*), never 0. The dashboard's
+at the end.
+
+**An FBT year with two leases.** When one lease ends part-way through an FBT year and the next starts, each lease
+works out its own (a) to (n) over its own part of the year. The FBT year as a whole adds them up: (f), (g), (j), (k)
+and the pro-rata km a × k ÷ e are summed over the leases, (c) is the first lease's, and (i), (l), (m) and (n) are
+worked out from the sums. With one estimate of 15,000 km for both leases, the year expects 15,000 km, the same as one
+lease held all year. The FBT year report shows each lease and then the year in total. The lease page and the
+dashboard show the year in total. A lease still to start in the year adds its expected km but nothing driven. The
+total's distance is *not known* if any lease's odometer isn't known. A figure that needs an odometer that isn't known is blank (shown as *not known*), never 0. The dashboard's
 **Kilometre pace** panel works out the same figures in SQL, using `garagebooks.odometer_at(car, moment)`, which answers like the
 app does with TeslaMate present, absent and held back.
 
