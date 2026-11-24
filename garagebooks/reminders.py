@@ -66,10 +66,11 @@ class Status:
     days_left: int | None = None        # negative once the date has passed
     km_left: float | None = None        # negative once the odometer is past
     odometer_unknown: bool = False      # a km figure that can't be compared: no odometer is known
+    next_lease_start: date | None = None    # a lease end whose next lease is already loaded: when that one starts
 
     @property
     def label(self):
-        return LABELS[self.code]
+        return "Next lease loaded" if self.next_lease_start is not None else LABELS[self.code]
 
     @property
     def rank(self):
@@ -83,6 +84,13 @@ class Status:
     def describe(self):
         """What is left, in words, for each of the date and the odometer: 'due in 10 days', '500 km to go'."""
         parts = []
+        if self.next_lease_start is not None:      # nothing is due: say when it ends and when the next one starts
+            d = self.days_left
+            parts.append("ends today" if d == 0 else f"ended {-d} day{'' if d == -1 else 's'} ago" if d < 0
+                         else f"ends in {d} day{'' if d == 1 else 's'}")
+            n = self.next_lease_start
+            parts.append(f"next lease already loaded (starts {n.day} {n:%b %Y})")
+            return parts
         if self.days_left is not None:
             d = self.days_left
             parts.append("due today" if d == 0 else f"{-d} day{'' if d == -1 else 's'} overdue" if d < 0
@@ -115,7 +123,8 @@ def _km_state(km_left, lead_km):
 
 def status(reminder, today, odometer_km):
     """What a reminder's state is today. `reminder` has due_date, due_km, lead_days, lead_km and
-    resolved_at (and `informational` for one derived from a lease that the provider takes care of).
+    resolved_at (and `informational` for one derived from a lease that the provider takes care of, or a lease end
+    with `next_lease_start`: the next lease is already loaded).
     `odometer_km` is the car's odometer, or None when it isn't known: a km reminder then says so,
     and is never treated as "not due"."""
     if reminder.get("resolved_at") is not None:
@@ -138,9 +147,10 @@ def status(reminder, today, odometer_km):
         states.append(_km_state(km_left, float(reminder.get("lead_km", DEFAULT_LEAD_KM))))
     # Whichever comes first: the worse of the two. With only an unknown odometer there is nothing to judge by.
     code = min(states, key=RANK.get) if states else UNKNOWN
-    if reminder.get("informational") and code in (OVERDUE, DUE_SOON, UPCOMING):
+    next_start = reminder.get("next_lease_start")
+    if (reminder.get("informational") or next_start is not None) and code in (OVERDUE, DUE_SOON, UPCOMING):
         code = INFO
-    return Status(code, days_left, km_left, unknown)
+    return Status(code, days_left, km_left, unknown, next_start if code == INFO else None)
 
 
 # ---- recurrence ---------------------------------------------------------------------------

@@ -161,6 +161,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 if not db.has_schema(conn):
                     raise RuntimeError("SKIP_MIGRATE=1, but the 'garagebooks' schema in this database is from an "
                                        "older release. Run scripts/provision-db.sh again, then start the app.")
+        with db.connect() as conn:
+            db.save_app_tz(conn, tz)
     # Who made a change, for the change history. The sign-in gate in front of the app names the user in
     # a request header; AUTH_USER_HEADER says which. Unset (the default) the header is never read: it is
     # only trustworthy when the proxy strips it from client requests. Every database connection the
