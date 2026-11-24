@@ -73,19 +73,19 @@ nav.crowded .drop-toggle { padding-left: .5rem; }
   .bar { padding: .5rem .75rem; gap: .25rem; flex-wrap: nowrap; }
   .brand { margin-right: auto; font-size: 1rem; gap: .35rem; }
   .brand img { width: 24px; height: 24px; }
-  nav, .dropdown { display: contents; }
-  nav a, nav.crowded a { order: 1; padding: .4rem .5rem; }
+  header nav, .dropdown { display: contents; }
+  header nav a, header nav.crowded a { order: 1; padding: .4rem .5rem; }
   header .add { order: 2; padding-inline: .7rem; }
   .menu-toggle { order: 3; }
   html:not(.js) .bar { flex-wrap: wrap; }
-  html:not(.js) nav { display: flex; order: 3; flex-basis: 100%; margin: 0 -.5rem; }
+  html:not(.js) header nav { display: flex; order: 3; flex-basis: 100%; margin: 0 -.5rem; }
   html:not(.js) .dropdown { display: contents; }
-  html.js nav a:not(.keep), html.js .drop-panel { display: none; }
+  html.js header nav a:not(.keep), html.js .drop-panel { display: none; }
   .drop-toggle { display: none; }
   .drop-panel { display: contents; position: static; }
-  html.js .menu-open nav a:not(.keep), html.js .menu-open .drop-panel a { display: block; order: 4; }
+  html.js header.menu-open nav a:not(.keep), html.js .menu-open .drop-panel a { display: block; order: 4; }
   html.js .menu-open .drop-panel { display: contents; }
-  html.js .menu-open nav a:not(.keep), html.js .menu-open .drop-panel a { flex: 1 0 100%; }
+  html.js header.menu-open nav a:not(.keep), html.js .menu-open .drop-panel a { flex: 1 0 100%; }
   html.js .menu-open .bar { flex-wrap: wrap; }
   html.js .menu-toggle { display: inline-flex; align-items: center; justify-content: center; width: 2.5rem; height: 2.5rem;
     padding: 0; border: 1px solid var(--line); border-radius: .6rem; background: none; color: var(--text); cursor: pointer; }
