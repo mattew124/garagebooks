@@ -527,6 +527,9 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 "car_storage": {car_id: f["backend"] for car_id, f in folders.items() if store_for(f["backend"])},
                 "default_storage": "onedrive" if drive else "local",
                 "cars": sorted(db.cars(conn), key=lambda c: c["sold_at"] is not None),   # sold cars last (the sort is stable)
+                # The cars "Fill from TeslaMate" can answer for: ones TeslaMate tracks, while its figures are usable.
+                "teslamate_cars": {c["id"] for c in db.cars(conn) if c["teslamate_car_id"] is not None}
+                                  if teslamate(conn).usable else set(),
                 "categories": db.categories(conn),
                 "values": values or {},
                 "errors": errors or {},

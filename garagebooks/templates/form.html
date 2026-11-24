@@ -40,7 +40,7 @@
   <label>Car
     <select name="car_id" required>
       {% if cars|length != 1 %}<option value="">Choose…</option>{% endif %}
-      {% for c in cars %}<option value="{{ c.id }}" data-storage="{{ car_storage.get(c.id, '') }}"{{ ' data-leased="1"' if c.id in leased_cars }} {{ 'selected' if values.car_id|string == c.id|string }}>{{ c.name or ('Car ' ~ c.id) }}{{ ' (sold)' if c.sold_at }}</option>{% endfor %}
+      {% for c in cars %}<option value="{{ c.id }}" data-storage="{{ car_storage.get(c.id, '') }}"{{ ' data-leased="1"' if c.id in leased_cars }}{{ ' data-teslamate="1"' if c.id in teslamate_cars }} {{ 'selected' if values.car_id|string == c.id|string }}>{{ c.name or ('Car ' ~ c.id) }}{{ ' (sold)' if c.sold_at }}</option>{% endfor %}
     </select>{{ err('car_id') }}
   </label>
 {% endmacro %}
@@ -181,8 +181,8 @@
     <span class="affix">
       <input name="odometer_km" inputmode="decimal" autocomplete="off" value="{{ values.odometer_km }}">
       <span>km</span></span>{{ err('odometer_km') }}
-    <small><button type="button" id="fill-odometer" class="linklike">Fill from TeslaMate</button>
-      <span id="odometer-hint"></span></small>
+    <small>{% if teslamate_cars %}<button type="button" id="fill-odometer" class="linklike"{{ '' if values.get('car_id', 0)|int(0) in teslamate_cars else ' hidden' }}>Fill from TeslaMate</button>
+      {% endif %}<span id="odometer-hint"></span></small>
   </label>
 
   <label>Vendor / shop <input name="vendor" maxlength="500" value="{{ values.vendor }}">{{ err('vendor') }}</label>
