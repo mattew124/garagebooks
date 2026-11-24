@@ -77,7 +77,7 @@
       {{ field('refinance_date', 'Refinance date', 'date', hint='Only if the lease was refinanced.') }}</div>
     {{ field('car_cost', 'Car\'s cost, value or financed amount', 'money') }}
     <div data-associate{{ ' hidden' if values.get('associate_lease') not in (True, 'on') }}>{{ field('depreciation_value', 'Value for depreciation', 'money',
-      hint='The car\'s value at the lease start, for the associate\'s depreciation (diminishing value, 25% a year, up to the ATO\'s car limit). Blank uses the car\'s cost.') }}</div>
+      hint='The car\'s value when the lease begins, for the associate\'s depreciation (diminishing value, 25% a year, up to the ATO\'s car limit). Blank uses the car\'s cost.') }}</div>
     <div class="row" data-not-associate{{ ' hidden' if values.get('associate_lease') in (True, 'on') }}>{{ field('residual_amount', 'Residual (balloon) amount', 'money') }}
       {{ field('residual_percent', 'Residual percentage of cost', 'percent', hint='Enter either; the other is worked out from the cost.') }}</div>
   </section>
