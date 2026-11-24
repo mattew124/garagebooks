@@ -7,6 +7,16 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+- **The tax rate is chosen per income year.** Settings has a compact table, one row per income year (1 July to
+  30 June): the tax bracket your taxable income falls in, from that year's ATO brackets, and your Medicare levy
+  status (not exempt, half exempt, exempt). An expense's after-tax cost uses its own year's rate (bracket plus
+  levy); a year left blank uses the latest earlier year's choice, and the table says so. Only the bracket is kept,
+  never a salary. The ATO's brackets from 2020–21 and the home charging rate are kept as data and read again from
+  the ATO each week by the new `ato_rates` scheduled job, which keeps the last good set if a page can't be read;
+  the home charging rates are now a read-only table with their source and when they were last checked.
+  Upgrade: pull the new image. A marginal rate you had entered becomes, for every income year up to now, the
+  bracket whose rate plus 2% is nearest it (32 gives 30%, so nothing changes; 34 gives 32.5% before 2024–25 and
+  30% after): check the table in Settings. On the restricted database role, re-run `scripts/provision-db.sh` first.
 - **`scripts/dev.sh setup` remakes a venv from another path.** A venv made before its checkout was moved or renamed
   has a `pip` that can't start; `setup` now makes it again. Nothing changes for installers.
 - **Dev stack: a real claims connector's key works, and the Dashboards link comes back.** The dev app joins the key

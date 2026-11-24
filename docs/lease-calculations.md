@@ -85,9 +85,21 @@ An expense paid from the package costs less than its invoice: the GST is claimed
 out of pre-tax salary, so it saves the tax you would otherwise have paid on that part of your pay. This is
 arithmetic on what you enter, with deliberate simplifications, and **it is not tax advice**.
 
-Two things are entered once: your **marginal tax rate** in Settings (a percentage that includes the 2%
-Medicare levy: 32% plus the levy is 34; the rate only, never a salary) and, for each lease, its pre-tax and
-post-tax payments. For an expense paid from the package, on a lease that covers its date:
+Two things are entered once: in Settings, for each **income tax year** (1 July to 30 June), the
+**tax bracket** your taxable income falls in and your **Medicare levy** status (the bracket only, never a
+salary: see [Tax year, bracket and Medicare status](#tax-year-bracket-and-medicare-status)); and, for each
+lease, its pre-tax and post-tax payments. An expense's date decides its income year, and its **rate** is that
+year's:
+
+```text
+rate        = the bracket's rate + the Medicare levy (2%, 1% half exempt, 0 exempt)
+```
+
+A year with no choice of its own uses the latest earlier year's, for the income its bracket stands for (its
+middle, or $10,000 into the top bracket), in that year's brackets: a choice of $45,001 – $120,000 (32.5%) in
+2022–23 stands for $82,500.50, which is in $45,001 – $135,000 (30%) from 2024–25. A year the ATO hasn't
+published uses its newest brackets. Before the first year chosen there is no rate. For an expense paid from the
+package, on a lease that covers its date:
 
 ```text
 ex GST      = invoice amount − its GST            if the expense has a GST read from the document
@@ -112,16 +124,17 @@ taken to be the lease's own post-tax share of its payments, applied to every pac
 timing, the cap on a package, and anything about your tax return other than the marginal rate are not
 modelled.
 
-**Worked example** (invented figures). An insurance invoice of $1,100.00 (GST included) on a lease paying
-$300.00 pre-tax and $20.00 post-tax a pay, at a marginal rate of 34%:
+**Worked example** (invented figures). An insurance invoice of $1,100.00 (GST included), dated in 2025–26, on a
+lease paying $300.00 pre-tax and $20.00 post-tax a pay. For 2025–26 the bracket chosen is $45,001 – $135,000
+(30%), not exempt from the Medicare levy, so the rate is 32%:
 
 ```text
 ex GST      = 1,100.00 × 10 ÷ 11                        = 1,000.00
 post share  = 20.00 ÷ (300.00 + 20.00)                  = 0.0625
-after tax   = 1,000.00 × (0.9375 × 0.66 + 0.0625)       = 681.25
+after tax   = 1,000.00 × (0.9375 × 0.68 + 0.0625)       = 700.00
 ```
 
-The same $1,100.00 on a GST-free category is 1,100.00 × 0.68125 = $749.375, which is $749.38.
+The same $1,100.00 on a GST-free category is 1,100.00 × 0.7 = $770.00.
 
 **Home charging reimbursement.** For a battery electric car on a lease that has *Home charging is reimbursed at
 the ATO's cents-per-km rate* ticked, the FBT year report adds, for each FBT year:
@@ -130,19 +143,23 @@ the ATO's cents-per-km rate* ticked, the FBT year report adds, for each FBT year
 km             = odometer at the end of the days held in the year (or now, if earlier)
                  − odometer at their start
 reimbursement  = km × cents per km ÷ 100
-tax saved      = reimbursement × marginal rate
+tax saved      = reimbursement × rate        (each day at its income year's rate, weighted by days)
 after-tax cost of the year = after-tax running costs (and TeslaMate's charging, paid personally) − tax saved
 ```
 
 The reimbursement and the tax saved are each rounded to the cent. The odometer is TeslaMate's, or the latest
 odometer reading entered by hand or on an expense, as everywhere else in GarageBooks. When either reading isn't
 known, the reimbursement is shown as *not known* and the year's after-tax total says *unavailable*: a missing
-distance is never treated as nothing. The ATO's rate is data, by FBT year, in **Settings** (4.20 cents per km for
-the FBT years 2022 to 2025 and 5.47 cents from 1 April 2026 to start with: check the ATO's current figure and add a
-year when it publishes one). A year with no rate of its own uses the latest earlier year's, and the report says so.
+distance is never treated as nothing. An FBT year runs across two income years (April to June is the end of
+one), so the tax saved takes each day's rate. The ATO's rate is data, by FBT year, shown in **Settings**
+(4.20 cents per km from 1 April 2022 and 5.47 cents from 1 April 2026 to start with). The `ato_rates` job reads it
+from the ATO's guideline (below) each week. A year with no rate of its own uses the latest earlier year's, and
+the report says so.
 
 The same definition of an expense's cost after tax is in the database as `garagebooks.expense_after_tax(tz)`, so
-the dashboard and the app agree, and a test holds the SQL and the Python together.
+the dashboard and the app agree, and a test holds the SQL and the Python together. The rate of a date is
+`garagebooks.marginal_rate('employee', date)`, from `garagebooks.tax_position(person, income year)`, and the app
+reads it from there too.
 
 ## Tax year, bracket and Medicare status
 
@@ -150,7 +167,9 @@ There is no tax year to pick: the **lease start date** on the **Inputs** sheet d
 the three years of the lease uses the income tax and HELP rates for the income tax year (1 July to
 30 June) its start falls in, so a lease starting on 1 October 2024 uses 2024-25, 2025-26 and 2026-27
 in turn. A year the ATO hasn't published yet uses the newest year it has, and the **Rates** sheet says
-so beside it. (In GarageBooks proper the same is true of every expense: its date decides its year.)
+so beside it. (In GarageBooks proper the same is true of every expense: its date decides its year, and the
+Settings page has one row per income year, with a bracket and a Medicare levy status to choose for each.
+GarageBooks offers *Not exempt*, *Half exempt* and *Exempt*; the workbook's ATO rule below is not in the app.)
 
 These choices on the **Inputs** sheet, one set for each person, set up the rest:
 
@@ -210,10 +229,17 @@ middle bracket.
 
 ## Live rates from the ATO
 
-The ATO publishes its rates as web pages, not as data, so GarageBooks reads the tables on five of
-them. `scripts/ato_rates.py` does the reading and checks what it found: brackets in order, rates
+The ATO publishes its rates as web pages, not as data, so GarageBooks reads the tables on them.
+`garagebooks/ato.py` does the reading and checks what it found: brackets in order, rates
 that are percentages, and tax figures that add up from one bracket to the next. If a page has
 changed shape it stops and says why, rather than carry a wrong rate into a comparison.
+
+The app keeps the income tax brackets (2020–21 on) and the home charging rate in the database, and its
+`ato_rates` [scheduled job](scheduled-jobs.md) reads them again each week from the first page below and the
+ATO's guideline on the home charging rate,
+[PCG 2024/2](https://www.ato.gov.au/law/view/document?docid=COG/PCG20242/NAT/ATO/00001) (its Table 2). If
+either page can't be read or doesn't look right, nothing is changed and the job says why on the Settings page:
+the last good set stays in use. The workbook reads five pages, through `scripts/ato_rates.py`:
 
 - **Income tax rates**, every year since 2020-21: [Tax rates: Australian residents](https://www.ato.gov.au/tax-rates-and-codes/tax-rates-australian-residents)
 - **HELP repayment rates**, the same years: [Study and training loan repayment thresholds and rates](https://www.ato.gov.au/tax-rates-and-codes/study-and-training-support-loans-rates-and-repayment-thresholds)

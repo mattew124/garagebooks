@@ -116,7 +116,7 @@ FBT year, with links to the previous and next years that have a lease or an expe
   total and what it costs after tax, TeslaMate's charging (paid personally), and the year's after-tax cost of
   running the car. For an electric car whose lease has its home charging reimbursed it adds the
   [reimbursement](#cost-after-tax): the km driven, the ATO's rate used, the reimbursement and the tax saved on it.
-  Without a marginal tax rate in Settings it says so and shows no after-tax figure.
+  With no tax bracket chosen in Settings it says so and shows no after-tax figure.
 
 These are the statement's figures worked through the published formula. They are not tax advice, and no
 personal details are stored.
@@ -129,9 +129,12 @@ A packaged expense costs less than its invoice: the GST is claimed back and the 
 salary. GarageBooks can show both figures, from two things you enter once. Nothing here is tax advice, and it
 never asks for a salary.
 
-1. In **Settings**, enter your **marginal tax rate** as a percentage *including the 2% Medicare levy* (32%
-   plus the levy is 34). Leave it blank and no after-tax figure is shown anywhere: the pages say the rate isn't
-   set and link to Settings.
+1. In **Settings**, the **Cost after tax** table has one row per income year (1 July to 30 June). For each,
+   choose the **tax bracket** your taxable income falls in (as the ATO lists them, such as
+   `$45,001 – $135,000 (30%)`) and your **Medicare levy** status (*Not exempt*, *Half exempt* or *Exempt*). An
+   expense's rate is its income year's bracket plus the levy (2%, 1% or nothing). A year left on *Same as the year
+   before* uses the latest earlier year's choice, and the table says which. With no year chosen no after-tax
+   figure is shown anywhere: the pages say so and link to Settings. Only the bracket is kept, never a salary.
 2. On the **Categories** page, tick **GST-free** for a category whose invoices carry no GST. Registration
    starts ticked. Anything else is taken to carry GST at 1/11 of the invoice.
 
@@ -141,7 +144,7 @@ Then, for a car with a lease:
   expense in a category with a budget pool, dated within a lease, is treated as paid from the package, and a
   purchase never is. Choose *The package (pre-tax salary)* or *Personally* when that is wrong.
 - The expense list shows a packaged expense's cost after tax in small type beside its amount, and an
-  after-tax total beside the invoice total. A car with no lease, or no marginal rate, shows nothing extra.
+  after-tax total beside the invoice total. A car with no lease, or no tax bracket chosen, shows nothing extra.
 - The FBT year report has an **After tax** part, and the dashboard has two panels below the others (see
   [the dashboard](dashboard.md#cost-after-tax)).
 
@@ -149,13 +152,14 @@ For an electric car on a novated or associate lease whose provider reimburses ho
 cents-per-km rate, tick **Home charging is reimbursed at the ATO's cents-per-km rate** on the lease form (it is
 offered for a battery electric car only: the ATO's rate doesn't cover a plug-in hybrid). The FBT year report then
 shows the reimbursement (the km driven in the days held, times the rate) and the tax saved on it. The ATO's rates
-by FBT year are in **Settings** and can be changed or added to. The distance needs the odometer, so with no
+by FBT year are listed in **Settings**, with where each came from and when it was last checked: the `ato_rates`
+[scheduled job](scheduled-jobs.md) reads them from the ATO each week, so there is nothing to type. The distance needs the odometer, so with no
 reading it says *not known* rather than counting it as nothing.
 
 The formulas, their simplifications and a worked example are on
 [Novated lease calculations](lease-calculations.md#cost-after-tax-l5).
 
-<!-- screenshot: settings-after-tax - The Settings page: the marginal tax rate and the ATO's cents-per-km rates by FBT year -->
+<!-- screenshot: settings-after-tax - The Settings page: the tax bracket and Medicare levy for each income year, and the ATO's cents-per-km rates by FBT year -->
 <!-- screenshot: expense-paid-from - The Add expense form for a car with a lease, with the Paid from choice -->
 <!-- screenshot: list-after-tax - The expense list, with a packaged expense's cost after tax beside its amount and the after-tax total -->
 <!-- screenshot: fbt-after-tax - The After tax part of the FBT year report, with the home charging reimbursement -->
@@ -254,4 +258,8 @@ by themselves. Change a date here and the reminder follows; delete the lease and
 The app adds its lease tables and the new column on categories itself when it starts. If you use the
 restricted database role (`SKIP_MIGRATE=1`), run `scripts/provision-db.sh` again first: this release also adds the
 `garagebooks.fbt_year(date)` function, which the dashboard and the app share, and the cost-after-tax columns, the
-`garagebooks.ev_charging_rate` table and the `garagebooks.expense_after_tax(tz)` function.
+`garagebooks.ev_charging_rate` table and the `garagebooks.expense_after_tax(tz)` function. The tax rate by income
+year adds the `garagebooks.tax_bracket` and `garagebooks.tax_choice` tables and the `income_year`,
+`tax_table_year`, `tax_position` and `marginal_rate` functions. A marginal rate entered in an earlier release
+becomes, for every income year up to the current one, the bracket whose rate plus the 2% levy is nearest it
+(30% for 32, say): check the table in Settings after upgrading.
