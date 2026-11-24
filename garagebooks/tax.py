@@ -9,7 +9,6 @@ brackets for the page, and refreshes the brackets and the home charging rate fro
 pages). Not tax advice.
 """
 
-from datetime import date
 from decimal import Decimal
 
 from . import ato, db, jobs
