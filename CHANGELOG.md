@@ -7,6 +7,12 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+- **Fill from TeslaMate only where it can work.** The Add form's button for the odometer shows only for a car
+  TeslaMate tracks, while TeslaMate is connected and usable; a car added by hand, or an install without TeslaMate,
+  doesn't get it. Nothing changes for installers.
+- **The import recognises lease forms and agreements.** A PDF that is an associate lease form or a lease agreement
+  is offered to keep with the matching lease (or to add a lease from it) instead of as an expense, and is never
+  renamed or moved. A kept file isn't offered for import again. Nothing changes for installers.
 - **`scripts/dev.sh setup` remakes a venv from another path.** A venv made before its checkout was moved or renamed
   has a `pip` that can't start; `setup` now makes it again. Nothing changes for installers.
 - **Dev stack: a real claims connector's key works, and the Dashboards link comes back.** The dev app joins the key

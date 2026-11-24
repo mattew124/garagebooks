@@ -29,7 +29,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // The button says what it will do: nothing to import but some to skip is "Skip 3", not "Import ticked".
   const ticked = (prefix) => importForm.querySelectorAll(`input[name^=${prefix}_]:checked`).length;
   const importLabel = () => {
-    const [n, s] = [ticked("include"), ticked("skip")];
+    const [n, s] = [ticked("include") + ticked("lease"), ticked("skip")];
     return n && s ? `Import ${n} and skip ${s}` : s ? `Skip ${s}` : "Import ticked";
   };
   const relabel = () => {

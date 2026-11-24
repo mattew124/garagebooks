@@ -610,7 +610,12 @@ def known_invoices(conn, refs):
                         # An email whose PDF was copied into the car's storage: its expense links the copy.
                         "UNION SELECT ref FROM garagebooks.mail_import WHERE ref = ANY(%(refs)s) "
                         "UNION SELECT invoice_url FROM garagebooks.expense_document WHERE invoice_url = ANY(%(refs)s) "
-                        "UNION SELECT invoice_path FROM garagebooks.expense_document WHERE invoice_path = ANY(%(refs)s)",
+                        "UNION SELECT invoice_path FROM garagebooks.expense_document WHERE invoice_path = ANY(%(refs)s) "
+                        # A lease form or agreement kept with a lease.
+                        "UNION SELECT form_url FROM garagebooks.lease WHERE form_url = ANY(%(refs)s) "
+                        "UNION SELECT form_path FROM garagebooks.lease WHERE form_path = ANY(%(refs)s) "
+                        "UNION SELECT agreement_url FROM garagebooks.lease WHERE agreement_url = ANY(%(refs)s) "
+                        "UNION SELECT agreement_path FROM garagebooks.lease WHERE agreement_path = ANY(%(refs)s)",
                         {"refs": list(refs)}).fetchall()
     return {r["ref"] for r in rows}
 
@@ -761,6 +766,17 @@ def car_leases(conn, car_id):
     """Every lease of a car, newest first. A row per lease with all its columns."""
     return conn.execute("SELECT * FROM garagebooks.lease WHERE car_id = %s ORDER BY start_date DESC, id DESC",
                         (car_id,)).fetchall()
+
+
+def set_lease_document(conn, car_id, lease_id, doc, ref_field, ref):
+    """Keep a file already in the car's storage as a lease's form or agreement (`doc`). Nothing about the
+    file changes. Replaces a link of the other kind. False when there is no such lease for the car."""
+    if doc not in ("form", "agreement"):
+        raise ValueError(doc)
+    url, path = (ref, None) if ref_field == "invoice_url" else (None, ref)
+    done = conn.execute(f"UPDATE garagebooks.lease SET {doc}_url = %s, {doc}_path = %s WHERE id = %s AND car_id = %s",
+                        (url, path, lease_id, car_id))
+    return done.rowcount == 1
 
 
 def get_lease(conn, lease_id, car_id=None):
