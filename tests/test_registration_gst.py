@@ -79,22 +79,25 @@ def test_the_columns_and_their_checks(admin):
         admin.execute("UPDATE garagebooks.expense SET card_payment_ref = %s", ("1" * 61,))
 
 
+CHOOSE_32 = "INSERT INTO garagebooks.tax_choice VALUES ('employee', 2026, 45001, 'not_exempt')"    # 30% + 2% in 2026-27
+
+
 def test_registration_is_gst_free_by_default_and_a_stored_gst_overrides_the_rule(admin):
-    admin.execute("UPDATE garagebooks.setting SET marginal_tax_rate = 34")
+    admin.execute(CHOOSE_32)
     assert admin.execute("SELECT gst_free FROM garagebooks.category WHERE name = 'Registration'").fetchone()["gst_free"]
     plain_one, with_gst = add(admin, "300.00", None), add(admin, "300.00", "18.18")
     got = {r["expense_id"]: r["effective_cost"] for r in admin.execute(
         "SELECT * FROM garagebooks.expense_after_tax('Australia/Brisbane')")}
-    assert got[plain_one] == D("198.00")                  # GST-free: no GST to claim back
-    assert got[with_gst] == D("186.00")                   # (300.00 - 18.18) x 0.66, rounded to the cent
+    assert got[plain_one] == D("204.00")                  # GST-free: no GST to claim back
+    assert got[with_gst] == D("191.64")                   # (300.00 - 18.18) x 0.68, rounded to the cent
 
 
 def test_a_stored_gst_overrides_a_category_that_charges_it_too(admin):
-    admin.execute("UPDATE garagebooks.setting SET marginal_tax_rate = 34")
+    admin.execute(CHOOSE_32)
     eid = add(admin, "330.00", "0.00", category="Tyres")
     got = admin.execute("SELECT effective_cost FROM garagebooks.expense_after_tax('Australia/Brisbane') "
                         "WHERE expense_id = %s", (eid,)).fetchone()["effective_cost"]
-    assert got == D("217.80")                             # no GST at all: 330.00 x 0.66, not x 10/11
+    assert got == D("224.40")                             # no GST at all: 330.00 x 0.68, not x 10/11
 
 
 def test_the_python_formula_takes_the_stored_gst_too():

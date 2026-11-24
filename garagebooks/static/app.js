@@ -465,9 +465,10 @@ document.addEventListener("DOMContentLoaded", () => {
     leaseForm.addEventListener("input", (ev) => { if (ev.isTrusted && ev.target.name) touched.add(ev.target.name); });
     leaseForm.addEventListener("change", (ev) => { if (ev.isTrusted && ev.target.name) touched.add(ev.target.name); });
 
-    const showAssociate = () => leaseForm.querySelectorAll("[data-not-associate]").forEach((box) => {
-      box.hidden = el.associate_lease.checked;
-    });
+    const showAssociate = () => {
+      leaseForm.querySelectorAll("[data-not-associate]").forEach((box) => { box.hidden = el.associate_lease.checked; });
+      leaseForm.querySelectorAll("[data-associate]").forEach((box) => { box.hidden = !el.associate_lease.checked; });
+    };
     el.associate_lease.addEventListener("change", showAssociate);
     showAssociate();
 
@@ -909,6 +910,28 @@ document.addEventListener("DOMContentLoaded", () => {
     const chosen = form.elements.category_id.selectedOptions[0];
     serviceFields.hidden = !(chosen && chosen.dataset.service === "1");
   });
+  // Only what applies to the chosen car is offered (the server checks it too): plug-in cars for "electric", cars with an
+  // engine for "combustion". A choice that no longer applies is cleared.
+  const carSelect = form.elements.car_id;
+  const kindFits = (applies, kind) => !kind || !applies || applies === "all" ||
+    (applies === "electric" ? ["BEV", "PHEV"] : ["ICE", "PHEV", "HEV"]).includes(kind);
+  const showForCar = () => {
+    const kind = carSelect.selectedOptions[0] && carSelect.selectedOptions[0].dataset.kind;
+    form.elements.category_id.querySelectorAll("option[data-applies]").forEach((o) => {
+      const fits = kindFits(o.dataset.applies, kind);
+      o.hidden = o.disabled = !fits;
+      if (!fits && o.selected) {
+        form.elements.category_id.value = "";
+        form.elements.category_id.dispatchEvent(new Event("change"));
+      }
+    });
+    form.querySelectorAll("#service-fields label[data-applies]").forEach((label) => {
+      const fits = kindFits(label.dataset.applies, kind);
+      label.hidden = !fits;
+      if (!fits) label.querySelector("input").checked = false;
+    });
+  };
+  if (carSelect && carSelect.tagName === "SELECT") carSelect.addEventListener("change", showForCar);
   // Fill the form from what /api/prefill read in a PDF; `body` is the form data to send it.
   async function prefillFrom(body) {
     prefillHint.textContent = "Reading the invoice…";

@@ -126,6 +126,12 @@ Starter categories: Initial purchase, Insurance, Registration, Tyres, Service, C
 covered (filters, fluids, wipers, brakes, a wheel alignment...) is a list of **service items** chosen on each Service
 expense, not a category each. Add more categories on the **Categories** page (new ones count as running costs).
 
+Each category and service item has a **For** choice on the Categories page: all cars, cars that plug in (battery
+electric and plug-in hybrid), or cars with an engine (petrol or diesel, plug-in hybrid and hybrid). Fuel, and service
+items such as oil, oil filter, fuel filter, air filter and timing belt, start as engine only, and Charging as plug-in
+only. The Add and Edit form and the import page offer only what suits the car's kind (set on the **Cars** page), and
+refuse the rest if it is sent anyway. An expense saved before keeps what it has, and still shows.
+
 ## Change history
 
 The **History** page lists every add, edit and delete of an expense or category, newest first: when,

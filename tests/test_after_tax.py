@@ -102,34 +102,13 @@ def test_the_days_the_reimbursement_covers_are_the_held_days_up_to_today():
 
 # ---- validation -----------------------------------------------------------------------------------
 
-def test_the_marginal_rate_is_a_percentage_from_0_to_100_or_blank():
-    assert v.parse_marginal_rate("34") == D("34.00") and v.parse_marginal_rate(" 34.5 % ") == D("34.50")
-    assert v.parse_marginal_rate("") is None and v.parse_marginal_rate(None) is None
-    assert v.parse_marginal_rate("0") == D("0.00") and v.parse_marginal_rate("100") == D("100.00")
-    for bad in ("-1", "100.01", "abc", "NaN", "1e3", "34,5,6"):
-        try:
-            v.parse_marginal_rate(bad)
-        except ValueError as exc:
-            assert "rate" in str(exc).lower()
-        else:
-            raise AssertionError(bad)
-
-
-def test_cents_per_km_and_the_fbt_year_are_checked():
-    assert v.parse_cents_per_km("4.2") == D("4.20") and v.parse_cents_per_km("5.47c") == D("5.47")
-    for bad in ("", "-1", "abc", "10000", "NaN"):
-        try:
-            v.parse_cents_per_km(bad)
-        except ValueError:
-            continue
-        raise AssertionError(bad)
-    assert v.parse_rate_year("2027") == 2027
-    for bad in ("", "abc", "1989", "2201", "2026.5"):
-        try:
-            v.parse_rate_year(bad)
-        except ValueError:
-            continue
-        raise AssertionError(bad)
+def test_the_rate_across_days_is_each_income_years_rate_weighted_by_days():
+    rates = {2025: D("32"), 2026: D("30")}
+    spans = [(date(2026, 4, 1), date(2026, 6, 30)), (date(2026, 7, 1), date(2026, 7, 31))]   # 91 days, then 31
+    assert lease.rate_over_days(spans, rates.get).quantize(D("1e-20")) == ((D("32") * 91 + D("30") * 31) / 122).quantize(D("1e-20"))
+    assert lease.rate_over_days([(date(2025, 8, 1), date(2025, 8, 31))], rates.get) == D("32")
+    assert lease.rate_over_days([(date(2024, 6, 30), date(2024, 7, 1))], rates.get) is None   # 2023-24 has no rate
+    assert lease.rate_over_days([], rates.get) is None
 
 
 def test_paid_from_is_automatic_the_package_or_personally():
@@ -181,14 +160,14 @@ def test_a_rate_outside_0_to_100_and_a_negative_cents_per_km_are_refused_by_the_
 def test_running_the_schema_again_is_safe_and_keeps_the_owners_choices(empty_db, monkeypatch):
     start(empty_db, monkeypatch)
     with connect(empty_db) as conn:
-        conn.execute("UPDATE garagebooks.setting SET marginal_tax_rate = 34")
+        db.set_tax_choice(conn, "employee", 2025, 45001, "half_exempt")
         conn.execute("UPDATE garagebooks.category SET gst_free = NOT gst_free WHERE name IN ('Registration', 'Tyres')")
         conn.execute("UPDATE garagebooks.ev_charging_rate SET cents_per_km = 9.99 WHERE fbt_year = 2026")
         conn.execute("INSERT INTO garagebooks.ev_charging_rate VALUES (2027, 6.00)")
     start(empty_db, monkeypatch)
     start(empty_db, monkeypatch)
     with connect(empty_db) as conn:
-        assert conn.execute("SELECT marginal_tax_rate FROM garagebooks.setting").fetchone()["marginal_tax_rate"] == 34
+        assert conn.execute("SELECT garagebooks.marginal_rate('employee', '2025-11-01') AS r").fetchone()["r"] == D("31")
         free = {r["name"] for r in conn.execute("SELECT name FROM garagebooks.category WHERE gst_free")}
         assert free == {"Tyres"}                                          # not put back to the defaults
         rates = {r["fbt_year"]: r["cents_per_km"] for r in conn.execute("SELECT * FROM garagebooks.ev_charging_rate")}
@@ -218,7 +197,7 @@ def test_a_database_from_before_this_release_gains_the_columns_and_keeps_its_exp
 def test_the_restricted_role_can_do_what_the_app_does(pg, admin):
     category_id = category(admin, "Tyres")
     with psycopg.connect(pg.app_url, row_factory=dict_row) as conn:      # one transaction, rolled back at the end
-        conn.execute("UPDATE garagebooks.setting SET marginal_tax_rate = 34")
+        conn.execute("INSERT INTO garagebooks.tax_choice VALUES ('employee', 2020, 45001, 'not_exempt')")
         conn.execute("UPDATE garagebooks.category SET gst_free = true WHERE id = %s", (category_id,))
         conn.execute("INSERT INTO garagebooks.ev_charging_rate VALUES (2031, 7.00) "
                      "ON CONFLICT (fbt_year) DO UPDATE SET cents_per_km = excluded.cents_per_km")
@@ -228,31 +207,48 @@ def test_the_restricted_role_can_do_what_the_app_does(pg, admin):
         assert conn.execute("SELECT effective_cost FROM garagebooks.expense_after_tax('UTC')").fetchone()["effective_cost"] is not None
         conn.execute("UPDATE garagebooks.lease SET charging_reimbursed = false")
         conn.rollback()
-    assert admin.execute("SELECT marginal_tax_rate FROM garagebooks.setting").fetchone()["marginal_tax_rate"] is None
+    assert admin.execute("SELECT count(*) AS n FROM garagebooks.tax_choice").fetchone()["n"] == 0
     assert pg.provision().returncode == 0                                # the restricted-role path still provisions
 
 
 # ---- the SQL function and the Python function agree ---------------------------------------------------
 
 POOLS = ["Insurance", "Initial purchase", "Misc"]           # a pool and running; a purchase; running with no pool
+# 2025-26's and 2026-27's brackets by their first dollar (the same edges in both years), and the Medicare levies.
+BRACKET_RATES = {2025: {0: 0, 18201: 16, 45001: 30, 135001: 37, 190001: 45},
+                 2026: {0: 0, 18201: 15, 45001: 30, 135001: 37, 190001: 45}}
+LEVIES = {"not_exempt": 2, "half_exempt": 1, "exempt": 0}
+
+
+def expected_rate(choices, day):
+    """The marginal rate the brackets chosen give on a date: its income year's choice, else the latest earlier one's."""
+    year = day.year if day.month >= 7 else day.year - 1
+    earlier = [y for y in choices if y <= year]
+    if not earlier:
+        return None
+    lower, medicare = choices[max(earlier)]
+    return D(BRACKET_RATES[year][lower] + LEVIES[medicare])
 
 
 @settings(max_examples=40)
 @given(
-    rate=st.one_of(st.none(), st.decimals(0, 100, places=2)),
+    choices=st.dictionaries(st.sampled_from([2025, 2026]),
+                            st.tuples(st.sampled_from(sorted(BRACKET_RATES[2025])), st.sampled_from(sorted(LEVIES)))),
     pretax=st.decimals(0, 2000, places=2), posttax=st.decimals(0, 2000, places=2),
-    lease_days=st.tuples(st.integers(0, 40), st.integers(1, 40)),
+    lease_days=st.tuples(st.integers(0, 200), st.integers(1, 200)),
     gst_free=st.booleans(),
-    items=st.lists(st.tuples(st.integers(-5, 90), st.integers(0, 23), st.sampled_from(POOLS),
+    items=st.lists(st.tuples(st.integers(-5, 300), st.integers(0, 23), st.sampled_from(POOLS),
                              st.decimals(-5000, 5000, places=2), st.sampled_from([None, True, False]),
                              st.one_of(st.none(), st.decimals(0, 1, places=2))),      # a GST read from the document, as a share of it
                    min_size=1, max_size=6))
-def test_the_sql_function_and_the_python_one_agree(pg, rate, pretax, posttax, lease_days, gst_free, items):
-    first = date(2026, 1, 10)
+def test_the_sql_function_and_the_python_one_agree(pg, choices, pretax, posttax, lease_days, gst_free, items):
+    first = date(2026, 1, 10)                     # the expenses run from 2025-26 into 2026-27
     start_day, end_day = first + timedelta(days=lease_days[0]), first + timedelta(days=lease_days[0] + lease_days[1])
     with pg.admin() as conn:
         with conn.transaction():                                          # nothing here outlives the example
-            conn.execute("UPDATE garagebooks.setting SET marginal_tax_rate = %s", (rate,))
+            conn.execute("DELETE FROM garagebooks.tax_choice")
+            for year, (lower, medicare) in choices.items():
+                db.set_tax_choice(conn, "employee", year, lower, medicare)
             car = conn.execute("INSERT INTO garagebooks.car (name) VALUES ('Prop') RETURNING id").fetchone()["id"]
             conn.execute("INSERT INTO garagebooks.category (name, kind, sort_order, budget_pool) VALUES ('Misc', 'running', 100, NULL) "
                          "ON CONFLICT (name) DO NOTHING")
@@ -279,6 +275,7 @@ def test_the_sql_function_and_the_python_one_agree(pg, rate, pretax, posttax, le
                 covered = has_lease and start_day <= day <= end_day
                 kind = "purchase" if name == "Initial purchase" else "running"
                 packaged = lease.is_packaged(choice, covered, None if name == "Misc" else "insurance", kind)
+                rate = expected_rate(choices, day)
                 want = lease.effective_cost(amount, packaged, gst_free, pretax if covered else None,
                                             posttax if covered else None, rate, gst_amount=gst)
                 assert got[expense_id]["packaged"] == packaged
@@ -292,49 +289,11 @@ def post_settings(client, **over):
     return client.post("/settings", data={"app_url": "", "grafana_url": "", **over}, headers=ORIGIN)
 
 
-def set_rate(client, rate="34", **over):
-    assert post_settings(client, marginal_tax_rate=rate, **over).status_code == 303
-
-
-def stored_rate(url):
-    with connect(url) as conn:
-        return conn.execute("SELECT marginal_tax_rate FROM garagebooks.setting").fetchone()["marginal_tax_rate"]
-
-
-def test_settings_save_the_marginal_rate_and_show_it_back(app):
-    client, url, _ = app
-    page = client.get("/settings").data.decode()
-    assert 'name="marginal_tax_rate"' in page and "Medicare levy" in page and "not tax advice" in page.lower()
-    set_rate(client, "34.5")
-    assert stored_rate(url) == D("34.50")
-    assert re.search(r'name="marginal_tax_rate"[^>]*value="34.5', client.get("/settings").data.decode())
-    set_rate(client, "")                                                  # blank: not entered
-    assert stored_rate(url) is None
-
-
-def test_a_bad_rate_is_refused_and_nothing_is_saved(app):
-    client, url, _ = app
-    set_rate(client, "30")
-    for bad in ("101", "-3", "lots"):
-        resp = post_settings(client, marginal_tax_rate=bad)
-        assert resp.status_code == 400 and "rate" in text(resp).lower()
-        assert stored_rate(url) == D("30.00")
-
-
-def test_settings_list_the_ev_rates_and_take_a_change_and_a_new_year(app):
-    client, url, _ = app
-    page = client.get("/settings").data.decode()
-    for year, cents in RATES.items():
-        assert re.search(rf'name="ev_rate_{year}"[^>]*value="{cents}"', page), year
-    assert post_settings(client, ev_rate_2026="5.60", new_rate_year="2027", new_rate_cents="6.00").status_code == 303
-    with connect(url) as conn:
-        rates = {r["fbt_year"]: r["cents_per_km"] for r in conn.execute("SELECT * FROM garagebooks.ev_charging_rate")}
-    assert rates[2026] == D("5.60") and rates[2027] == D("6.00") and rates[2025] == D("4.20")
-    bad = post_settings(client, ev_rate_2026="-1")
-    assert bad.status_code == 400 and "cents per km" in text(bad).lower()
-    half = post_settings(client, new_rate_year="2028")                      # a year with no rate
-    assert half.status_code == 400
-    assert post_settings(client, new_rate_year="", new_rate_cents="").status_code == 303   # both blank: nothing to add
+def set_rate(client, on=True, **over):
+    """Choose $45,001 - $135,000 (30%), not exempt from the Medicare levy, for 2025-26: a marginal rate of 32% from
+    1 July 2025 on (later years follow it). on=False clears it, so no year has a rate."""
+    chosen = {"tax_employee_2025_bracket": "45001" if on else "", "tax_employee_2025_medicare": "not_exempt"}
+    assert post_settings(client, **chosen, **over).status_code == 303
 
 
 # ---- the expense form -----------------------------------------------------------------------------------
@@ -392,8 +351,8 @@ def test_the_history_names_the_new_fields(app):
                        headers=ORIGIN).status_code == 303
     shown = text(client.get("/history"))
     assert "Paid from" in shown and "The package" in shown and "Personally" in shown
-    client.post(f"/categories/{insurance}/gst_free", data={"gst_free": "1"}, headers=ORIGIN)
-    assert "GST-free" in text(client.get("/history"))
+    client.post("/categories/save", data={"category_id": str(insurance), f"gst_partial_{insurance}": "1"}, headers=ORIGIN)
+    assert "GST only partly applies" in text(client.get("/history"))
 
 
 # ---- the list ------------------------------------------------------------------------------------------
@@ -401,7 +360,7 @@ def test_the_history_names_the_new_fields(app):
 def test_a_packaged_expense_shows_what_it_costs_after_tax_and_the_totals_do_too(app):
     client, url, car_id = app
     add_lease(client, car_id)
-    set_rate(client, "34")
+    set_rate(client)
     with connect(url) as conn:
         expense(conn, car_id, "Insurance", "2025-11-10T09:00+10", 1100)
         expense(conn, car_id, "Tyres", "2025-11-11T09:00+10", 200)
@@ -409,9 +368,9 @@ def test_a_packaged_expense_shows_what_it_costs_after_tax_and_the_totals_do_too(
         conn.execute("UPDATE garagebooks.expense SET packaged = false WHERE amount = 200")
     page = client.get("/")
     body, shown = page.data.decode(), text(page)
-    assert "$681.25" in shown and "after tax" in shown.lower()
+    assert "$700.00" in shown and "after tax" in shown.lower()
     assert body.count('class="after-tax"') == 1                              # only the packaged one
-    assert "$1,300.00" in shown and "$881.25" in text_of(re.search(r'id="after-tax-total".*?</span>', body, re.S).group(0))
+    assert "$1,300.00" in shown and "$900.00" in text_of(re.search(r'id="after-tax-total".*?</span>', body, re.S).group(0))
 
 
 def test_without_a_rate_the_list_says_so_and_shows_no_after_tax_figure(app):
@@ -420,13 +379,13 @@ def test_without_a_rate_the_list_says_so_and_shows_no_after_tax_figure(app):
     with connect(url) as conn:
         expense(conn, car_id, "Insurance", "2025-11-10T09:00+10", 1100)
     body = client.get("/").data.decode()
-    assert 'class="after-tax"' not in body and 'id="after-tax-total"' not in body and "$681.25" not in body
+    assert 'class="after-tax"' not in body and 'id="after-tax-total"' not in body and "$700.00" not in body
     assert 'id="no-tax-rate"' in body and "/settings" in body
 
 
 def test_a_car_with_no_lease_has_nothing_extra_in_the_list(app):
     client, url, car_id = app
-    set_rate(client, "34")
+    set_rate(client)
     with connect(url) as conn:
         expense(conn, car_id, "Insurance", "2025-11-10T09:00+10", 1100)
     body = client.get("/").data.decode()
@@ -436,7 +395,7 @@ def test_a_car_with_no_lease_has_nothing_extra_in_the_list(app):
 def test_an_expense_outside_the_lease_dates_is_personal_and_a_purchase_is_never_automatic(app):
     client, url, car_id = app
     add_lease(client, car_id, start_date="2025-10-01", end_date="2026-09-30")
-    set_rate(client, "34")
+    set_rate(client)
     with connect(url) as conn:
         expense(conn, car_id, "Insurance", "2025-09-30T23:00+10", 1100)       # the day before the lease
         expense(conn, car_id, "Initial purchase", "2025-11-10T09:00+10", 60000)
@@ -448,21 +407,21 @@ def test_an_expense_outside_the_lease_dates_is_personal_and_a_purchase_is_never_
 
 # ---- the categories ---------------------------------------------------------------------------------------
 
-def test_a_category_can_be_marked_gst_free_and_the_cost_follows(app):
+def test_a_category_can_be_marked_as_only_partly_gst_and_the_cost_follows(app):
     client, url, car_id = app
     add_lease(client, car_id)
-    set_rate(client, "34")
+    set_rate(client)
     with connect(url) as conn:
         expense(conn, car_id, "Insurance", "2025-11-10T09:00+10", 1100)
         insurance = category(conn, "Insurance")
     page = client.get("/categories").data.decode()
-    assert f'/categories/{insurance}/gst_free' in page and "GST-free" in page
-    assert "$681.25" in text(client.get("/"))
-    assert client.post(f"/categories/{insurance}/gst_free", data={"gst_free": "1"}, headers=ORIGIN).status_code == 303
-    assert "$749.38" in text(client.get("/"))
-    client.post(f"/categories/{insurance}/gst_free", data={}, headers=ORIGIN)           # an unticked box sends nothing
-    assert "$681.25" in text(client.get("/"))
-    assert client.post("/categories/99999/gst_free", data={"gst_free": "1"}, headers=ORIGIN).status_code == 404
+    assert f'name="gst_partial_{insurance}"' in page and "GST only partly applies" in page
+    assert "$700.00" in text(client.get("/"))
+    assert client.post("/categories/save", data={"category_id": str(insurance), f"gst_partial_{insurance}": "1"},
+                       headers=ORIGIN).status_code == 303
+    assert "$770.00" in text(client.get("/"))           # no GST read or entered: none is counted
+    client.post("/categories/save", data={"category_id": str(insurance)}, headers=ORIGIN)   # an unticked box sends nothing
+    assert "$700.00" in text(client.get("/"))
 
 
 # ---- the lease form ----------------------------------------------------------------------------------------
@@ -512,42 +471,42 @@ def section(body):
 def test_the_report_shows_invoice_and_effective_cost_per_line_and_the_total(app):
     client, url, car_id = app
     add_lease(client, car_id)
-    set_rate(client, "34")
+    set_rate(client)
     fill_year(url, car_id)
     shown = text_of(section(client.get(f"/cars/{car_id}/fbt?year=2025").data.decode()))
-    assert "$2,300.00" in shown and "$1,562.50" in shown                      # 1,100 + 1,000 + 200 invoiced; 681.25 x 2 + 200
-    assert "Insurance" in shown and "Registration" in shown and "$1,300.00" in shown and "$881.25" in shown
+    assert "$2,300.00" in shown and "$1,600.00" in shown                      # 1,100 + 1,000 + 200 invoiced; 700.00 x 2 + 200 (a 32% rate)
+    assert "2 packaged" in shown and "dashboard" in shown.lower()           # the breakdown by line is on the dashboard
     assert "not tax advice" in text(client.get(f"/cars/{car_id}/fbt?year=2025")).lower()
 
 
 def test_the_report_adds_the_home_charging_reimbursement_and_the_tax_saved(app):
     client, url, car_id = app
     add_lease(client, car_id, charging_reimbursed="on")
-    set_rate(client, "34")
+    set_rate(client)
     fill_year(url, car_id)
     readings(url, car_id)
     box = text_of(re.search(r'id="fbt-reimbursement".*?</div>', section(client.get(f"/cars/{car_id}/fbt?year=2025").data.decode()), re.S).group(0))
-    assert "2,000 km" in box and "4.20" in box and "$84.00" in box and "$28.56" in box
+    assert "2,000 km" in box and "4.20" in box and "$84.00" in box and "$26.88" in box
     total = text_of(re.search(r'id="fbt-after-tax-total".*?</tr>', client.get(f"/cars/{car_id}/fbt?year=2025").data.decode(), re.S).group(0))
-    assert "$1,533.94" in total                                              # 1,562.50 less 28.56
+    assert "$1,573.12" in total                                              # 1,600.00 less 26.88 (84.00 x 32%)
 
 
 def test_an_unknown_odometer_makes_the_reimbursement_unknown_not_zero(app):
     client, url, car_id = app
     add_lease(client, car_id, charging_reimbursed="on")
-    set_rate(client, "34")
+    set_rate(client)
     fill_year(url, car_id)
     body = client.get(f"/cars/{car_id}/fbt?year=2025").data.decode()
     box = text_of(re.search(r'id="fbt-reimbursement".*?</div>', section(body), re.S).group(0))
     assert "not known" in box.lower() and "$0.00" not in box
     total = text_of(re.search(r'id="fbt-after-tax-total".*?</tr>', body, re.S).group(0))
-    assert "unavailable" in total.lower() and "$1,562.50" not in total.replace("before", "")  # no figure stands in for it
+    assert "unavailable" in total.lower() and "$1,600.00" not in total.replace("before", "")  # no figure stands in for it
 
 
 def test_the_rate_of_an_earlier_year_is_used_and_named_when_the_year_has_none(app):
     client, url, car_id = app
     add_lease(client, car_id, charging_reimbursed="on")
-    set_rate(client, "34")
+    set_rate(client)
     readings(url, car_id)
     with connect(url) as conn:
         conn.execute("DELETE FROM garagebooks.ev_charging_rate WHERE fbt_year = 2025")
@@ -567,22 +526,22 @@ def test_without_a_rate_the_report_says_so_and_shows_no_after_tax_figure(app):
     body = client.get(f"/cars/{car_id}/fbt?year=2025").data.decode()
     box = section(body)
     assert 'id="fbt-after-tax-norate"' in box and "/settings" in box
-    assert "$1,562.50" not in box and "$84.00" not in box and "$28.56" not in box
+    assert "$1,600.00" not in box and "$84.00" not in box and "$26.88" not in box
 
 
 def test_the_after_tax_part_follows_the_pools_when_budgets_are_on(app):
     client, url, car_id = app
     add_lease(client, car_id)
-    set_rate(client, "34", lease_budgets="1")             # saving Settings sets the budgets switch too
+    set_rate(client, lease_budgets="1")             # saving Settings sets the budgets switch too
     fill_year(url, car_id)
-    table = re.search(r'id="fbt-after-tax-lines".*?</table>', client.get(f"/cars/{car_id}/fbt?year=2025").data.decode(), re.S).group(0)
-    assert 'data-pool="insurance"' in table and 'data-pool="registration"' in table and "$881.25" in text_of(table)
+    shown = text_of(section(client.get(f"/cars/{car_id}/fbt?year=2025").data.decode()))
+    assert "breakdown by pool" in shown and "$1,600.00" in shown
 
 
 def test_a_car_that_is_not_reimbursed_has_no_reimbursement_box(app):
     client, url, car_id = app
     add_lease(client, car_id)
-    set_rate(client, "34")
+    set_rate(client)
     fill_year(url, car_id)
     assert 'id="fbt-reimbursement"' not in client.get(f"/cars/{car_id}/fbt?year=2025").data.decode()
 
@@ -590,18 +549,18 @@ def test_a_car_that_is_not_reimbursed_has_no_reimbursement_box(app):
 def test_teslamates_charging_is_counted_as_paid_personally_and_its_odometer_is_used(empty_db, monkeypatch):
     client, car_id = tessie(empty_db, monkeypatch)
     add_lease(client, car_id, start_date="2026-01-02", end_date="2028-12-31", charging_reimbursed="on")
-    set_rate(client, "34")
+    set_rate(client)
     body = client.get(f"/cars/{car_id}/fbt?year=2025").data.decode()
     box = section(body)
     assert "$12.50" in text_of(box)                                           # the charge: paid personally, so its invoice and effective cost
     assert "800 km" in text_of(re.search(r'id="fbt-reimbursement".*?</div>', box, re.S).group(0))      # 900 less 100, from TeslaMate
-    assert "$33.60" in text_of(box) and "$11.42" in text_of(box)               # 800 x 4.20 c ; x 34%
+    assert "$33.60" in text_of(box) and "$10.75" in text_of(box)               # 800 x 4.20 c ; x 32%
 
 
 def test_when_teslamate_is_held_back_its_charging_and_odometer_are_unavailable(empty_db, monkeypatch):
     client, car_id = tessie(empty_db, monkeypatch)
     add_lease(client, car_id, start_date="2026-01-02", end_date="2028-12-31", charging_reimbursed="on")
-    set_rate(client, "34")
+    set_rate(client)
     with connect(empty_db) as conn:
         conn.execute("ALTER TABLE public.positions RENAME COLUMN odometer TO odo")
     client = start(empty_db, monkeypatch)
@@ -617,9 +576,9 @@ def test_with_no_teslamate_at_all_the_after_tax_part_still_draws(empty_db, monke
     with connect(empty_db) as conn:
         car_id = conn.execute("SELECT id FROM garagebooks.car").fetchone()["id"]
     add_lease(client, car_id, charging_reimbursed="on")
-    set_rate(client, "34")
+    set_rate(client)
     fill_year(empty_db, car_id)
-    assert "$1,562.50" in text_of(section(client.get(f"/cars/{car_id}/fbt?year=2025").data.decode()))
+    assert "$1,600.00" in text_of(section(client.get(f"/cars/{car_id}/fbt?year=2025").data.decode()))
 
 
 # ---- the dashboard -------------------------------------------------------------------------------------------
@@ -636,7 +595,7 @@ def test_the_two_panels_use_only_the_ids_reserved_for_them_and_sit_in_a_new_row_
     shipped = json.loads((dashboard.SOURCE).read_text())
     mine = [p for p in shipped["panels"] if p["title"] in AFTER_TAX_PANELS]
     assert sorted(p["title"] for p in mine) == sorted(AFTER_TAX_PANELS) and {p["id"] for p in mine} <= MINE
-    others = [p for p in shipped["panels"] if p not in mine]
+    others = [p for p in shipped["panels"] if p["title"] not in dashboard.AFTER_TAX_PANELS]     # the after-tax rows come last
     assert all(p["gridPos"]["y"] >= max(o["gridPos"]["y"] + o["gridPos"]["h"] for o in others) for p in mine)
     assert len({p["id"] for p in shipped["panels"]}) == len(shipped["panels"])
     assert "odometer" in " ".join(p["description"] for p in mine).lower()      # says the reimbursement is in the app only
@@ -647,7 +606,7 @@ def test_the_panels_are_left_out_unless_asked_for():
     plain = dashboard.render("UTC", "", after_tax=False)
     assert not set(AFTER_TAX_PANELS) & set(panel_titles(plain))
     shipped = json.loads(dashboard.SOURCE.read_text())
-    assert [p for p in plain["panels"]] == [p for p in shipped["panels"] if p["title"] not in AFTER_TAX_PANELS]
+    assert [p for p in plain["panels"]] == [p for p in shipped["panels"] if p["title"] not in dashboard.AFTER_TAX_PANELS]
 
 
 def test_the_app_writes_the_panels_only_with_a_rate_and_a_lease_and_rewrites_when_either_changes(empty_db, monkeypatch, tmp_path):
@@ -659,13 +618,13 @@ def test_the_app_writes_the_panels_only_with_a_rate_and_a_lease_and_rewrites_whe
     client.post("/cars", data={"name": "Own", "kind": "BEV"}, headers=ORIGIN)
     with connect(empty_db) as conn:
         car_id = conn.execute("SELECT id FROM garagebooks.car").fetchone()["id"]
-    set_rate(client, "34")
+    set_rate(client)
     assert not written()                                                     # a rate, but no lease
     add_lease(client, car_id)
     assert written() == set(AFTER_TAX_PANELS)                                 # a lease now: written at once
-    set_rate(client, "")
+    set_rate(client, False)
     assert not written()                                                     # the rate cleared: dropped
-    set_rate(client, "34")
+    set_rate(client)
     assert written() == set(AFTER_TAX_PANELS)                                 # and back when saved
     assert client.post(f"/cars/{car_id}/lease/{lease_id(empty_db)}/delete", headers=ORIGIN).status_code == 303
     assert not written()
@@ -702,7 +661,7 @@ def test_the_panel_queries_run_whether_teslamate_is_absent_present_or_held_back(
 
 def test_the_panels_total_invoice_and_effective_cost_by_fbt_year(admin):
     try:
-        admin.execute("UPDATE garagebooks.setting SET marginal_tax_rate = 34")
+        admin.execute("INSERT INTO garagebooks.tax_choice VALUES ('employee', 2025, 45001, 'not_exempt')")     # 32%
         admin.execute("INSERT INTO garagebooks.lease (car_id, financier, start_date, end_date, term_months, pay_frequency,"
                       " pretax_payment, posttax_payment) VALUES (1, 'Example Finance', '2025-10-01', '2028-09-30', 36, 'fortnightly', 300, 20)")
         admin.execute("INSERT INTO garagebooks.expense (car_id, category_id, occurred_at, amount) VALUES "
@@ -712,25 +671,29 @@ def test_the_panels_total_invoice_and_effective_cost_by_fbt_year(admin):
         rows = admin.execute(runnable(next(p for p in dash["panels"] if p["title"] == "After tax by FBT year")["targets"][0]["rawSql"])
                              .replace("'UTC'", "'Australia/Brisbane'")).fetchall()
         assert [(r["FBT year"], r["Invoices"], r["After tax"]) for r in rows] == [
-            ("FBT 2025–26", D("1100.00"), D("681.25")), ("FBT 2026–27", D("1100.00"), D("681.25"))]
+            ("FBT 2025–26", D("1100.00"), D("700.00")), ("FBT 2026–27", D("1100.00"), D("700.00"))]
         stat = admin.execute(runnable(next(p for p in dash["panels"] if p["title"] == "Running costs after tax")["targets"][0]["rawSql"])
                              .replace("'UTC'", "'Australia/Brisbane'")).fetchone()
-        assert (stat["Invoices"], stat["After tax"]) == (D("2200.00"), D("1362.50"))
-        admin.execute("UPDATE garagebooks.setting SET marginal_tax_rate = NULL")
+        assert (stat["Invoices"], stat["After tax"]) == (D("2200.00"), D("1400.00"))
+        admin.execute("TRUNCATE garagebooks.tax_choice")
         stat = admin.execute(runnable(next(p for p in dash["panels"] if p["title"] == "Running costs after tax")["targets"][0]["rawSql"])
                              .replace("'UTC'", "'Australia/Brisbane'")).fetchone()
         assert stat["After tax"] is None                                      # no rate: no figure, never the invoice standing in
     finally:
-        admin.execute("UPDATE garagebooks.setting SET marginal_tax_rate = NULL")
+        admin.execute("TRUNCATE garagebooks.tax_choice")
         admin.execute("DELETE FROM garagebooks.lease")
 
 
-def test_db_helpers_round_trip_the_rate_and_the_rates_table(empty_db, monkeypatch):
+def test_db_helpers_round_trip_the_choices_and_the_rates_table(empty_db, monkeypatch):
     start(empty_db, monkeypatch)
     with connect(empty_db) as conn:
-        assert db.get_settings(conn)["marginal_tax_rate"] is None
-        db.set_marginal_tax_rate(conn, D("34"))
-        assert db.get_settings(conn)["marginal_tax_rate"] == D("34.00")
+        assert not db.any_tax_choice(conn) and db.tax_choices(conn) == {}
+        db.set_tax_choice(conn, "employee", 2025, 45001, "exempt")
+        assert db.tax_choices(conn)[("employee", 2025)]["medicare"] == "exempt" and db.any_tax_choice(conn)
+        assert db.tax_positions(conn, "employee", [2024, 2025])[2025]["marginal_rate"] == D("30")
+        assert db.tax_positions(conn, "employee", [2024])[2024] is None
+        db.set_tax_choice(conn, "employee", 2025, None, None)
+        assert not db.any_tax_choice(conn)
         db.set_ev_charging_rate(conn, 2027, D("6.00"))
         assert db.ev_charging_rates(conn)[2027] == D("6.00")
 

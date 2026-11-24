@@ -97,6 +97,23 @@
     {% endif %}
   </div>
   {% endfor %}
+  {% if pace_year %}{% set t = pace_year %}
+  <div class="km-pace-lease km-pace-total" id="km-pace-total">
+    <h3>{{ report.label }} in total <small>{{ 'both leases' if t.leases == 2 else 'all ' ~ t.leases ~ ' leases' }} held in it, added up</small></h3>
+    <dl class="facts">
+      <div><dt>Days held</dt><dd data-figure="total-days">{{ t.days_held }} of {{ t.days_in_year }} days</dd></div>
+      <div><dt>Km expected by the end</dt><dd class="derived" data-figure="total-expected">{{ t.expected_km|km }}</dd></div>
+      {% if t.state != 'upcoming' %}
+      <div><dt>Km driven {{ 'so far' if t.state == 'current' else 'in the year' }}</dt><dd data-figure="total-driven">{{ known(t.driven, t.driven|km) }}</dd></div>
+      <div><dt>{{ 'Against the pro-rata pace today' if t.state == 'current' else 'Against the pro-rata pace' }}</dt><dd class="derived" data-figure="total-ahead">{% if t.ahead is none %}<strong class="unavailable">not known</strong>{% elif t.ahead > 0 %}{{ t.ahead|abs|km }} ahead{% elif t.ahead < 0 %}{{ t.ahead|abs|km }} behind{% else %}on pace{% endif %}</dd></div>
+      {% if t.state == 'current' %}
+      <div><dt>Km per day needed from today</dt><dd class="derived" data-figure="total-to-go">{{ known(t.per_day_to_go, t.per_day_to_go ~ ' km') }}</dd></div>
+      {% endif %}
+      {% endif %}
+    </dl>
+    <p class="km-pace-note"><small>Each lease counts its own days in this FBT year and its own estimate; the distances are added up.</small></p>
+  </div>
+  {% endif %}
   <p><small>Km expected = the lease's estimated km per year × days held ÷ days in the FBT year. The odometer is TeslaMate's where it
     is available, otherwise your latest reading (an expense's odometer counts) on or before that moment. Days so far are the whole days gone,
     so today still counts as to drive. These figures are for your own tracking, not tax advice.</small></p>
@@ -154,31 +171,26 @@
 <section class="card stack fbt" id="fbt-after-tax" aria-labelledby="fbt-after-tax-h">
   <h2 id="fbt-after-tax-h">After tax</h2>
   {% if not after.rate_set %}
-  <p id="fbt-after-tax-norate">Your marginal tax rate isn't set, so what these costs come to after tax isn't shown.
-    <a href="{{ url_for('settings') }}">Set it in Settings</a>; only the rate is kept, never a salary.</p>
+  <p id="fbt-after-tax-norate">No tax bracket is chosen for any income year, so what these costs come to after tax isn't shown.
+    <a href="{{ url_for('settings') }}">Choose your brackets in Settings</a>; only the bracket is kept, never a salary.</p>
   {% else %}
-  <div class="table-wrap"><table id="fbt-after-tax-lines">
-    <thead><tr><th>{{ 'Pool' if budgets_on else 'Category' }}</th><th class="num">Invoices</th><th class="num">After tax</th></tr></thead>
+  <div class="table-wrap"><table id="fbt-after-tax-summary">
+    <thead><tr><th></th><th class="num">Invoices</th><th class="num">After tax</th></tr></thead>
     <tbody>
-    {% for line in after.lines %}
-    <tr{% if budgets_on %} data-pool="{{ line.key }}"{% endif %}><td>{{ line.label }}{% if line.packaged %} <small>{{ line.packaged }} packaged</small>{% endif %}</td>
-      <td class="num">{{ line.invoice|money }}</td><td class="num">{{ amount(line.effective) }}</td></tr>
-    {% endfor %}
-    {% if after.charging %}
-    <tr id="after-tax-teslamate-charging"><td>Charging <small>from TeslaMate, paid personally</small></td>
-      <td class="num">{{ amount(after.charging.value, after.charging.reason) }}</td><td class="num">{{ amount(after.charging.value, after.charging.reason) }}</td></tr>
-    {% endif %}
-    {% if not after.lines and not after.charging %}<tr><td colspan="3" class="empty">No running costs in this FBT year.</td></tr>{% endif %}
-    </tbody>
-    <tfoot>
-      <tr id="fbt-after-tax-running"><th>Running costs</th><td class="num">{{ amount(after.invoice) }}</td><td class="num">{{ amount(after.effective) }}</td></tr>
+      <tr id="fbt-after-tax-running"><th>Running costs{% set n = after.lines|sum(attribute='packaged') %}{% if n %} <small>{{ n }} packaged</small>{% endif %}{% if after.charging %} <small>(TeslaMate's charging included, paid personally)</small>{% endif %}</th>
+        <td class="num">{{ amount(after.invoice) }}</td><td class="num">{{ amount(after.effective) }}</td></tr>
       {% if after.reimbursement and after.reimbursement.result %}
       <tr><th>Less tax saved on reimbursement</th><td></td><td class="num">−{{ after.reimbursement.result.tax_saved|money }}</td></tr>
       {% endif %}
+    </tbody>
+    <tfoot>
       <tr id="fbt-after-tax-total"><th>After-tax cost</th><td></td>
         <td class="num"><strong>{{ amount(after.total) }}</strong></td></tr>
     </tfoot>
   </table></div>
+  <p><small>The breakdown by {{ 'pool' if budgets_on else 'category' }}, and every year side by side, are on the
+    {% if grafana_url %}<a href="{{ grafana_url }}" target="_blank" rel="noopener noreferrer">dashboard</a>{% else %}Grafana dashboard{% endif %}
+    (<strong>After tax by category and FBT year</strong>, and the <strong>After-tax cost by income year</strong> panels).</small></p>
   {% if after.reimbursement %}
   {% set r = after.reimbursement %}
   <div id="fbt-reimbursement">
@@ -191,7 +203,7 @@
       so the reimbursement for the {{ r.km|km }} driven can't be worked out.</p>
     {% else %}
     <p>{{ r.km|km }} driven while held and leased in this FBT year × {{ r.rate[1] }} cents per km
-      = <strong>{{ r.result.amount|money }}</strong>. At your marginal rate the tax saved on it is <strong>{{ r.result.tax_saved|money }}</strong>.</p>
+      = <strong>{{ r.result.amount|money }}</strong>. At your marginal rate for the income year (or years) of those days the tax saved on it is <strong>{{ r.result.tax_saved|money }}</strong>.</p>
     {% if r.rate[0] != report.year %}
     <p><small>The rate used is the one for {{ label(r.rate[0]) }}, the latest year with one in <a href="{{ url_for('settings') }}">Settings</a>:
       there is none for {{ label(report.year) }}.</small></p>{% endif %}
@@ -199,11 +211,35 @@
     <p><small>The reimbursement is the distance times the ATO's cents-per-km rate for home charging an electric car, for the days held under a lease that has it ticked, up to today.</small></p>
   </div>
   {% endif %}
-  <p><small>An expense paid from the package has its GST claimed back (1/11 of an invoice that isn't GST-free) and the rest comes from pre-tax salary, so it costs less than
-    its invoice; one paid personally costs what the invoice says. These are deliberate simplifications of the published rules, worked out from the marginal rate in
+  <p><small>An expense paid from the package has its GST claimed back (1/11 of an invoice, or the GST entered on it where a category's GST only partly applies) and the rest comes from pre-tax salary, so it costs less than
+    its invoice; one paid personally costs what the invoice says. These are deliberate simplifications of the published rules, worked out from the tax bracket and Medicare levy status for each income year in
     <a href="{{ url_for('settings') }}">Settings</a> and the lease's pre-tax and post-tax payments: see the documentation. Not tax advice.</small></p>
   {% endif %}
 </section>
+
+{% if associate %}
+<section class="card stack fbt" id="fbt-associate" aria-labelledby="fbt-associate-h">
+  <h2 id="fbt-associate-h">Associate lease, for the household</h2>
+  <p><small>The associate owns the car and receives the lease payments as business income, less depreciation; you save tax on the pre-tax
+    payments. By income year (1 July to 30 June), the two this FBT year runs across. Every year is on the dashboard's <strong>After-tax cost of
+    ownership</strong> row.</small></p>
+  <div class="table-wrap"><table class="compact">
+    <thead><tr><th>Income year</th><th class="num">Payments received</th><th class="num">Depreciation</th><th class="num">Associate's extra tax</th>
+      <th class="num">Your tax saved</th><th class="num">Household</th></tr></thead>
+    <tbody>
+    {% for r in associate %}
+    <tr data-income-year="{{ r.income_year }}"><td>{{ tax_label(r.income_year) }}</td><td class="num">{{ r.payments|money }}</td>
+      <td class="num">{{ amount(r.depreciation, "Enter the car's cost or value for depreciation on the lease.") }}</td>
+      <td class="num">{{ amount(r.associate_cost, "Choose the associate's tax bracket in Settings.") }}</td>
+      <td class="num">{{ amount(r.employee_saving, "Choose your tax bracket in Settings.") }}</td>
+      <td class="num"><strong>{% if r.household_cost is none %}{{ amount(none) }}{% elif r.household_cost < 0 %}{{ (-r.household_cost)|money }} saved{% else %}{{ r.household_cost|money }} cost{% endif %}</strong></td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <p><small>The associate's extra tax is the tax and Medicare levy on the payments less depreciation (diminishing value, 25% a year, on the car's value up to the
+    ATO's car limit), less the small business income tax offset. Their bracket stands for their income without the lease. See the documentation. Not tax advice.</small></p>
+</section>
+{% endif %}
 
 <section class="card stack fbt" id="purchases" aria-labelledby="fbt-purchases">
   <h2 id="fbt-purchases">Purchases</h2>

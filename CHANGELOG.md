@@ -11,6 +11,73 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
   button, which opens the other links. On a wide screen **Settings** is a dropdown holding **Invoice storage**,
   which no longer has its own link. Without JavaScript the links wrap as before and the dropdown opens on
   hover or focus. Nothing changes for installers.
+- **Fuel is only for cars with an engine, and Charging only for cars that plug in.** Each category and service item
+  on the Categories page has a **For** choice: all cars, cars that plug in (battery electric and plug-in hybrid) or
+  cars with an engine (petrol or diesel, plug-in hybrid and hybrid). Fuel, and the service items oil filter, fuel
+  filter, engine oil, timing belt and air filter, start as engine only; Charging as plug-in only (your own choice is
+  kept on upgrade). The expense form and the import page offer only what suits the car, and the server refuses the
+  rest. Expenses already saved that break the rule stay and show as before. Upgrade: pull the new image (the schema
+  gains `category.applies_to` and `service_item.applies_to`; on the restricted database role re-run
+  `scripts/provision-db.sh` first).
+- **Tests never read the ATO's pages.** The weekly `ato_rates` job reached the real ATO site in every test that
+  started the app, which made the suite slow and a scheduler test fail at random in CI. Tests now get a stand-in
+  that refuses at once. Nothing changes for installers.
+- **The Categories page saves everything at once, and GST can be "only partly applies".** Every category and service
+  item is edited in one form with one **Save** button at the bottom: each changed row is saved in one go, a wrong row
+  is flagged beside it and nothing is saved until it is fixed. A service item is deleted with a small **×** on its row
+  (it asks first, and never wraps onto a second line, on a phone as well). The category option **GST-free** is now
+  **GST only partly applies** (registration: only its CTP part has GST): the GST isn't taken to be 1/11, it is the
+  amount read from the invoice or entered on the expense, and with none no GST is counted; the expense form and list
+  say when to enter it. The sums are unchanged, and the database column keeps its name (`category.gst_free`).
+  Nothing for installers to do.
+- **An after-tax cost of ownership on the dashboard.** A new row of panels puts a car's after-tax cost together
+  by income year: the running costs after tax plus what its lease costs the household after tax (for an
+  associate lease, the associate's extra tax less the tax you save, as the payments stay in the household), a
+  total, and a per-year lease table; plus **After tax by category and FBT year**. The FBT year report's per-line
+  after-tax table moved there: the report keeps the year's totals, the home charging reimbursement and the
+  associate lease figures. Upgrade: pull the new image (the schema gains `after_tax_by_income_year()`; on the
+  restricted database role re-run `scripts/provision-db.sh` first).
+- **An associate lease's after-tax saving is the household's.** For an associate lease GarageBooks now works out,
+  for each income year, the associate's side: the lease payments they receive as business income, less
+  depreciation (diminishing value, 25% a year on the car's value up to the ATO's car limit), the extra tax and
+  Medicare levy on it, and the small business income tax offset. The household figure is that less the tax you
+  save on the pre-tax payments. Settings asks for the associate's tax bracket and Medicare status by income year
+  (once a car has an associate lease), the lease form for the car's value for depreciation (blank uses its cost),
+  and the FBT year report shows the figures briefly. Upgrade: pull the new image (the schema gains
+  `lease.depreciation_value`, `car_limit` and `lease_income_year()`; on the restricted database role re-run
+  `scripts/provision-db.sh` first).
+- **The tax rate is chosen per income year.** Settings has a compact table, one row per income year (1 July to
+  30 June): the tax bracket your taxable income falls in, from that year's ATO brackets, and your Medicare levy
+  status (not exempt, half exempt, exempt). An expense's after-tax cost uses its own year's rate (bracket plus
+  levy); a year left blank uses the latest earlier year's choice, and the table says so. Only the bracket is kept,
+  never a salary. The ATO's brackets from 2020–21 and the home charging rate are kept as data and read again from
+  the ATO each week by the new `ato_rates` scheduled job, which keeps the last good set if a page can't be read;
+  the home charging rates are now a read-only table with their source and when they were last checked.
+  Upgrade: pull the new image. A marginal rate you had entered becomes, for every income year up to now, the
+  bracket whose rate plus 2% is nearest it (32 gives 30%, so nothing changes; 34 gives 32.5% before 2024–25 and
+  30% after): check the table in Settings. On the restricted database role, re-run `scripts/provision-db.sh` first.
+
+- **Faster OneDrive folder scans.** Listing the PDFs in a car's OneDrive folder and its subfolders now asks
+  Microsoft Graph for the whole tree with one `delta` query (a few pages) instead of a call for every folder, so
+  an import page with many subfolders opens sooner. If Graph won't answer a delta query for a folder, the folders
+  are listed one by one as before. Mailbox scans are unchanged (a delta query can't include attachments, so it
+  would be slower). Nothing to do on upgrade.
+- **Claims send an invoice kept in OneDrive.** Claiming an expense whose invoice is in OneDrive used to stop with
+  "only a link: attach the invoice file first", which can't be done when OneDrive is the car's folder. The claim
+  now downloads the file from OneDrive (up to 10 MB) and sends it, and says so plainly when the OneDrive sign-in
+  has lapsed or the file has been moved or deleted. Nothing to do on upgrade.
+- **The kilometre pace counts the whole FBT year when it holds two leases.** When a lease ended and the next one started
+  during an FBT year, the lease page and the dashboard's **Kilometre pace** panel were labelled with the FBT year but
+  counted only the current lease's part of it. The distance driven under the earlier lease was left out, so a car on
+  pace looked thousands of km behind. Both now add up every lease held in the year, each with its own days and
+  estimate. The FBT year report keeps each lease's section and adds the year in total below them. Nothing to do: pull
+  the new image.
+- **A lease followed by the next one no longer says it is overdue.** When the next lease of the same car is already
+  entered, **Lease ends** is for your information only ("Next lease loaded", with the next lease's start date): never
+  due soon or overdue, never sent as a notification and not counted in the header, on the dashboard too. The lease
+  reminders also follow the app's own day (`APP_TZ`), not the database server's: on the server's UTC day a lease that
+  ended last night stayed current, and overdue, until mid-morning. The app saves `APP_TZ` in its settings on every
+  start for this. Nothing to do: pull the new image.
 - **`scripts/dev.sh setup` remakes a venv from another path.** A venv made before its checkout was moved or renamed
   has a `pip` that can't start; `setup` now makes it again. Nothing changes for installers.
 - **Dev stack: a real claims connector's key works, and the Dashboards link comes back.** The dev app joins the key

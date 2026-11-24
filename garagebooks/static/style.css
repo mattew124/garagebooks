@@ -280,7 +280,19 @@ ul.plain li:last-child { border-bottom: 0; }
 .card ul.plain, .notice ul.plain, dialog ul.plain { background: none; border: 0; border-radius: 0; box-shadow: none; margin: 0; }
 .card ul.plain li, .notice ul.plain li, dialog ul.plain li { padding: .4rem 0; }
 ul.category-list li { display: flex; justify-content: space-between; align-items: center; gap: .5rem 1rem; flex-wrap: wrap; }
-ul.category-list form.row { align-items: end; gap: .5rem; }
+ul.category-list .row { align-items: end; gap: .5rem; }
+ul.service-list li { flex-wrap: wrap; }
+.item-row { display: flex; align-items: center; gap: .5rem; flex: 1 1 100%; }
+.item-row > label { flex: 1 1 auto; min-width: 0; }
+.item-row > label:has(select) { flex: 0 1 11rem; }
+@media (max-width: 40rem) {
+  .item-row { flex-wrap: wrap; }
+  .item-row > label:has(input) { flex: 1 1 calc(100% - 3rem); }
+  .item-row > label:has(select) { order: 3; flex: 1 1 100%; }
+}
+button.icon-button { flex: none; width: 2.2rem; height: 2.2rem; padding: 0; margin: 0; border-radius: 50%; font-size: 1.3rem; line-height: 1;
+  background: var(--surface); color: var(--bad); border: 1px solid var(--line); }
+#categories-form > button[type=submit] { margin-bottom: 1.5rem; }
 ul.learned-list li { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
 ul.folders li { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; }
 ul.folders .actions { display: flex; gap: .4rem 1rem; align-items: center; flex-wrap: wrap; }

@@ -16,9 +16,13 @@ from psycopg.rows import dict_row
 
 from garagebooks import claims, create_app, db
 from tests.fake_connector import TOKEN, Fake
+from tests.test_onedrive import FILE_DOWNLOAD, KEY, FakeMicrosoft, an_hour_passes, sign_in
 from tests.test_validation import PDF
 
 ORIGIN = {"Origin": "http://localhost"}
+# OneDrive's address for a file in a personal drive, as Graph gives it (webUrl): the item's id is in it.
+ONEDRIVE_URL = "https://onedrive.live.com?cid=ABC&id=F1"
+SHARE_URL = "https://1drv.ms/b/s!SHARED"           # an address with no id in it: Graph's shares lookup finds it
 
 
 @pytest.fixture()
@@ -29,7 +33,7 @@ def fake():
     server.stop()
 
 
-def make_client(pg, monkeypatch, tmp_path, url, **env):
+def make_client(pg, monkeypatch, tmp_path, url, transport=None, **env):
     monkeypatch.delenv("BASE_PATH", raising=False)
     monkeypatch.setenv("APP_TZ", "Australia/Brisbane")
     for key in ("CLAIMS_CONNECTOR_URL", "CLAIMS_CONNECTOR_TOKEN", "CLAIMS_CONNECTOR_TOKEN_FILE",
@@ -43,7 +47,7 @@ def make_client(pg, monkeypatch, tmp_path, url, **env):
         monkeypatch.setenv("CLAIMS_CONNECTOR_TOKEN", TOKEN)
     for key, value in env.items():
         monkeypatch.setenv(key, value)
-    app = create_app(connect=lambda: psycopg.connect(pg.app_url, row_factory=dict_row))
+    app = create_app(connect=lambda: psycopg.connect(pg.app_url, row_factory=dict_row), onedrive_transport=transport)
     app.testing = True
     return app.test_client()
 
@@ -287,6 +291,105 @@ def test_an_invoice_over_ten_megabytes_is_refused(client, admin, fake, tyres, mo
     monkeypatch.setattr(claims, "MAX_INVOICE_BYTES", len(PDF) - 1)
     assert b"too large" in client.get(f"/{tyres}/claim").data
     assert not [c for c in fake.calls if c[1] == "/v1/preview"]
+
+
+# ---- the invoice, from either storage -------------------------------------------------------------
+# Every claim test above uses an invoice in the folder on the server. An expense whose invoice was uploaded to
+# (or imported from) OneDrive keeps only the file's OneDrive address, and claiming one used to be refused as
+# "only a link". These run the claim against both storages, so neither can be left out again.
+
+@pytest.fixture()
+def ms():
+    return FakeMicrosoft()
+
+
+@pytest.fixture()
+def drive_client(pg, admin, fake, ms, monkeypatch, tmp_path):
+    """The app with OneDrive connected (and the folder on the server too, as the plain client has it)."""
+    client = make_client(pg, monkeypatch, tmp_path, fake.url, transport=ms, GARAGEBOOKS_ENCRYPTION_KEY=KEY)
+    sign_in(client, ms)
+    return client
+
+
+@pytest.fixture(params=["local", "onedrive"])
+def stored(request, admin):
+    """-> (client, the eligible expense, the invoice's file name), the invoice kept in each storage in turn."""
+    lease(admin)
+    if request.param == "local":
+        return request.getfixturevalue("client"), expense(admin), "INV12345.pdf"
+    client = request.getfixturevalue("drive_client")
+    return client, expense(admin, invoice_path=None, invoice_url=ONEDRIVE_URL), "receipt.pdf"
+
+
+def test_the_preview_sends_the_invoice_from_either_storage(stored, fake):
+    client, eid, name = stored
+    resp = client.get(f"/{eid}/claim")
+    assert resp.status_code == 200 and b"Submit claim" in resp.data and b"attach the invoice" not in resp.data
+    body = last(fake, "/v1/preview")[3]
+    assert body["invoice"]["name"] == name and body["invoice"]["content_type"] == "application/pdf"
+    assert fake.invoice_bytes(body) == PDF
+
+
+def test_submit_sends_the_invoice_from_either_storage(stored, fake, admin):
+    client, eid, name = stored
+    assert submit(client, eid).status_code == 303
+    body = last(fake, "/v1/submit")[3]
+    assert body["invoice"]["name"] == name and fake.invoice_bytes(body) == PDF
+    assert [r["expense_id"] for r in claim_rows(admin)] == [eid]
+
+
+def test_a_onedrive_invoice_is_fetched_by_its_item_id_without_a_token_to_the_cdn(drive_client, admin, fake, ms):
+    lease(admin)
+    eid = expense(admin, invoice_path=None, invoice_url=ONEDRIVE_URL)
+    drive_client.get(f"/{eid}/claim")
+    asked = [c for c in ms.calls if "/me/drive/items/F1" in c[1]]
+    assert len(asked) == 1 and "/content" not in asked[0][1]
+    (cdn,) = [c for c in ms.calls if c[1] == FILE_DOWNLOAD]
+    assert "Authorization" not in cdn[3]
+
+
+def test_a_onedrive_address_without_an_item_id_is_looked_up_as_a_share(drive_client, admin, fake, ms):
+    lease(admin)
+    eid = expense(admin, invoice_path=None, invoice_url=SHARE_URL)
+    resp = drive_client.get(f"/{eid}/claim")
+    assert b"Submit claim" in resp.data and fake.invoice_bytes(last(fake, "/v1/preview")[3]) == PDF
+    assert any("/shares/u!" in c[1] for c in ms.calls)
+
+
+def test_a_onedrive_invoice_that_has_gone_is_explained(drive_client, admin, fake):
+    lease(admin)
+    eid = expense(admin, invoice_path=None, invoice_url="https://onedrive.live.com?cid=ABC&id=ABC!GONE")
+    page = said(drive_client.get(f"/{eid}/claim"))
+    assert "isn't in OneDrive any more" in page and "Submit claim" not in page
+    assert not [c for c in fake.calls if c[1] == "/v1/preview"]
+
+
+def test_a_lapsed_onedrive_sign_in_is_explained(drive_client, admin, fake, ms, monkeypatch):
+    lease(admin)
+    eid = expense(admin, invoice_path=None, invoice_url=ONEDRIVE_URL)
+    ms.refresh_ok = False
+    an_hour_passes(monkeypatch)                         # the kept access token has expired
+    page = said(drive_client.get(f"/{eid}/claim"))
+    assert "OneDrive sign-in has expired" in page and "Submit claim" not in page
+    assert not [c for c in fake.calls if c[1] == "/v1/preview"]
+
+
+def test_a_onedrive_invoice_over_ten_megabytes_is_refused_before_it_is_downloaded(drive_client, admin, fake, ms,
+                                                                                  monkeypatch):
+    lease(admin)
+    eid = expense(admin, invoice_path=None, invoice_url=ONEDRIVE_URL)
+    monkeypatch.setattr(claims, "MAX_INVOICE_BYTES", len(PDF) - 1)
+    assert b"too large" in drive_client.get(f"/{eid}/claim").data
+    assert not [c for c in ms.calls if c[1] == FILE_DOWNLOAD]
+    assert not [c for c in fake.calls if c[1] == "/v1/preview"]
+
+
+def test_a_onedrive_invoice_without_onedrive_connected_says_to_connect_it(pg, admin, fake, ms, monkeypatch, tmp_path):
+    client = make_client(pg, monkeypatch, tmp_path, fake.url, transport=ms, GARAGEBOOKS_ENCRYPTION_KEY=KEY)
+    lease(admin)
+    eid = expense(admin, invoice_path=None, invoice_url=ONEDRIVE_URL)
+    page = said(client.get(f"/{eid}/claim"))
+    assert "Connect OneDrive first" in page and "Submit claim" not in page
 
 
 # ---- signing in to the provider ----------------------------------------------------------------------

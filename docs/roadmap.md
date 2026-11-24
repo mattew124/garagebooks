@@ -212,7 +212,7 @@ pre-tax salary. With your marginal tax rate entered once in Settings (the rate, 
 each packaged expense and the totals show both the invoice amount and the effective cost. Expenses paid
 personally are unaffected. Nothing here is tax advice.
 
-Built (#91): a **Paid from** choice on an expense (automatic, the package or personally), a **GST-free** tick
+Built (#91): a **Paid from** choice on an expense (automatic, the package or personally), a **GST only partly applies** tick
 per category, the marginal rate and the ATO's home charging rates by FBT year in Settings, an **After tax**
 part on the FBT year report, two dashboard panels, and, for a battery electric car whose lease has it ticked,
 the home charging reimbursement: the ATO's cents-per-km rate (kept as data by FBT year: 4.20 cents per km for the
