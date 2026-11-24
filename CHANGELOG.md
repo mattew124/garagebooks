@@ -7,6 +7,13 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+- **An after-tax cost of ownership on the dashboard.** A new row of panels puts a car's after-tax cost together
+  by income year: the running costs after tax plus what its lease costs the household after tax (for an
+  associate lease, the associate's extra tax less the tax you save, as the payments stay in the household), a
+  total, and a per-year lease table; plus **After tax by category and FBT year**. The FBT year report's per-line
+  after-tax table moved there: the report keeps the year's totals, the home charging reimbursement and the
+  associate lease figures. Upgrade: pull the new image (the schema gains `after_tax_by_income_year()`; on the
+  restricted database role re-run `scripts/provision-db.sh` first).
 - **An associate lease's after-tax saving is the household's.** For an associate lease GarageBooks now works out,
   for each income year, the associate's side: the lease payments they receive as business income, less
   depreciation (diminishing value, 25% a year on the car's value up to the ATO's car limit), the extra tax and

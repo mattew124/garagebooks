@@ -75,7 +75,10 @@ The argument is the time zone that decides which lease covers an expense's date.
 `garagebooks.marginal_rate('employee', date)` is the rate used for a date (the income year's bracket plus the
 Medicare levy), and `garagebooks.tax_position(person, income_year)` says where it comes from;
 `garagebooks.tax_bracket` holds the ATO's brackets by income year and `garagebooks.tax_choice` what is chosen in
-Settings. `garagebooks.ev_charging_rate` holds the ATO's home charging rate (cents per km) by FBT year. The rules are on
+Settings. `garagebooks.lease_income_year()` gives each lease's payments, your tax saved and, for an associate lease,
+the associate's depreciation and extra tax by income year, and `garagebooks.after_tax_by_income_year(tz)` adds the
+running costs after tax per car and income year (what the dashboard's after-tax cost of ownership row draws).
+`garagebooks.ev_charging_rate` holds the ATO's home charging rate (cents per km) by FBT year. The rules are on
 [Novated lease calculations](lease-calculations.md#cost-after-tax-l5).
 
 ## Logs

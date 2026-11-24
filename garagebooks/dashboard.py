@@ -68,7 +68,8 @@ def _without_sold(dash):
             panel["gridPos"].update(x=i * width, w=width)
 
 
-AFTER_TAX_PANELS = ("Running costs after tax", "After tax by FBT year")
+AFTER_TAX_PANELS = ("Running costs after tax", "After tax by FBT year", "After-tax cost by income year", "Household cost after tax",
+                    "Lease after tax by income year", "After tax by category and FBT year")
 
 
 def _without_after_tax(dash):

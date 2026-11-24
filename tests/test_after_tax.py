@@ -475,7 +475,7 @@ def test_the_report_shows_invoice_and_effective_cost_per_line_and_the_total(app)
     fill_year(url, car_id)
     shown = text_of(section(client.get(f"/cars/{car_id}/fbt?year=2025").data.decode()))
     assert "$2,300.00" in shown and "$1,600.00" in shown                      # 1,100 + 1,000 + 200 invoiced; 700.00 x 2 + 200 (a 32% rate)
-    assert "Insurance" in shown and "Registration" in shown and "$1,300.00" in shown and "$900.00" in shown
+    assert "2 packaged" in shown and "dashboard" in shown.lower()           # the breakdown by line is on the dashboard
     assert "not tax advice" in text(client.get(f"/cars/{car_id}/fbt?year=2025")).lower()
 
 
@@ -534,8 +534,8 @@ def test_the_after_tax_part_follows_the_pools_when_budgets_are_on(app):
     add_lease(client, car_id)
     set_rate(client, lease_budgets="1")             # saving Settings sets the budgets switch too
     fill_year(url, car_id)
-    table = re.search(r'id="fbt-after-tax-lines".*?</table>', client.get(f"/cars/{car_id}/fbt?year=2025").data.decode(), re.S).group(0)
-    assert 'data-pool="insurance"' in table and 'data-pool="registration"' in table and "$900.00" in text_of(table)
+    shown = text_of(section(client.get(f"/cars/{car_id}/fbt?year=2025").data.decode()))
+    assert "breakdown by pool" in shown and "$1,600.00" in shown
 
 
 def test_a_car_that_is_not_reimbursed_has_no_reimbursement_box(app):
@@ -595,7 +595,7 @@ def test_the_two_panels_use_only_the_ids_reserved_for_them_and_sit_in_a_new_row_
     shipped = json.loads((dashboard.SOURCE).read_text())
     mine = [p for p in shipped["panels"] if p["title"] in AFTER_TAX_PANELS]
     assert sorted(p["title"] for p in mine) == sorted(AFTER_TAX_PANELS) and {p["id"] for p in mine} <= MINE
-    others = [p for p in shipped["panels"] if p not in mine]
+    others = [p for p in shipped["panels"] if p["title"] not in dashboard.AFTER_TAX_PANELS]     # the after-tax rows come last
     assert all(p["gridPos"]["y"] >= max(o["gridPos"]["y"] + o["gridPos"]["h"] for o in others) for p in mine)
     assert len({p["id"] for p in shipped["panels"]}) == len(shipped["panels"])
     assert "odometer" in " ".join(p["description"] for p in mine).lower()      # says the reimbursement is in the app only
@@ -606,7 +606,7 @@ def test_the_panels_are_left_out_unless_asked_for():
     plain = dashboard.render("UTC", "", after_tax=False)
     assert not set(AFTER_TAX_PANELS) & set(panel_titles(plain))
     shipped = json.loads(dashboard.SOURCE.read_text())
-    assert [p for p in plain["panels"]] == [p for p in shipped["panels"] if p["title"] not in AFTER_TAX_PANELS]
+    assert [p for p in plain["panels"]] == [p for p in shipped["panels"] if p["title"] not in dashboard.AFTER_TAX_PANELS]
 
 
 def test_the_app_writes_the_panels_only_with_a_rate_and_a_lease_and_rewrites_when_either_changes(empty_db, monkeypatch, tmp_path):
