@@ -61,6 +61,17 @@ def no_background_jobs(monkeypatch):
     monkeypatch.setenv("SCHEDULER", "off")
 
 
+@pytest.fixture(autouse=True)
+def no_ato_network(monkeypatch):
+    """The ato_rates job must never read the ATO's real pages in a test: it ran slow and made CI flaky. A test
+    that wants pages passes its own fetch (create_app(ato_fetch=...)) or saved copies; test_no_network.py."""
+    from garagebooks import ato
+
+    def refuse(url):
+        raise ato.RatesError(f"no network in tests ({url})")
+    monkeypatch.setattr(ato, "get", refuse)
+
+
 def pytest_collection_modifyitems(config, items):
     for item in items:
         if item.get_closest_marker("teslamate") and not TESLAMATE:
