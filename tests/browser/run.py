@@ -600,12 +600,11 @@ def test_categories_save_together_and_delete_is_a_small_button(page):
     finally:
         page.set_viewport_size(original)
         page.goto(UI + "categories")
-        asked = []
-        page.on("dialog", lambda d: (asked.append(d.message), d.accept()))
         for n in ("Browser test item", "Browser test item 2"):     # also sweeps what an aborted earlier run left
             btn = page.get_by_role("button", name=f"Delete {n}", exact=True)
             if btn.count():
-                asked.clear()
+                asked = []
+                page.once("dialog", lambda d, asked=asked: (asked.append(d.message), d.accept()))
                 btn.click()
                 page.wait_for_url(re.compile(r"msg=service_deleted"))
                 assert asked and asked[0].startswith(f"Delete {n} "), asked
