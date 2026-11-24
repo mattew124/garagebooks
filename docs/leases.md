@@ -141,7 +141,8 @@ never asks for a salary.
    choose the **tax bracket** your taxable income falls in (as the ATO lists them, such as
    `$45,001 – $135,000 (30%)`) and your **Medicare levy** status (*Not exempt*, *Half exempt* or *Exempt*). An
    expense's rate is its income year's bracket plus the levy (2%, 1% or nothing). A year left on *Same as the year
-   before* uses the latest earlier year's choice, and the table says which. With no year chosen no after-tax
+   before* uses the latest earlier year's choice, and the table says which. Once a car has an associate lease,
+   the table also asks for the **Associate's** bracket and levy status in the same way. With no year chosen no after-tax
    figure is shown anywhere: the pages say so and link to Settings. Only the bracket is kept, never a salary.
 2. On the **Categories** page, tick **GST-free** for a category whose invoices carry no GST. Registration
    starts ticked. Anything else is taken to carry GST at 1/11 of the invoice.
