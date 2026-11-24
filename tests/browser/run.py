@@ -1864,6 +1864,50 @@ def test_list_with_a_claim_link_fits_a_phone(page):
         remove_marked(page)
 
 
+def test_real_onedrive_claim(page):
+    """An expense whose invoice is in the real OneDrive (the test folder only) is claimed with that file: the claim
+    page downloads it and previews through the stand-in connector, rather than asking for the file. Nothing is
+    submitted. The car, lease and expenses are removed at the end; the uploaded PDF stays in the test folder."""
+    from datetime import date
+    page.goto(UI + "storage")
+    if not page.locator("button:has-text('Disconnect')").count():
+        raise Skip("dev stack isn't connected to OneDrive (scripts/dev.sh onedrive-link)")
+    if not in_test_folder(page):
+        raise Skip(f"cars aren't pointed at /{TEST_FOLDER}, so nothing was written")
+    fake_connector(page)
+    try:
+        page.goto(UI + "new")                 # uploaded through a car whose folder is the test folder
+        page.set_input_files("input[name=invoice_file]", {
+            "name": "browser-test-claim.pdf", "mimeType": "application/pdf", "buffer": b"%PDF-1.4\n%%EOF\n"})
+        page.wait_for_load_state("networkidle")
+        page.select_option("select[name=category_id]", label="Tyres")
+        page.fill("input[name=amount]", "371.94")
+        page.fill("input[name=vendor]", MARKER)
+        page.fill("input[name=invoice_url]", "")
+        page.click("button[type=submit].button")
+        page.wait_for_url(re.compile(r"msg=saved"), timeout=60000)
+        page.goto(UI)
+        link = page.locator("tbody tr", has_text=MARKER).locator("a[href^='https://']").first.get_attribute("href")
+        assert "onedrive" in link or "1drv" in link, f"not a OneDrive address: {link[:40]}"
+
+        add_claimable_expense(page, date.today())
+        page.goto(UI)
+        row = page.locator("tbody tr", has_text=MARKER).filter(has_text="$1,200.00")
+        row.locator("a:has-text('Edit')").first.click()
+        page.fill("input[name=invoice_url]", link)
+        page.click("button[type=submit].button")
+        page.wait_for_url(re.compile(r"msg=updated"))
+        page.goto(UI)
+        page.locator("tbody tr", has_text=MARKER).filter(has_text="$1,200.00").locator("a.claim-link").click()
+        expect(page.locator("#claim-preview")).to_contain_text("Claim $1200.00 for Tyres", timeout=60000)
+        body = page.locator("main").inner_text()
+        assert "only a link" not in body and "No invoice is attached" not in body, "the OneDrive invoice wasn't sent"
+        expect(page.get_by_role("button", name="Submit claim")).to_be_visible()
+        shot(page, "claim-preview-onedrive")
+    finally:
+        remove_marked(page)
+
+
 def sync_provider_history(page):
     """Press Sync provider history: it starts in the background, the page shows it running and reloads itself when done."""
     page.get_by_role("button", name="Sync provider history").click()
@@ -2037,6 +2081,7 @@ def main():
         step("Connect OneDrive goes to Microsoft", test_connect_reaches_microsoft, page)
         step("folder browser (read-only)", test_folder_browser, page)
         step("real upload to the OneDrive test folder", test_real_upload, page)
+        step("a claim sends an invoice kept in the real OneDrive", test_real_onedrive_claim, page)
         step("OneDrive file picker on the Add form", test_onedrive_picker, page)
         step("import page shows progress", test_import_page_shows_progress, page)
         # The built-in PDF viewer only exists in full Chromium, not the headless shell the rest uses.

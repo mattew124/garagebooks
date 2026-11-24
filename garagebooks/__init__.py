@@ -1648,15 +1648,31 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         return None
 
     def claim_invoice(row):
-        """-> (INVOICE object or None, blocking message or None, notice or None) for an expense's invoice file.
-        Only a file in the invoice folder can be read: a link into OneDrive is not a file this app can fetch."""
+        """-> (INVOICE object or None, blocking message or None, notice or None) for an expense's invoice file:
+        read from the invoice folder, or downloaded from OneDrive (with OneDrive's own sign-in) when the expense
+        keeps the file's OneDrive address. Any other link (an email in the mailbox, a web page) isn't a file this
+        app can send."""
+        too_large = "The invoice file is too large to send (the limit is 10 MB)."
+        if row["invoice_url"] and onedrive.is_drive_url(row["invoice_url"]):
+            store = store_for("onedrive")
+            if store is None:
+                return None, ("This expense's invoice is in OneDrive, which isn't set up here "
+                              "(GARAGEBOOKS_ENCRYPTION_KEY), so it can't be sent."), None
+            try:
+                name, content = store.fetch(row["invoice_url"], max_bytes=claim_lib.MAX_INVOICE_BYTES)
+            except onedrive.TooLarge:
+                return None, too_large, None
+            except storage.StorageError as exc:
+                log.warning("claim: the OneDrive invoice of expense %s couldn't be read: %s", row["id"], exc.user_message)
+                return None, exc.user_message, None
+            return claim_lib.invoice_payload(name, content), None, None
         if row["invoice_path"] and local is not None:
             try:
                 content = local.download(row["invoice_path"])
             except storage.StorageError as exc:
                 return None, exc.user_message, None
             if len(content) > claim_lib.MAX_INVOICE_BYTES:
-                return None, "The invoice file is too large to send (the limit is 10 MB).", None
+                return None, too_large, None
             name = row["invoice_path"].rsplit("/", 1)[-1]
             return claim_lib.invoice_payload(name, content), None, None
         if row["invoice_path"] or row["invoice_url"]:

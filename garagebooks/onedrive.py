@@ -25,7 +25,7 @@ import secrets
 import time
 import urllib.error
 import urllib.request
-from urllib.parse import quote, urlencode
+from urllib.parse import parse_qs, quote, urlencode, urlparse
 
 from cryptography.fernet import Fernet, InvalidToken
 
@@ -42,6 +42,7 @@ MAIL_SCOPES = "Mail.Read User.Read offline_access"
 BUSY_STATUSES = (429, 503)   # Microsoft throttling or a brief outage: worth a short wait
 RETRY_WAITS = (1, 3)         # seconds between tries; requests are bounded by gunicorn's timeout
 MAX_PAGES = 20   # of 200 children each, when listing a folder
+MAX_DELTA_PAGES = 100   # of 200 items each, when listing a folder tree with delta
 MAX_DEPTH = 4    # subfolders below a car's folder that are searched for PDFs
 MAX_PDF_BYTES = 20 * 1024 * 1024
 
@@ -52,6 +53,14 @@ class OneDriveError(StorageError):
 
 class SignInExpired(OneDriveError):
     pass
+
+
+class NotFound(OneDriveError):
+    """Graph answered 404: the item isn't there (moved to another drive, or deleted)."""
+
+
+class TooLarge(OneDriveError):
+    """A file over the size the caller asked for: refused before its bytes are downloaded."""
 
 
 class NotConnected(OneDriveError):
@@ -111,6 +120,35 @@ def display_path(item):
         return "/"
     _, _, under_root = parent.partition("root:")
     return f"{under_root.rstrip('/')}/{item['name']}"
+
+
+DRIVE_HOSTS = ("onedrive.live.com", "1drv.ms")
+
+
+def is_drive_url(web_url):
+    """Is this an address of a file in a personal OneDrive (what an upload or a OneDrive import keeps)?"""
+    try:
+        u = urlparse(str(web_url or ""))
+    except ValueError:
+        return False
+    return u.scheme == "https" and u.hostname in DRIVE_HOSTS
+
+
+def item_id_from_url(web_url):
+    """A personal OneDrive file's webUrl (https://onedrive.live.com?cid=...&id=<item id>, or the older
+    redir?resid=<item id>) -> the item id, or None when the address doesn't hold one (a 1drv.ms link)."""
+    u = urlparse(web_url)
+    if u.scheme != "https" or u.hostname != "onedrive.live.com":
+        return None
+    query = parse_qs(u.query)
+    found = (query.get("id") or query.get("resid") or [""])[0].strip()
+    return found or None
+
+
+def share_token(web_url):
+    """Graph's id for an item by its address (GET /shares/{token}/driveItem): u! and the address in unpadded
+    url-safe base64."""
+    return "u!" + base64.urlsafe_b64encode(web_url.encode()).rstrip(b"=").decode()
 
 
 def folder_info(item):
@@ -195,7 +233,7 @@ class OneDrive:
         if status in BUSY_STATUSES:
             raise OneDriveError(f"{service} is busy right now: try again in a few minutes.")
         if status != 200:
-            raise OneDriveError(f"{service} said no: " + graph_error(status, body))
+            raise (NotFound if status == 404 else OneDriveError)(f"{service} said no: " + graph_error(status, body))
         return body
 
     def account_name(self, access_token):
@@ -317,7 +355,61 @@ class OneDrive:
     def pdfs(self, access_token, folder_id):
         """Every PDF in a folder and the folders below it (MAX_DEPTH deep), oldest
         name first: [{id, name, size, web_url, folder}]. `folder` is the path below
-        the one given, '' for files directly in it."""
+        the one given, '' for files directly in it.
+
+        One `driveItem: delta` query lists the whole subtree in pages of 200 items, where listing
+        `/children` costs a call for every folder as well as every page. If Graph won't answer a delta
+        query for the folder, the folders are walked with `/children` as before."""
+        try:
+            found = self._pdfs_by_delta(access_token, folder_id)
+        except OneDriveError as exc:
+            log.warning("delta listing of folder=%s refused (%s): listing it folder by folder", folder_id, exc)
+            found = self._pdfs_by_children(access_token, folder_id)
+        log.debug("list folder=%s pdfs=%d", folder_id, len(found))
+        return sorted(found, key=lambda f: (f["folder"].lower(), f["name"].lower()))
+
+    @staticmethod
+    def _is_listed_pdf(c):
+        return "file" in c and c["name"].lower().endswith(".pdf") and str(c.get("webUrl", "")).startswith("https://")
+
+    def _pdfs_by_delta(self, access_token, folder_id):
+        """The PDFs of pdfs(), from a delta query for the folder. Delta gives each item only its parent's id
+        (no path), in any order, so a file's folder is worked out by following the parents up to `folder_id`."""
+        url = (f"{GRAPH}/me/drive/items/{quote(folder_id, safe='')}/delta"
+               f"?$select=id,name,size,folder,file,webUrl,parentReference&$top=200")
+        items = []
+        for _ in range(MAX_DELTA_PAGES):
+            body = self._get(access_token, url)
+            items += [c for c in body.get("value", []) if "deleted" not in c and c.get("id")]
+            url = body.get("@odata.nextLink")
+            if not url or not url.startswith(GRAPH + "/"):
+                break
+        folders = {c["id"]: c for c in items if "folder" in c}
+        paths = {}
+
+        def below(fid):
+            """Names from `folder_id` down to the folder `fid`, or None when it isn't under it (or too deep)."""
+            if fid == folder_id:
+                return []
+            if fid not in paths:
+                paths[fid] = None           # also stops a loop of parents
+                here = folders.get(fid)
+                parent = below((here.get("parentReference") or {}).get("id")) if here else None
+                if parent is not None and len(parent) < MAX_DEPTH:
+                    paths[fid] = [*parent, here["name"]]
+            return paths[fid]
+
+        found = []
+        for c in items:
+            if not self._is_listed_pdf(c):
+                continue
+            names = below((c.get("parentReference") or {}).get("id"))
+            if names is not None:
+                found.append({"id": c["id"], "name": c["name"], "size": c.get("size", 0),
+                              "web_url": c["webUrl"], "folder": "/".join(names)})
+        return found
+
+    def _pdfs_by_children(self, access_token, folder_id):
         found = []
 
         def walk(fid, below, depth):
@@ -328,7 +420,7 @@ class OneDrive:
                 for c in body.get("value", []):
                     if "folder" in c and depth < MAX_DEPTH:
                         walk(c["id"], f"{below}/{c['name']}" if below else c["name"], depth + 1)
-                    elif "file" in c and c["name"].lower().endswith(".pdf") and str(c.get("webUrl", "")).startswith("https://"):
+                    elif self._is_listed_pdf(c):
                         found.append({"id": c["id"], "name": c["name"], "size": c.get("size", 0),
                                       "web_url": c["webUrl"], "folder": below})
                 url = body.get("@odata.nextLink")
@@ -336,8 +428,7 @@ class OneDrive:
                     break
 
         walk(folder_id, "", 0)
-        log.debug("list folder=%s pdfs=%d", folder_id, len(found))
-        return sorted(found, key=lambda f: (f["folder"].lower(), f["name"].lower()))
+        return found
 
     def download(self, access_token, item_id):
         """A file's bytes. Graph hands out a short-lived pre-authenticated address on
@@ -347,9 +438,35 @@ class OneDrive:
         link = meta.get("@microsoft.graph.downloadUrl", "")
         if not link.startswith("https://") or meta.get("size", 0) > MAX_PDF_BYTES:
             raise OneDriveError("That file can't be downloaded (missing or over 20 MB).")
+        return self._from_cdn(link, item_id)
+
+    def _from_cdn(self, link, item_id):
         status, content = self.transport("GET", link, None, {}, raw=True)
         if status != 200:
             log.warning("download item=%s refused: HTTP %s", item_id, status)
             raise OneDriveError(f"OneDrive didn't give the file (HTTP {status}).")
         log.debug("download item=%s bytes=%d", item_id, len(content))
         return content
+
+    def fetch(self, access_token, web_url, max_bytes=MAX_PDF_BYTES):
+        """A file in this drive, by the address an expense keeps for it (its invoice_url, the file's webUrl)
+        -> (its name, its bytes). The item id is read from the address when it holds one (as a personal
+        drive's do), otherwise Graph's shares lookup finds the item. Raises NotFound when the file has gone,
+        and TooLarge, before downloading anything, when it is over max_bytes."""
+        item_id = item_id_from_url(web_url)
+        where = (f"{GRAPH}/me/drive/items/{quote(item_id, safe='')}" if item_id
+                 else f"{GRAPH}/shares/{share_token(web_url)}/driveItem")
+        try:
+            meta = self._get(access_token, f"{where}?select=id,name,size,file,@microsoft.graph.downloadUrl")
+        except NotFound:
+            log.warning("fetch by address: the file isn't in OneDrive (by %s)", "item id" if item_id else "share")
+            raise NotFound("The invoice file isn't in OneDrive any more (moved or deleted?).") from None
+        link = str(meta.get("@microsoft.graph.downloadUrl", ""))
+        if "file" not in meta or not link.startswith("https://"):
+            raise OneDriveError("That OneDrive address isn't a file that can be downloaded.")
+        if meta.get("size", 0) > max_bytes:
+            raise TooLarge(f"The file is over {max_bytes // (1024 * 1024)} MB.")
+        content = self._from_cdn(link, meta.get("id"))
+        if len(content) > max_bytes:
+            raise TooLarge(f"The file is over {max_bytes // (1024 * 1024)} MB.")
+        return str(meta.get("name") or "invoice.pdf"), content
