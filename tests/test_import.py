@@ -38,6 +38,13 @@ class ImportDrive(FakeMicrosoft):
             if self.download_status != 200:
                 return self.download_status, b""
             return 200, FILES[path.rsplit("/", 1)[1]][2]
+        if method == "GET" and path.endswith("/delta") and path.split("/")[-2] == "INV":
+            self.calls.append((method, url, data, headers))      # the whole folder tree in one answer
+            kids = [{"id": i, "name": n, "file": {}, "size": 10, "webUrl": f"https://od.example/{i}",
+                     "parentReference": {"id": p}} for i, (n, p, _) in FILES.items()]
+            folders = [{"id": "INV", "name": "Invoices", "folder": {}, "parentReference": {"id": "TESTCAR"}},
+                       {"id": "SUB", "name": "Insurance", "folder": {}, "parentReference": {"id": "INV"}}]
+            return 200, {"value": kids + folders, "@odata.deltaLink": url + "&token=done"}
         if method == "GET" and path.endswith("/children") and path.split("/")[-2] in ("INV", "SUB"):
             self.calls.append((method, url, data, headers))
             parent = path.split("/")[-2]

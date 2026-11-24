@@ -34,6 +34,15 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
   bracket whose rate plus 2% is nearest it (32 gives 30%, so nothing changes; 34 gives 32.5% before 2024–25 and
   30% after): check the table in Settings. On the restricted database role, re-run `scripts/provision-db.sh` first.
 
+- **Faster OneDrive folder scans.** Listing the PDFs in a car's OneDrive folder and its subfolders now asks
+  Microsoft Graph for the whole tree with one `delta` query (a few pages) instead of a call for every folder, so
+  an import page with many subfolders opens sooner. If Graph won't answer a delta query for a folder, the folders
+  are listed one by one as before. Mailbox scans are unchanged (a delta query can't include attachments, so it
+  would be slower). Nothing to do on upgrade.
+- **Claims send an invoice kept in OneDrive.** Claiming an expense whose invoice is in OneDrive used to stop with
+  "only a link: attach the invoice file first", which can't be done when OneDrive is the car's folder. The claim
+  now downloads the file from OneDrive (up to 10 MB) and sends it, and says so plainly when the OneDrive sign-in
+  has lapsed or the file has been moved or deleted. Nothing to do on upgrade.
 - **The kilometre pace counts the whole FBT year when it holds two leases.** When a lease ended and the next one started
   during an FBT year, the lease page and the dashboard's **Kilometre pace** panel were labelled with the FBT year but
   counted only the current lease's part of it. The distance driven under the earlier lease was left out, so a car on

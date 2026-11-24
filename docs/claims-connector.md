@@ -140,8 +140,11 @@ An **invoice** is `null`, or:
 {"name": "INV12345.pdf", "content_type": "application/pdf", "data_base64": "JVBERi0xLjcK..."}
 ```
 
-The app sends the invoice file kept in the invoice folder, up to 10 MB. It doesn't send an invoice that
-is only a link.
+The app sends the expense's invoice file, up to 10 MB, wherever it is kept: it reads it from the invoice
+folder, or downloads it from OneDrive with the app's own OneDrive sign-in (so the sign-in must be current: if
+it has lapsed, the claim page says so, and **Connect OneDrive** on the Invoice storage page fixes it). It
+doesn't send an invoice that is only a link to somewhere else (an email in the mailbox, a web page), and it
+sends only the expense's invoice, not the other documents attached to it on the import page.
 
 ### `GET /v1/health`
 
