@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_provider.html" import mark with context %}
+{% import "_category_choice.html" as choice with context %}
 {% block title %}{{ 'Edit expense' if expense_id else 'Add expense' }}{% endblock %}
 {% macro err(field) %}{% if errors.get(field) %}<span class="error">{{ errors[field] }}</span>{% endif %}{% endmacro %}
 {% block main_attrs %} class="narrow"{% endblock %}
@@ -40,7 +41,7 @@
   <label>Car
     <select name="car_id" required>
       {% if cars|length != 1 %}<option value="">Choose…</option>{% endif %}
-      {% for c in cars %}<option value="{{ c.id }}" data-storage="{{ car_storage.get(c.id, '') }}"{{ ' data-leased="1"' if c.id in leased_cars }}{% if c.id in teslamate_cars %} data-teslamate="1"{% endif %} {{ 'selected' if values.car_id|string == c.id|string }}>{{ c.name or ('Car ' ~ c.id) }}{{ ' (sold)' if c.sold_at }}</option>{% endfor %}
+      {% for c in cars %}<option value="{{ c.id }}" data-storage="{{ car_storage.get(c.id, '') }}" data-kind="{{ c.kind }}"{{ ' data-leased="1"' if c.id in leased_cars }}{% if c.id in teslamate_cars %} data-teslamate="1"{% endif %} {{ 'selected' if values.car_id|string == c.id|string }}>{{ c.name or ('Car ' ~ c.id) }}{{ ' (sold)' if c.sold_at }}</option>{% endfor %}
     </select>{{ err('car_id') }}
   </label>
 {% endmacro %}
@@ -89,7 +90,8 @@
   <label>Category
     <select name="category_id" required>
       <option value="">Choose…</option>
-      {% for c in categories %}<option value="{{ c.id }}" data-period="{{ 1 if c.has_period else 0 }}" data-service="{{ 1 if c.name == 'Service' else 0 }}" data-gstfree="{{ 1 if c.gst_free else 0 }}" {{ 'selected' if values.category_id|string == c.id|string }}>{{ c.name }}</option>{% endfor %}
+      {% set car_kind = cars|selectattr('id', 'equalto', values.get('car_id', 0)|int(0))|map(attribute='kind')|first %}
+      {{ choice.category_options(categories, values.category_id, car_kind) }}
     </select>{{ err('category_id') }}
     <small><a href="{{ url_for('categories') }}">Need another category?</a></small>
   </label>
@@ -105,8 +107,8 @@
   {% set service_on = (categories|selectattr('id', 'equalto', values.get('category_id', 0)|int(0))|selectattr('name', 'equalto', 'Service')|list) %}
   <fieldset class="service-items" id="service-fields" {{ '' if service_on else 'hidden' }}>
     <legend>Service items</legend>
-    {% for i in service_items() %}<label class="inline"><input type="checkbox" name="service_item" value="{{ i.id }}" {{ 'checked' if i.id|string in values.get('service_item', []) }}> <span>{{ i.name }}</span></label>
-    {% endfor %}
+    {% for i in service_items() %}{{ choice.service_item_box(i, 'service_item', i.id|string in values.get('service_item', []), car_kind) }}
+    {% endfor %}{{ err('service_item') }}
     <small><a href="{{ url_for('categories') }}">Add or rename items</a></small>
   </fieldset>
 

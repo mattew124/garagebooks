@@ -24,6 +24,12 @@
       <label class="check"><input type="checkbox" name="has_period_{{ c.id }}" value="1" {{ 'checked' if c.has_period }}>
         <span>Has a period <small>(insurance or registration: it covers a start and an end date)</small></span></label>
     </div>
+    <div class="row">
+      <label><small>For</small>
+        <select name="applies_to_{{ c.id }}">
+          {% for key, label in applies_to.items() %}<option value="{{ key }}" {{ 'selected' if c.applies_to == key }}>{{ label }}</option>{% endfor %}
+        </select></label>
+    </div>
     {% if budgets_on %}
     <div class="row">
       <label><small>Lease budget pool</small>
@@ -41,6 +47,7 @@
   needed. Leave it blank to use a folder named after the category, e.g. Tyres and Service can both use “Maintenance”.</small></p>{% endif %}
 <p><small>Tick GST only partly applies for a category where only part of an invoice carries GST, such as registration (the CTP part has GST, the registration fee doesn't). The GST isn't assumed to be 1/11 of the invoice: the amount read from the invoice, or entered on the expense, is used, and with none the expense is treated as having no GST. It only changes what an expense paid from a lease package is shown to cost after tax.</small></p>
 <p><small>Tick Has a period for a category whose expenses cover a stretch of time, such as insurance and registration: the Add and Edit form and the import page then ask for the period's start and end dates, and read them from the document when they can.</small></p>
+<p><small>For says which cars a category or service item is offered for on the Add and Edit form and the import page: cars that plug in (battery electric and plug-in hybrid) for Charging, cars with an engine (petrol, diesel and both kinds of hybrid) for Fuel and engine items such as oil, or all cars. An expense saved before keeps what it has.</small></p>
 {% if budgets_on %}<p><small>A car on a novated lease has a yearly budget for each pool. Choose the pool each category's expenses are paid from, or None when the category isn't part of the package.</small></p>{% endif %}
 <h2 id="service-items">Service items</h2>
 <p><small>What a service covered, chosen on each expense in the Service category (and on the import page).
@@ -52,6 +59,10 @@
     <div class="item-row">
       <label><small class="visually-hidden">Name</small>
         <input name="item_name_{{ i.id }}" maxlength="60" value="{{ i.name }}" required autocomplete="off"></label>
+      <label><small class="visually-hidden">For</small>
+        <select name="item_applies_to_{{ i.id }}" aria-label="Which cars {{ i.name }} is for">
+          {% for key, label in applies_to.items() %}<option value="{{ key }}" {{ 'selected' if i.applies_to == key }}>{{ label }}</option>{% endfor %}
+        </select></label>
       <button type="submit" class="icon-button" form="remove-item-{{ i.id }}" aria-label="Delete {{ i.name }}" title="Delete {{ i.name }}">&times;</button>
     </div>
     {% if row_errors.get('s' ~ i.id) %}<span class="error">{{ row_errors['s' ~ i.id] }}</span>{% endif %}

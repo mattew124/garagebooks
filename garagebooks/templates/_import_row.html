@@ -1,3 +1,4 @@
+{% import "_category_choice.html" as choice with context %}
 <tr{% if r.lease %} class="lease-row"{% endif %}>
       <td data-label="Import">{% if r.lease %}{% if r.lease.lease_id %}<input type="checkbox" name="lease_{{ n }}" checked title="Keep with the lease">
         <input type="hidden" name="lease_id_{{ n }}" value="{{ r.lease.lease_id }}"><input type="hidden" name="lease_doc_{{ n }}" value="{{ r.lease.doc }}">{% endif %}
@@ -33,7 +34,7 @@
       <td data-label="Category">
         <select name="category_id_{{ n }}">
           <option value="">Choose…</option>
-          {% for c in categories %}<option value="{{ c.id }}" data-period="{{ 1 if c.has_period else 0 }}" data-service="{{ 1 if c.name == 'Service' else 0 }}" data-gstfree="{{ 1 if c.gst_free else 0 }}" data-purchase="{{ 1 if c.kind == 'purchase' else 0 }}" {{ 'selected' if c.id|string == r.category_id }}>{{ c.name }}</option>{% endfor %}
+          {{ choice.category_options(categories, r.category_id, car.get('kind') if car else none) }}
         </select></td>
       <td data-label="Vendor"><input name="vendor_{{ n }}" maxlength="500" value="{{ r.vendor }}"></td>
       <td class="num" data-label="Amount"><input name="amount_{{ n }}" inputmode="decimal" value="{{ r.amount }}"></td>
@@ -64,7 +65,7 @@
         {% set is_service = categories|selectattr('id', 'equalto', r.category_id|int(0))|selectattr('name', 'equalto', 'Service')|list %}
         <fieldset class="service-items" data-service-fields data-n="{{ n }}" {{ '' if is_service else 'hidden' }}>
           <legend><small>Service items</small></legend>
-          <span data-service-list>{% for i in service_items() %}<label class="inline"><input type="checkbox" name="service_item_{{ n }}" value="{{ i.id }}" {{ 'checked' if i.id|string in r.services }}> <small>{{ i.name }}</small></label>{% endfor %}</span>
+          <span data-service-list>{% for i in service_items() %}{{ choice.service_item_box(i, 'service_item_' ~ n, i.id|string in r.services, car.get('kind') if car else none, 'small') }}{% endfor %}</span>
           <button type="button" class="linklike" data-add-service>Add an item…</button>
         </fieldset></div></td>
     </tr>

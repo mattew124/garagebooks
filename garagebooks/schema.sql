@@ -1495,3 +1495,26 @@ FROM cur
 LEFT JOIN LATERAL (SELECT min(n.start_date) AS start_date FROM garagebooks.lease n
                    WHERE n.car_id = cur.car_id AND n.id <> cur.id AND n.start_date > cur.start_date
                      AND n.start_date <= cur.end_date + 7) nx ON true;
+-- Which cars a category or a service item applies to: 'all', 'electric' (cars that plug in: BEV and PHEV) or
+-- 'combustion' (cars with an engine: ICE, PHEV and HEV). The expense form and the import page only offer what
+-- applies to the car; expenses saved before keep what they have. The defaults are set once, when the column is
+-- added, and not as anyone's edit (kept out of the change history); the owner's later choices are never overwritten.
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_schema = 'garagebooks' AND table_name = 'category' AND column_name = 'applies_to') THEN
+        ALTER TABLE garagebooks.category ADD COLUMN applies_to text NOT NULL DEFAULT 'all'
+            CHECK (applies_to IN ('all', 'electric', 'combustion'));
+        ALTER TABLE garagebooks.category DISABLE TRIGGER log_change;
+        UPDATE garagebooks.category SET applies_to = 'combustion' WHERE name = 'Fuel';
+        UPDATE garagebooks.category SET applies_to = 'electric' WHERE name = 'Charging';
+        ALTER TABLE garagebooks.category ENABLE TRIGGER log_change;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_schema = 'garagebooks' AND table_name = 'service_item' AND column_name = 'applies_to') THEN
+        ALTER TABLE garagebooks.service_item ADD COLUMN applies_to text NOT NULL DEFAULT 'all'
+            CHECK (applies_to IN ('all', 'electric', 'combustion'));
+        UPDATE garagebooks.service_item SET applies_to = 'combustion'
+            WHERE lower(name) IN ('fuel filter', 'oil filter', 'engine oil', 'timing belt', 'air filter', 'engine air filter', 'spark plugs');
+    END IF;
+END $$;

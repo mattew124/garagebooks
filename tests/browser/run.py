@@ -1080,6 +1080,8 @@ def cars_checks(page):
     page.goto(UI + "new")                                         # an odometer reading now comes from an expense
     page.select_option("select[name=car_id]", label=MARKER)
     page.wait_for_load_state("networkidle")                       # the odometer fills itself in on choosing a car
+    expect(page.locator("select[name=category_id] option", has_text="Charging")).to_be_disabled()   # a petrol car doesn't plug in
+    expect(page.locator("select[name=category_id] option", has_text="Fuel")).to_be_enabled()
     page.select_option("select[name=category_id]", label="Tyres")
     page.fill("input[name=amount]", "50")
     page.fill("input[name=vendor]", MARKER)

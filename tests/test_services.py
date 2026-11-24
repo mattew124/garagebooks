@@ -12,6 +12,13 @@ SEED = ["Fuel filter", "Oil filter", "Engine oil", "Tyre rotation", "Windscreen 
         "Brakes", "Brake fluid", "Timing belt", "Air filter", "Coolant", "Cabin air filter", "Wheel alignment"]
 
 
+@pytest.fixture(autouse=True)
+def plug_in_hybrid(admin):
+    """The test car is a PHEV here, so engine items (oil filter) and plug-in ones both apply: tests/test_powertrain.py
+    covers which cars get what."""
+    admin.execute("UPDATE garagebooks.car SET kind = 'PHEV' WHERE id = 1")
+
+
 def items(admin):
     return {r["name"]: r["id"] for r in admin.execute("SELECT id, name FROM garagebooks.service_item")}
 

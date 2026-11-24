@@ -123,6 +123,15 @@ def connect():
 
 CAR_KINDS = {"BEV": "Battery electric", "ICE": "Petrol or diesel", "PHEV": "Plug-in hybrid", "HEV": "Hybrid"}
 
+# Which cars a category or service item applies to (its applies_to): cars that plug in, cars with an engine, or all.
+APPLIES_TO = {"all": "All cars", "electric": "Cars that plug in", "combustion": "Cars with an engine"}
+_APPLIES_KINDS = {"electric": ("BEV", "PHEV"), "combustion": ("ICE", "PHEV", "HEV")}
+
+
+def applies(applies_to, car_kind):
+    """Whether something with this applies_to suits a car of this kind. No car (None): everything does."""
+    return car_kind is None or car_kind in _APPLIES_KINDS.get(applies_to, CAR_KINDS)
+
 
 def cars(conn):
     """The app's own car list: the cars TeslaMate tracks (sources.sync_cars adds them) and those added by hand."""
@@ -402,11 +411,12 @@ def set_ev_charging_rate(conn, year, cents_per_km, source_url=None, checked_at=N
 
 def categories(conn):
     return conn.execute(
-        "SELECT id, name, kind, upload_folder, budget_pool, gst_free, has_period FROM garagebooks.category ORDER BY sort_order, name"
+        "SELECT id, name, kind, upload_folder, budget_pool, gst_free, has_period, applies_to FROM garagebooks.category "
+        "ORDER BY sort_order, name"
     ).fetchall()
 
 
-CATEGORY_FIELDS = ("upload_folder", "gst_free", "has_period", "budget_pool")
+CATEGORY_FIELDS = ("upload_folder", "gst_free", "has_period", "budget_pool", "applies_to")
 
 
 def update_category(conn, category_id, **fields):
@@ -422,7 +432,7 @@ SERVICE_CATEGORY = "Service"
 
 
 def service_items(conn):
-    return conn.execute("SELECT id, name FROM garagebooks.service_item ORDER BY sort_order, lower(name)").fetchall()
+    return conn.execute("SELECT id, name, applies_to FROM garagebooks.service_item ORDER BY sort_order, lower(name)").fetchall()
 
 
 def service_item(conn, item_id):
@@ -448,6 +458,12 @@ def rename_service_items(conn, names):
             conn.execute("UPDATE garagebooks.service_item SET name = %s WHERE id = %s", (f"~renaming {item_id}", item_id))
     for item_id, name in names.items():
         conn.execute("UPDATE garagebooks.service_item SET name = %s WHERE id = %s", (name, item_id))
+
+
+def set_service_items_applies(conn, applies_to):
+    """{item id: applies_to}, each saved."""
+    for item_id, value in applies_to.items():
+        conn.execute("UPDATE garagebooks.service_item SET applies_to = %s WHERE id = %s", (value, item_id))
 
 
 def delete_service_item(conn, item_id):
