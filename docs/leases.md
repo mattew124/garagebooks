@@ -163,7 +163,11 @@ The formulas, their simplifications and a worked example are on
 ## Kilometre pace
 
 When a lease has an **Estimated km per year**, the FBT year report has a **Kilometre pace** section for each lease
-held in the year shown, and the car's lease page has a short version for the current FBT year. They work out:
+held in the year shown, and the car's lease page has a short version for the current FBT year. When a lease ends
+part-way through an FBT year and the next one starts, the report shows each lease's part and then **the FBT year in
+total**: both parts added up, so the year expects the whole year's distance. The lease page's short version counts
+the whole FBT year too, and says so (*both leases held in it*); with one lease that started during the year, it says
+the figures run from the lease's start. They work out:
 
 - the **odometer at the start** (1 April, or the lease's start if later) and the **km expected by the end**
   (31 March, or the lease's end if earlier): the estimate × days held ÷ days in the FBT year;
@@ -182,6 +186,7 @@ edit it. The same figures are on the dashboard's [Kilometre pace](dashboard.md#k
 [Lease calculations](lease-calculations.md#kilometre-pace-l4) for the arithmetic.
 
 <!-- screenshot: km-pace - The Kilometre pace section of the FBT year report -->
+<!-- screenshot: km-pace-two-leases - The Kilometre pace section of an FBT year with two leases: each lease, then the FBT year in total -->
 
 ## Lease budgets
 

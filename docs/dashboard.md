@@ -92,11 +92,12 @@ and includes the registration and lease end from the car's [lease](leases.md).
 
 ## Kilometre pace
 
-The **Kilometre pace** table, at the bottom of the dashboard, shows the selected car's current lease against its
-estimated km per year, for the current FBT year: **Expected km** (pro rata for the days held), **Odometer at start** and
+The **Kilometre pace** table, at the bottom of the dashboard, shows the selected car's current FBT year against
+its estimated km per year. When a lease ends during the year and the next one starts, both leases are added up, each
+with its own days and estimate (see [Lease calculations](lease-calculations.md#kilometre-pace-l4)). The figures are: **Expected km** (pro rata for the days held), **Odometer at start** and
 **Odometer needed at end**, **Km per day needed**, **Driven so far**, **Km per day driven**, **Ahead (+) or behind (-)** the
 pro-rata pace and **Km per day needed from today**. They are the same figures as the
-[FBT year report](leases.md#kilometre-pace) works out. The table is empty for a car with no current lease or no estimate, and
+[FBT year report](leases.md#kilometre-pace) works out. The table is empty when no lease held in the current FBT year has an estimate, and
 the panel is left out of the dashboard altogether until a lease has an estimate. A figure that needs an odometer that isn't
 known is empty, not 0.
 
