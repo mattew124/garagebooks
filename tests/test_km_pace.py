@@ -117,6 +117,64 @@ def test_an_odometer_that_went_backwards_is_not_negative_distance():
     assert lease.km_pace(a_lease(), 2025, date(2025, 10, 1), 20000, 19990)["driven"] == D("0.0")
 
 
+# ---- an FBT year with two leases: the year's figures add up both parts ----------------------------------------
+
+def two_leases(estimate_b=15000):
+    """Invented: one lease ends on 20 November 2025 and the next starts the day after, inside FBT 2025-26."""
+    return (a_lease(start_date=date(2023, 11, 21), end_date=date(2025, 11, 20)),
+            a_lease(start_date=date(2025, 11, 21), end_date=date(2027, 11, 20), estimated_km_per_year=estimate_b))
+
+
+def test_an_fbt_year_with_two_leases_adds_both_parts_up_to_the_whole_year():
+    old, new = two_leases()
+    # 1 Apr to 20 Nov 2025 is 234 days, 21 Nov 2025 to 31 Mar 2026 is 131: 365 in all
+    assert lease.days_held(old, 2025) + lease.days_held(new, 2025) == 365
+    today = date(2025, 12, 1)                                   # 10 days into the second lease
+    year = lease.km_pace_year([(old, 20000, 29000), (new, 29000, 29500)], 2025, today)
+    assert (year["first"], year["last"]) == (date(2025, 4, 1), date(2026, 3, 31))
+    assert (year["days_held"], year["days_in_year"], year["leases"]) == (365, 365, 2)
+    assert (year["elapsed_days"], year["remaining_days"]) == (244, 121)
+    assert year["state"] == "current"
+    assert year["expected_km"] == D("15000.0")                  # the year's estimate, not the second lease's 5,384
+    assert year["start_km"] == D("20000.0") and year["end_km_needed"] == D("35000.0")
+    assert year["driven"] == D("9500.0")                        # 9,000 under the first lease and 500 under the second
+    assert year["expected_so_far"] == D("10027.4")              # 15000 x 244 / 365
+    assert year["ahead"] == D("-527.4")
+    assert year["per_day_driven"] == D("38.9")                  # 9500 / 244
+    assert year["per_day_to_go"] == D("45.5")                   # (15000 - 9500) / 121
+    assert year["per_day_needed"] == D("41.1")
+
+
+def test_a_single_lease_year_is_the_same_as_its_own_pace():
+    one = a_lease()
+    for today, start_km, now in ((date(2025, 10, 1), 20000, 27000), (date(2026, 11, 1), 20000, 34000),
+                              (date(2025, 10, 1), None, 27000)):
+        mine = lease.km_pace(one, 2025, today, start_km, now)
+        year = lease.km_pace_year([(one, start_km, now)], 2025, today)
+        for key in (*lease.PACE_FIGURES, "start_km", "days_held", "elapsed_days", "remaining_days", "state"):
+            assert year[key] == mine[key], key
+
+
+def test_a_year_total_needs_every_odometer_and_skips_a_lease_with_no_estimate():
+    old, new = two_leases()
+    today = date(2025, 12, 1)
+    unknown = lease.km_pace_year([(old, 20000, None), (new, 29000, 29500)], 2025, today)
+    assert unknown["driven"] is None and unknown["ahead"] is None and unknown["expected_km"] == D("15000.0")
+    no_estimate = lease.km_pace_year([(old, 20000, 29000), (new | {"estimated_km_per_year": None}, 29000, 29500)], 2025, today)
+    assert no_estimate["leases"] == 1 and no_estimate["days_held"] == 234
+    assert lease.km_pace_year([(a_lease(estimated_km_per_year=None), 1, 2)], 2025, today) is None
+    assert lease.km_pace_year([(old, 1, 2)], 2027, today) is None                  # not held that year
+
+
+def test_a_second_lease_still_to_start_adds_its_expected_km_but_nothing_driven():
+    old, new = two_leases()
+    today = date(2025, 10, 1)                                   # 183 days into the first lease
+    year = lease.km_pace_year([(old, 20000, 27000), (new, None, None)], 2025, today)
+    assert year["expected_km"] == D("15000.0") and year["driven"] == D("7000.0")
+    assert (year["elapsed_days"], year["remaining_days"]) == (183, 182)
+    assert year["per_day_to_go"] == D("44.0")                   # (15000 - 7000) / 182
+
+
 # ---- the odometer function the dashboard shares --------------------------------------------------
 
 def moments():
@@ -318,6 +376,64 @@ def test_the_lease_page_says_when_there_is_no_estimate(app):
     assert "no estimated km" in plain(re.search(r'id="lease-km-pace".*?</p>', page, re.S).group(0)).lower()
 
 
+def test_an_fbt_year_with_two_leases_shows_each_part_and_the_year_in_total(app):
+    client, url, car_id = app
+    add_lease(client, car_id, start_date="2023-11-21", end_date="2025-11-20", term_months="24")
+    add_lease(client, car_id, start_date="2025-11-21", end_date="2027-11-20", term_months="24")
+    hand(url, car_id, 20000, "2025-03-31 12:00+10")
+    hand(url, car_id, 29000, "2025-11-20 12:00+10")
+    hand(url, car_id, 35500, "2026-03-31 12:00+10")
+    body = client.get(f"/cars/{car_id}/fbt?year=2025").data.decode()
+    parts = re.findall(r'data-figure="driven"[^>]*>(.*?)</dd>', section(body), re.S)
+    assert [plain(x) for x in parts[:2]] == ["9,000 km", "6,500 km"]
+    total = re.search(r'<div[^>]*id="km-pace-total".*?</div>\s*</dl>', body, re.S)
+    assert total, "no total for the FBT year"
+    text = plain(total.group(0))
+    assert "FBT 2025–26" in text and "both leases" in text
+    assert re.search(r'data-figure="total-expected"[^>]*>\s*15,000 km', total.group(0))
+    assert re.search(r'data-figure="total-driven"[^>]*>\s*15,500 km', total.group(0))
+    assert re.search(r'data-figure="total-days"[^>]*>\s*365 of 365 days', total.group(0))
+    assert re.search(r'data-figure="total-ahead"[^>]*>\s*500 km ahead', total.group(0))
+
+
+def test_one_lease_in_an_fbt_year_has_no_separate_total(app):
+    client, url, car_id = app
+    add_lease(client, car_id, start_date="2024-04-01", end_date="2027-03-31")
+    body = client.get(f"/cars/{car_id}/fbt?year=2025").data.decode()
+    assert 'id="km-pace-total"' not in body
+
+
+def change_in_this_year():
+    """A day in the current FBT year, after its start and on or before today, for a lease change: None on 1 April."""
+    year, today = fbt_year_now(), today_here()
+    gone = (today - lease.fbt_start(year)).days
+    return None if gone < 1 else lease.fbt_start(year) + timedelta(days=max(gone // 2, 1))
+
+
+def two_leases_now(client, url, car_id):
+    change = change_in_this_year()
+    if change is None:
+        pytest.skip("today is 1 April: no earlier lease can be in this FBT year")
+    year = fbt_year_now()
+    add_lease(client, car_id, start_date=(change - timedelta(days=700)).isoformat(),
+              end_date=(change - timedelta(days=1)).isoformat(), term_months="24")
+    add_lease(client, car_id, start_date=change.isoformat(), end_date=(change + timedelta(days=730)).isoformat(),
+              term_months="24")
+    hand(url, car_id, 10000, datetime.combine(lease.fbt_start(year), time(0), TZ) - timedelta(hours=1))
+    hand(url, car_id, 13000, datetime.combine(change, time(0), TZ) - timedelta(hours=1))
+    hand(url, car_id, 13400, datetime.now(TZ) - timedelta(minutes=5))
+    return year, change
+
+
+def test_the_lease_page_counts_the_whole_fbt_year_not_only_the_current_lease(app):
+    client, url, car_id = app
+    year, change = two_leases_now(client, url, car_id)
+    page = client.get(f"/cars/{car_id}/lease").data.decode()
+    text = plain(re.search(r'id="lease-km-pace".*?</p>', page, re.S).group(0))
+    assert lease.fbt_label(year) in text and "both leases" in text
+    assert "3,400 km driven so far" in text                 # 3,000 under the earlier lease and 400 under this one
+
+
 # ---- the dashboard panel ------------------------------------------------------------------------------------
 
 TITLE = "Kilometre pace"
@@ -457,3 +573,26 @@ def test_the_panel_agrees_with_the_app_for_a_car_teslamate_tracks_and_when_it_is
     client.get("/cars")
     row, expected = agree_with_panel(empty_db, car_id, sources.TeslaMate(sources.UNAVAILABLE, "held"))
     assert row["Odometer at start"] == D("1.0") and row["Driven so far"] == D("0.0")    # only the stale reading from 2020 is left
+
+
+def test_the_panel_counts_the_whole_fbt_year_as_the_app_does_with_two_leases(app):
+    client, url, car_id = app
+    year, change = two_leases_now(client, url, car_id)
+    today = today_here()
+    with connect(url) as conn:
+        rows = run_panel(conn, car_id)
+        leases = conn.execute("SELECT * FROM garagebooks.lease WHERE car_id = %s ORDER BY start_date", (car_id,)).fetchall()
+        state = sources.detect(conn)
+        parts = []
+        for row in leases:
+            first, last = lease._held_range(row, year)
+            start = sources.odometer_at(conn, state, car_id, datetime.combine(first, time(0), TZ))
+            now = sources.odometer_at(conn, state, car_id, min(datetime.now(TZ), datetime.combine(last + timedelta(days=1), time(0), TZ)))
+            parts.append((row, start and start.km, now and now.km))
+    expected = lease.km_pace_year(parts, year, today)
+    assert len(rows) == 1 and expected["driven"] == D("3400.0")
+    for column, key in COLUMNS.items():
+        if key is None:
+            assert rows[0][column] == lease.fbt_label(year)
+        else:
+            assert rows[0][column] == expected[key], (column, rows[0][column], expected[key])

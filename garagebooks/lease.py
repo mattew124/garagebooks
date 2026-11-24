@@ -475,3 +475,52 @@ def km_pace(lease, year, today, start_km, current_km):
         out["per_day_to_go"] = _tenth(max(expected - driven, Decimal(0)) / out["remaining_days"])
     return out
 
+
+
+def km_pace_year(parts, year, today):
+    """The kilometre pace of a whole FBT year for a car, across every lease held in it: a lease that ends part-way
+    and the next one each count their own days and their own estimate. `parts` is a list of (lease, start_km,
+    current_km), the odometers as km_pace takes them. A lease with no estimate, or not held in the year, is left
+    out; None when none is left. `leases` is how many count. A distance needs every counted lease's odometers
+    (one still to start has driven nothing yet): else it is None, never a part standing in for the whole.
+    Rounded to 0.1 once, at the end, so one lease gives exactly what km_pace gives."""
+    in_year = days_in_fbt_year(year)
+    counted = []
+    for row, start_km, current_km in sorted(parts, key=lambda p: p[0]["start_date"]):
+        pace = km_pace(row, year, today, start_km, current_km)
+        if pace["state"] != "not_held" and pace["estimate"] is not None:
+            counted.append((pace, _decimal(start_km), _decimal(current_km)))
+    if not counted:
+        return None
+    held = sum(p["days_held"] for p, _, _ in counted)
+    elapsed = sum(p["elapsed_days"] for p, _, _ in counted)
+    expected = sum((Decimal(p["estimate"]) * p["days_held"] / in_year for p, _, _ in counted), Decimal(0))
+    so_far = sum((Decimal(p["estimate"]) * p["elapsed_days"] / in_year for p, _, _ in counted), Decimal(0))
+    states = {p["state"] for p, _, _ in counted}
+    state = states.pop() if len(states) == 1 else "current"
+    first_pace, first_start, _ = counted[0]
+    start = None if first_pace["state"] == "upcoming" else first_start
+    driven = Decimal(0)
+    for pace, begin, now in counted:
+        if pace["state"] == "upcoming":
+            continue
+        if begin is None or now is None:
+            driven = None
+            break
+        driven += max(now - begin, Decimal(0))
+    if state == "upcoming":
+        driven = None
+    out = {"year": year, "leases": len(counted), "first": first_pace["first"], "last": counted[-1][0]["last"],
+           "days_held": held, "days_in_year": in_year, "elapsed_days": elapsed, "remaining_days": held - elapsed,
+           "state": state, "start_km": _tenth(start), **dict.fromkeys(PACE_FIGURES)}
+    out["expected_km"], out["per_day_needed"] = _tenth(expected), _tenth(expected / held)
+    if start is not None:
+        out["end_km_needed"] = _tenth(start + expected)
+    if driven is None:
+        return out
+    out.update(driven=_tenth(driven), expected_so_far=_tenth(so_far), ahead=_tenth(driven - so_far))
+    if elapsed:
+        out["per_day_driven"] = _tenth(driven / elapsed)
+    if out["remaining_days"]:
+        out["per_day_to_go"] = _tenth(max(expected - driven, Decimal(0)) / out["remaining_days"])
+    return out

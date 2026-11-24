@@ -11,6 +11,12 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
   "only a link: attach the invoice file first", which can't be done when OneDrive is the car's folder. The claim
   now downloads the file from OneDrive (up to 10 MB) and sends it, and says so plainly when the OneDrive sign-in
   has lapsed or the file has been moved or deleted. Nothing to do on upgrade.
+- **The kilometre pace counts the whole FBT year when it holds two leases.** When a lease ended and the next one started
+  during an FBT year, the lease page and the dashboard's **Kilometre pace** panel were labelled with the FBT year but
+  counted only the current lease's part of it. The distance driven under the earlier lease was left out, so a car on
+  pace looked thousands of km behind. Both now add up every lease held in the year, each with its own days and
+  estimate. The FBT year report keeps each lease's section and adds the year in total below them. Nothing to do: pull
+  the new image.
 - **A lease followed by the next one no longer says it is overdue.** When the next lease of the same car is already
   entered, **Lease ends** is for your information only ("Next lease loaded", with the next lease's start date): never
   due soon or overdue, never sent as a notification and not counted in the header, on the dashboard too. The lease
