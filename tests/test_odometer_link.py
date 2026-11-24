@@ -27,10 +27,12 @@ def form_for(client, car_id):
 @pytest.fixture()
 def cars(admin):
     """Car 1 is linked to TeslaMate (id 1); car 2 is added by hand."""
+    before = admin.execute("SELECT teslamate_car_id AS t FROM garagebooks.car WHERE id = 1").fetchone()["t"]
     admin.execute("UPDATE garagebooks.car SET teslamate_car_id = 1 WHERE id = 1")
     admin.execute("INSERT INTO garagebooks.car (id, name, kind) VALUES (2, 'By hand', 'BEV')")
     yield
     admin.execute("DELETE FROM garagebooks.car WHERE id = 2")
+    admin.execute("UPDATE garagebooks.car SET teslamate_car_id = %s WHERE id = 1", (before,))   # the next test starts as it was
 
 
 def option(html, car_id):
