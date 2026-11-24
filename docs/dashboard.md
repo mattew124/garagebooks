@@ -72,6 +72,29 @@ rules, the simplifications and a worked example are on
   TeslaMate, counts as paid personally. It shows a dash while a packaged expense can't be worked out.
 - **After tax by FBT year** lists each FBT year with the same two figures and the difference. It ignores the
   time range, so the years are whole.
+- **After tax by category and FBT year** breaks each FBT year down by category: the invoices, what they cost
+  after tax and how many were paid from the package. (The FBT year report in GarageBooks shows only the year's
+  totals and the home charging reimbursement, and points here for the breakdown.)
+
+## After-tax cost of ownership
+
+A row below the cost-after-tax panels puts the whole after-tax cost of a car together, by **income year**
+(1 July to 30 June, the year tax is worked out in), with the same rule for when it is shown:
+
+- **After-tax cost by income year**: stacked bars of the running costs after tax and what the lease costs the
+  household after tax. For a lease through a financier that is the payments less the tax you save on them. For
+  an [associate lease](lease-calculations.md#in-garagebooks-an-associate-lease-after-tax) the payments stay in
+  the household, so it is the associate's extra tax (on the payments less depreciation, net of the small
+  business income tax offset) less the tax you save. Below zero is a saving.
+- **Household cost after tax**: the same, all years together, with the lease payments and your tax saved.
+- **Lease after tax by income year**: per year, the payments, your tax saved, the associate's depreciation and
+  extra tax, and the household figure.
+
+A figure that needs a bracket not chosen (yours or the associate's) is left blank, never 0. The purchase is left
+out. The panels read `garagebooks.after_tax_by_income_year(tz)`, built on `expense_after_tax()` and
+`lease_income_year()`, the same definitions the app uses.
+
+<!-- screenshot: dashboard-after-tax-tco - The After-tax cost of ownership row: cost by income year, the household total and the lease table -->
 
 The home charging reimbursement needs the odometer, so it is **shown in the app only** (on the FBT year report),
 not on the dashboard. The existing total cost of ownership figures are unchanged: these panels sit beside them.

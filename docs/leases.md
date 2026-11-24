@@ -112,9 +112,9 @@ FBT year, with links to the previous and next years that have a lease or an expe
 - Each pool's **yearly budget** in force, pro-rated by the days held, for reference. This release doesn't track
   what each pool has paid out.
 
-- **After tax**: each line above (each pool with budgets on, each category with them off) with its invoice
-  total and what it costs after tax, TeslaMate's charging (paid personally), and the year's after-tax cost of
-  running the car. For an electric car whose lease has its home charging reimbursed it adds the
+- **After tax**: the year's running costs on the invoices and what they cost after tax (TeslaMate's charging
+  counted as paid personally), and the year's after-tax cost of running the car. The breakdown by pool or
+  category, and every year side by side, are on the [dashboard](dashboard.md#cost-after-tax). For an electric car whose lease has its home charging reimbursed it adds the
   [reimbursement](#cost-after-tax): the km driven, the ATO's rate used, the reimbursement and the tax saved on it.
   With no tax bracket chosen in Settings it says so and shows no after-tax figure.
 

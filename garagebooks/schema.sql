@@ -1417,3 +1417,42 @@ BEGIN
     END LOOP;
 END
 $fn$;
+
+-- The after-tax cost of ownership by income year (1 July to 30 June), per car: what the dashboard's "After-tax
+-- cost of ownership" row draws, from the same definitions the app uses (expense_after_tax() for the running
+-- costs, lease_income_year() for the leases). TeslaMate's charging is not here: the panels add it, as the
+-- other after-tax panels do, so this reads no TeslaMate table. A sum that needs an unknown figure is NULL.
+--   running_invoices / running_after_tax  running and energy costs entered (purchases left out)
+--   lease_payments, admin_fees, employee_saving, depreciation, associate_cost, lease_household  summed over the
+--                                          car's leases held in the year (lease_income_year())
+--   household_cost = running_after_tax + lease_household
+CREATE OR REPLACE FUNCTION garagebooks.after_tax_by_income_year(tz text)
+RETURNS TABLE (car_id smallint, income_year integer, running_invoices numeric, running_after_tax numeric,
+               lease_payments numeric, admin_fees numeric, employee_saving numeric, depreciation numeric,
+               associate_cost numeric, lease_household numeric, household_cost numeric)
+LANGUAGE sql STABLE
+AS $fn$
+    WITH running AS (
+        SELECT t.car_id, garagebooks.income_year((t.occurred_at AT TIME ZONE tz)::date) AS y,
+               sum(t.amount) AS invoices,
+               CASE WHEN bool_or(t.packaged AND t.effective_cost IS NULL) THEN NULL ELSE sum(t.effective_cost) END AS after
+        FROM garagebooks.expense_after_tax(tz) t
+        JOIN garagebooks.expense e ON e.id = t.expense_id
+        JOIN garagebooks.category c ON c.id = e.category_id
+        WHERE c.kind IN ('running', 'energy')
+        GROUP BY 1, 2),
+    leases AS (
+        SELECT l.car_id, l.income_year AS y, sum(l.payments) AS payments, sum(l.admin_fees) AS admin,
+               CASE WHEN bool_or(l.employee_saving IS NULL) THEN NULL ELSE sum(l.employee_saving) END AS saving,
+               sum(l.depreciation) AS depreciation,
+               CASE WHEN bool_or(l.associate AND l.associate_cost IS NULL) THEN NULL ELSE sum(l.associate_cost) END AS associate,
+               CASE WHEN bool_or(l.household_cost IS NULL) THEN NULL ELSE sum(l.household_cost) END AS household
+        FROM garagebooks.lease_income_year() l
+        GROUP BY 1, 2)
+    SELECT COALESCE(r.car_id, l.car_id), COALESCE(r.y, l.y), COALESCE(r.invoices, 0),
+           CASE WHEN r.car_id IS NULL THEN 0 ELSE r.after END,
+           COALESCE(l.payments, 0), COALESCE(l.admin, 0), CASE WHEN l.car_id IS NULL THEN 0 ELSE l.saving END,
+           l.depreciation, l.associate, CASE WHEN l.car_id IS NULL THEN 0 ELSE l.household END,
+           (CASE WHEN r.car_id IS NULL THEN 0 ELSE r.after END) + (CASE WHEN l.car_id IS NULL THEN 0 ELSE l.household END)
+    FROM running r FULL JOIN leases l ON l.car_id = r.car_id AND l.y = r.y
+$fn$;

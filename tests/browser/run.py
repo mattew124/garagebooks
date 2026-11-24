@@ -1488,7 +1488,7 @@ def after_tax_dashboard_checks(page):
     """With a rate and a lease the dashboard has both after-tax panels, and they sit below the Kilometre pace row
     without covering it (a tall viewport: Grafana only draws the panels in view)."""
     car_id = re.search(r"/cars/(\d+)/", page.url).group(1)
-    wide = page.context.browser.new_context(viewport={"width": 1280, "height": 3000})
+    wide = page.context.browser.new_context(viewport={"width": 1280, "height": 3600})   # down to the after-tax TCO row
     graf = wide.new_page()
     try:
         for _ in range(12):      # Grafana re-reads the provisioned dashboard every 60 seconds
@@ -1501,6 +1501,9 @@ def after_tax_dashboard_checks(page):
         shot(graf, "after-tax-dashboard")
         expect(graf.get_by_text("Running costs after tax", exact=True).first).to_be_visible(timeout=30000)
         expect(graf.get_by_text("After tax by FBT year", exact=True).first).to_be_visible()
+        for title in ("After-tax cost by income year", "Household cost after tax", "Lease after tax by income year",
+                      "After tax by category and FBT year"):
+            expect(graf.get_by_text(title, exact=True).first).to_be_visible()
     finally:
         wide.close()
 
@@ -1565,7 +1568,7 @@ def cost_after_tax_checks(page):
     page.locator(".car", has_text=MARKER).get_by_role("link", name="Lease").click()
     page.get_by_role("link", name="Costs, taxable value and contributions by FBT year").click()
     after = page.locator("#fbt-after-tax")
-    expect(after.locator("#fbt-after-tax-lines")).to_contain_text("$700.00")
+    expect(after.locator("#fbt-after-tax-running")).to_contain_text("$700.00")
     expect(after.locator("#fbt-reimbursement")).to_contain_text("Not known")     # no odometer: never counted as nothing
     expect(after.locator("#fbt-after-tax-total")).to_contain_text("unavailable")
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "sideways scroll on a phone"
@@ -1605,7 +1608,7 @@ def km_pace_checks(page, today, year):
     expect(page.locator("#lease-km-pace")).to_contain_text("0 km driven so far")
     shot(page, "km-pace-lease-phone")
     car_id = re.search(r"/cars/(\d+)/", report).group(1)
-    wide = page.context.browser.new_context(viewport={"width": 1280, "height": 3000})   # Grafana only draws the panels in view
+    wide = page.context.browser.new_context(viewport={"width": 1280, "height": 3600})   # Grafana only draws the panels in view
     graf = wide.new_page()
     for _ in range(12):      # Grafana re-reads the provisioned dashboard every 60 seconds: wait for the new panel
         graf.goto(GRAFANA + f"d/garagebooks-tco/cost-of-ownership?var-car_id={car_id}")
