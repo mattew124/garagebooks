@@ -446,14 +446,17 @@ def test_a_category_can_be_given_a_pool_and_cleared(app):
         cat = conn.execute("SELECT id FROM garagebooks.category WHERE name = 'Tyres'").fetchone()["id"]
     page = client.get("/categories").data.decode()
     assert "Lease budget pool" in page and '<option value="tyres" selected>Tyres</option>' in page
-    assert client.post(f"/categories/{cat}/pool", data={"budget_pool": "other"}, headers=ORIGIN).status_code == 303
+    def pool_form(pool):
+        return {"category_id": str(cat), f"budget_pool_{cat}": pool}
+    assert client.post("/categories/save", data=pool_form("other"), headers=ORIGIN).status_code == 303
     with connect(url) as conn:
         assert pools(conn)["Tyres"] == "other"
-    assert client.post(f"/categories/{cat}/pool", data={"budget_pool": ""}, headers=ORIGIN).status_code == 303
+    assert client.post("/categories/save", data=pool_form(""), headers=ORIGIN).status_code == 303
     with connect(url) as conn:
         assert pools(conn)["Tyres"] is None
-    assert client.post(f"/categories/{cat}/pool", data={"budget_pool": "fuel"}, headers=ORIGIN).status_code == 400
-    assert client.post("/categories/99999/pool", data={"budget_pool": "other"}, headers=ORIGIN).status_code == 404
+    assert client.post("/categories/save", data=pool_form("fuel"), headers=ORIGIN).status_code == 400
+    with connect(url) as conn:
+        assert pools(conn)["Tyres"] is None                                 # a refused pool changes nothing
 
 
 # ---- the least-privilege role ---------------------------------------------------------------------
@@ -544,10 +547,10 @@ def test_editing_with_budgets_off_keeps_the_saved_budgets_and_moves_them_with_th
 def test_with_budgets_off_the_categories_page_has_no_pool_selectors(app):
     client, url, _car = app
     page = client.get("/categories").data.decode()
-    assert "Lease budget pool" not in page and 'name="budget_pool"' not in page and "yearly budget" not in page
+    assert "Lease budget pool" not in page and 'name="budget_pool_' not in page and "yearly budget" not in page
     budgets_on(url)
     page = client.get("/categories").data.decode()
-    assert "Lease budget pool" in page and 'name="budget_pool"' in page and "yearly budget" in page
+    assert "Lease budget pool" in page and 'name="budget_pool_' in page and "yearly budget" in page
 
 
 # ---- associate leases, the end date and the term ----------------------------------------------------

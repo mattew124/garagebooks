@@ -96,9 +96,9 @@ becomes the car's invoice folder. None of this needs TeslaMate.
 GST on a registration is only on its CTP insurance part, so it isn't a tenth of the total. When a **Registration**
 notice states its GST (the `incl GST of $x` figures on the CTP breakdown's `Total CTP insurance premium` line, on the notice's last page, or else a `GST` line with a dollar figure; the larger or smaller of two on one line, as the Settings
 choice for several amounts says), the row shows it in **GST in the amount** and the expense stores it. A stored GST
-replaces the category's GST rule in the [cost after tax](leases.md): the amount less that GST is what the GST-free
-share is worked out on. Leave it empty to use the rule (Registration starts as **GST-free** on the Categories page, only
-as the fallback for an expense whose notice stated no GST).
+replaces the category's GST rule in the [cost after tax](leases.md): the amount less that GST is what the after-tax cost
+is worked out on. Registration starts as **GST only partly applies** on the Categories page, so with no GST read or entered
+no GST is counted.
 
 The notice's **card payment reference** (the `Ref:` under `Enter Payment Reference Number`), **BPAY biller code** and **BPAY reference** are kept with the expense, in a
 **Payment references** section of the Edit form that starts closed. They are never shown in the expense list or tiles,
@@ -114,10 +114,12 @@ coolant, cabin air filter) on its import row, or on the Add and Edit form. On an
 appear in the PDF (whole words, any case) are ticked for you. The items only show while the category is Service, and are
 dropped if you change the category. The Service category is in the maintenance lease budget pool to begin with.
 
-The list is yours: **Categories → Service items** adds, renames and removes items (removing one takes it off the
+The list is yours: **Categories → Service items** adds, renames and deletes items (a small **×** on its row deletes one; deleting one takes it off the
 expenses that had it; renaming keeps it on them). Missing one while importing? **Add an item…** on the row opens a
 dialog; the new item is added to every row's list and ticked on the row you were in, and nothing else on the
 page changes.
+
+<!-- screenshot: categories-page - The Categories page: every category and service item in one form with one Save button, and the small x that deletes a service item -->
 
 <!-- screenshot: import-service-items - An import row in the Service category, with its service items and the Add an item dialog -->
 

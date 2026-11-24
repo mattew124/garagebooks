@@ -406,16 +406,16 @@ def categories(conn):
     ).fetchall()
 
 
-def set_gst_free(conn, category_id, gst_free):
-    """Whether a category's invoices carry no GST. False if no such category."""
-    return conn.execute("UPDATE garagebooks.category SET gst_free = %s WHERE id = %s",
-                        (bool(gst_free), category_id)).rowcount == 1
+CATEGORY_FIELDS = ("upload_folder", "gst_free", "has_period", "budget_pool")
 
 
-def set_has_period(conn, category_id, has_period):
-    """Whether a category's expenses cover a period (insurance, registration). False if no such category."""
-    return conn.execute("UPDATE garagebooks.category SET has_period = %s WHERE id = %s",
-                        (bool(has_period), category_id)).rowcount == 1
+def update_category(conn, category_id, **fields):
+    """Set some of a category's editable fields (CATEGORY_FIELDS). False if no such category."""
+    if not fields or not set(fields) <= set(CATEGORY_FIELDS):
+        raise ValueError(f"not editable category fields: {fields}")
+    sets = ", ".join(f"{name} = %({name})s" for name in fields)
+    return conn.execute(f"UPDATE garagebooks.category SET {sets} WHERE id = %(id)s",  # noqa: S608 - names checked above
+                        {**fields, "id": category_id}).rowcount == 1
 
 
 SERVICE_CATEGORY = "Service"
@@ -439,13 +439,15 @@ def add_service_item(conn, name):
                         "RETURNING id, name", (name,)).fetchone()
 
 
-def rename_service_item(conn, item_id, name):
-    """True when renamed; None if the name belongs to another item; False if there is no such item."""
-    clash = conn.execute("SELECT 1 FROM garagebooks.service_item WHERE lower(name) = lower(%s) AND id <> %s",
-                         (name, item_id)).fetchone()
-    if clash:
-        return None
-    return conn.execute("UPDATE garagebooks.service_item SET name = %s WHERE id = %s", (name, item_id)).rowcount == 1
+def rename_service_items(conn, names):
+    """Rename items together: {item id: new name}. The names must already be checked as a set (no two the
+    same, none another item's), so two items can swap names: each goes to a placeholder first, because the
+    names are unique at every step."""
+    if len(names) > 1:
+        for item_id in names:
+            conn.execute("UPDATE garagebooks.service_item SET name = %s WHERE id = %s", (f"~renaming {item_id}", item_id))
+    for item_id, name in names.items():
+        conn.execute("UPDATE garagebooks.service_item SET name = %s WHERE id = %s", (name, item_id))
 
 
 def delete_service_item(conn, item_id):
@@ -494,12 +496,6 @@ def add_category(conn, name):
         "ON CONFLICT (name) DO NOTHING RETURNING id",
         (name,),
     ).fetchone()["id"]
-
-
-def set_upload_folder(conn, category_id, folder):
-    """Returns False when there is no such category."""
-    return conn.execute("UPDATE garagebooks.category SET upload_folder = %s WHERE id = %s",
-                        (folder, category_id)).rowcount == 1
 
 
 _SELECT = """
@@ -931,11 +927,6 @@ def fbt_years_with_expenses(conn, car_id, tz):
     return [r["y"] for r in conn.execute(
         "SELECT DISTINCT garagebooks.fbt_year((occurred_at AT TIME ZONE %(tz)s)::date) AS y "
         "FROM garagebooks.expense WHERE car_id = %(car)s ORDER BY 1", {"car": car_id, "tz": tz}).fetchall()]
-
-
-def set_budget_pool(conn, category_id, pool):
-    """Which of the provider's budget pools a category's expenses come from (None: none). False if no such category."""
-    return conn.execute("UPDATE garagebooks.category SET budget_pool = %s WHERE id = %s", (pool, category_id)).rowcount == 1
 
 
 # ---- reminders (roadmap item 4) --------------------------------------------------------

@@ -93,12 +93,12 @@ def test_the_categories_that_have_a_period_by_default(admin):
 
 def test_a_category_can_be_marked_as_having_a_period(client, admin):  # noqa: F811
     tyres = category_id(admin, "Tyres")
-    assert "/has_period" in client.get("/categories").data.decode()
-    assert client.post(f"/categories/{tyres}/has_period", data={"has_period": "1"}, headers=ORIGIN).status_code == 303
+    assert 'name="has_period_' in client.get("/categories").data.decode()
+    assert client.post("/categories/save", data={"category_id": str(tyres), f"has_period_{tyres}": "1"},
+                       headers=ORIGIN).status_code == 303
     assert admin.execute("SELECT has_period FROM garagebooks.category WHERE id = %s", (tyres,)).fetchone()["has_period"]
-    client.post(f"/categories/{tyres}/has_period", data={}, headers=ORIGIN)
+    client.post("/categories/save", data={"category_id": str(tyres)}, headers=ORIGIN)       # an unticked box sends nothing
     assert not admin.execute("SELECT has_period FROM garagebooks.category WHERE id = %s", (tyres,)).fetchone()["has_period"]
-    assert client.post("/categories/99999/has_period", data={"has_period": "1"}, headers=ORIGIN).status_code == 404
 
 
 def test_the_add_and_edit_form_keep_the_period(client, admin):  # noqa: F811

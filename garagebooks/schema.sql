@@ -790,8 +790,10 @@ SELECT garagebooks.build_odometer_at(true);
 --   expense.packaged           true = paid from the package, false = paid personally, NULL = automatic:
 --                              packaged when a lease of the car covers the date, the category has a budget
 --                              pool and is not a purchase
---   category.gst_free          the category's invoices carry no GST (registration and CTP, say). Added
---                              once, with its defaults; the owner's later edits are never overwritten
+--   category.gst_free          "GST only partly applies" (the column kept its first name, when the option was
+--                              "GST-free"): the GST is not taken to be one eleventh of the invoice, it is the
+--                              expense's gst_amount, and with none known no GST is counted (registration: only its CTP
+--                              part has GST). Added once, with its defaults; the owner's later edits are never overwritten
 --   lease.charging_reimbursed  the provider reimburses home charging at the ATO's cents-per-km rate
 ALTER TABLE garagebooks.setting ADD COLUMN IF NOT EXISTS marginal_tax_rate numeric(5, 2)
     CHECK (marginal_tax_rate IS NULL OR marginal_tax_rate BETWEEN 0 AND 100);
@@ -824,7 +826,7 @@ ON CONFLICT (fbt_year) DO NOTHING;
 -- an expense is on decides the lease that covers it, as for the FBT year). The one definition the app
 -- and the dashboard share; tests/test_after_tax.py holds it to lease.effective_cost(). With no rate
 -- entered effective_cost is NULL for a packaged expense: never the invoice standing in for it.
---   ex_gst    = amount, or amount x 10 / 11 when the category is not GST-free
+--   ex_gst    = amount, or amount x 10 / 11 unless the category's GST only partly applies (category.gst_free)
 --   post      = the lease's post-tax payment / (pre-tax + post-tax payment), 0 with no lease or no payments
 --   effective = ex_gst x ((1 - post) x (1 - rate) + post), rounded half away from zero to the cent
 -- Written as one division so nothing is rounded before the end. It reads no TeslaMate table.

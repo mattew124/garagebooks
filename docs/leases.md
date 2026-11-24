@@ -145,8 +145,10 @@ never asks for a salary.
    before* uses the latest earlier year's choice, and the table says which. Once a car has an associate lease,
    the table also asks for the **Associate's** bracket and levy status in the same way. With no year chosen no after-tax
    figure is shown anywhere: the pages say so and link to Settings. Only the bracket is kept, never a salary.
-2. On the **Categories** page, tick **GST-free** for a category whose invoices carry no GST. Registration
-   starts ticked. Anything else is taken to carry GST at 1/11 of the invoice.
+2. On the **Categories** page, tick **GST only partly applies** for a category where only part of an invoice carries
+   GST. Registration starts ticked (its CTP insurance part has GST, the rest has none). For such a category the GST isn't
+   assumed to be 1/11: enter the GST the invoice states on the expense (the form and the expense list remind you), and
+   with none entered no GST is counted. Anything else is taken to carry GST at 1/11 of the invoice.
 
 Then, for a car with a lease:
 

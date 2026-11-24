@@ -111,7 +111,7 @@ package, on a lease that covers its date:
 
 ```text
 ex GST      = invoice amount − its GST            if the expense has a GST read from the document
-            = invoice amount                      else if the category is GST-free
+            = invoice amount                      else if the category's GST only partly applies
             = invoice amount × 10 ÷ 11            otherwise
 post share  = post-tax payment ÷ (pre-tax payment + post-tax payment)      (0 when the two add to nothing)
 after tax   = ex GST × ((1 − post share) × (1 − rate) + post share)
@@ -126,8 +126,10 @@ The result is rounded half up to the cent, once, at the end. A packaged expense 
 the app's time zone), the category has a budget pool, and the category isn't a purchase. The other two choices
 override that. Existing expenses are all *Automatic*, so nothing has to be entered again.
 
-**Simplifications.** GST is taken to be a flat 1/11 of an invoice that isn't GST-free (the Categories page has
-a **GST-free** tick, ticked for Registration to start with). The part of the package paid from after-tax pay is
+**Simplifications.** GST is taken to be a flat 1/11 of an invoice, except in a category whose GST only partly
+applies (the Categories page has a **GST only partly applies** tick, ticked for Registration to start with: a
+registration notice has GST on its CTP insurance part and none on the rest). There the GST is not assumed: it is the
+GST read from the invoice or entered on the expense, and with none known the expense is treated as having no GST. The part of the package paid from after-tax pay is
 taken to be the lease's own post-tax share of its payments, applied to every packaged expense. Payroll
 timing, the cap on a package, and anything about your tax return other than the marginal rate are not
 modelled.
@@ -142,7 +144,7 @@ post share  = 20.00 ÷ (300.00 + 20.00)                  = 0.0625
 after tax   = 1,000.00 × (0.9375 × 0.68 + 0.0625)       = 700.00
 ```
 
-The same $1,100.00 on a GST-free category is 1,100.00 × 0.7 = $770.00.
+The same $1,100.00 on a category whose GST only partly applies, with no GST entered, is 1,100.00 × 0.7 = $770.00.
 
 **Home charging reimbursement.** For a battery electric car on a lease that has *Home charging is reimbursed at
 the ATO's cents-per-km rate* ticked, the FBT year report adds, for each FBT year:
