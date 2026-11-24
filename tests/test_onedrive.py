@@ -995,7 +995,7 @@ def test_no_credit_without_the_logo(app_for, ms):
 def test_the_header_has_one_link_for_every_storage_and_old_links_still_arrive(client, ms):
     """One Invoice storage page for OneDrive and whatever else is set up, not a header link each."""
     sign_in(client, ms)
-    nav = re.search(r"<nav>.*?</nav>", client.get("/").data.decode(), re.S).group(0)
+    nav = re.search(r"<nav[^>]*>.*?</nav>", client.get("/").data.decode(), re.S).group(0)
     assert '<a href="/storage">Invoice storage</a>' in nav and "OneDrive" not in nav
     old = client.get("/onedrive")
     assert old.status_code == 302 and old.headers["Location"].endswith("/storage")

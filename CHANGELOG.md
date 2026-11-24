@@ -7,6 +7,10 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+- **The header stays on one line, on a phone too.** A phone shows the title, All, Reminders, + Add and a menu
+  button, which opens the other links. On a wide screen **Settings** is a dropdown holding **Invoice storage**,
+  which no longer has its own link. Without JavaScript the links wrap as before and the dropdown opens on
+  hover or focus. Nothing changes for installers.
 - **Fill from TeslaMate only where it can work.** The Add form's button for the odometer shows only for a car
   TeslaMate tracks, while TeslaMate is connected and usable; a car added by hand, or an install without TeslaMate,
   doesn't get it. Nothing changes for installers.

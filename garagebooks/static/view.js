@@ -3,6 +3,7 @@
 // app.js wires up the buttons and the dragging.
 (function () {
   var root = document.documentElement;
+  root.classList.add("js");   // the header's menu button and Settings dropdown only exist with scripting
   var saved = null;
   try { saved = localStorage.getItem("expenses-view"); } catch (e) { /* private mode */ }
   root.dataset.view = saved === "rows" || saved === "tiles" ? saved
