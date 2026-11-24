@@ -132,8 +132,10 @@ never asks for a salary.
 1. In **Settings**, enter your **marginal tax rate** as a percentage *including the 2% Medicare levy* (32%
    plus the levy is 34). Leave it blank and no after-tax figure is shown anywhere: the pages say the rate isn't
    set and link to Settings.
-2. On the **Categories** page, tick **GST-free** for a category whose invoices carry no GST. Registration
-   starts ticked. Anything else is taken to carry GST at 1/11 of the invoice.
+2. On the **Categories** page, tick **GST only partly applies** for a category where only part of an invoice carries
+   GST. Registration starts ticked (its CTP insurance part has GST, the rest has none). For such a category the GST isn't
+   assumed to be 1/11: enter the GST the invoice states on the expense (the form and the expense list remind you), and
+   with none entered no GST is counted. Anything else is taken to carry GST at 1/11 of the invoice.
 
 Then, for a car with a lease:
 
