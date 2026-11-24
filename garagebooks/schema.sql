@@ -510,7 +510,8 @@ CREATE TABLE IF NOT EXISTS garagebooks.reminder (
 CREATE INDEX IF NOT EXISTS reminder_car_idx ON garagebooks.reminder (car_id) WHERE resolved_at IS NULL;
 CREATE INDEX IF NOT EXISTS reminder_previous_idx ON garagebooks.reminder (previous_id);
 
--- (service_item_id is NULL here and filled in by the redefinition at the end of this file, once service_item exists.)
+-- (service_item_id is NULL here and filled in by the redefinition at the end of this file, once service_item exists;
+-- next_lease_start is NULL here and in the next one, and filled in by the last.)
 -- Everything that is due, in one place for the app and Grafana: the open reminders, plus two derived
 -- from a car's current lease, so they follow the lease and can't drift from it (the lease that
 -- covers today, else the next to start): registration expiry, which is informational when the provider renews it,
@@ -518,19 +519,20 @@ CREATE INDEX IF NOT EXISTS reminder_previous_idx ON garagebooks.reminder (previo
 -- (Dates use the database's own day; the app works out "today" in APP_TZ for its pages.)
 CREATE OR REPLACE VIEW garagebooks.reminder_due AS
 SELECT 'reminder'::text AS kind, r.id AS reminder_id, r.car_id, r.title, r.category_id, r.due_date,
-       r.due_km, r.lead_days, r.lead_km, false AS informational, NULL::smallint AS service_item_id
+       r.due_km, r.lead_days, r.lead_km, false AS informational, NULL::smallint AS service_item_id,
+       NULL::date AS next_lease_start
 FROM garagebooks.reminder r
 WHERE r.resolved_at IS NULL
 UNION ALL
 SELECT 'registration', NULL::integer, cl.car_id, 'Registration expires', NULL::smallint, cl.rego_expiry,
-       NULL::numeric(9, 1), 30, 0::numeric(9, 1), cl.rego_renewed_by_provider, NULL::smallint
+       NULL::numeric(9, 1), 30, 0::numeric(9, 1), cl.rego_renewed_by_provider, NULL::smallint, NULL::date
 FROM garagebooks.lease cl
 WHERE cl.rego_expiry IS NOT NULL
   AND cl.id = (SELECT l.id FROM garagebooks.lease l WHERE l.car_id = cl.car_id AND l.end_date >= CURRENT_DATE
                ORDER BY l.start_date LIMIT 1)
 UNION ALL
 SELECT 'lease_end', NULL::integer, cl.car_id, 'Lease ends', NULL::smallint, cl.end_date,
-       NULL::numeric(9, 1), 90, 0::numeric(9, 1), false, NULL::smallint
+       NULL::numeric(9, 1), 90, 0::numeric(9, 1), false, NULL::smallint, NULL::date
 FROM garagebooks.lease cl
 WHERE cl.id = (SELECT l.id FROM garagebooks.lease l WHERE l.car_id = cl.car_id AND l.end_date >= CURRENT_DATE
                ORDER BY l.start_date LIMIT 1);
@@ -1081,19 +1083,19 @@ CREATE INDEX IF NOT EXISTS reminder_item_idx ON garagebooks.reminder (service_it
 -- reminder_due again, with the item as its last column (the lease-derived rows have none).
 CREATE OR REPLACE VIEW garagebooks.reminder_due AS
 SELECT 'reminder'::text AS kind, r.id AS reminder_id, r.car_id, r.title, r.category_id, r.due_date,
-       r.due_km, r.lead_days, r.lead_km, false AS informational, r.service_item_id
+       r.due_km, r.lead_days, r.lead_km, false AS informational, r.service_item_id, NULL::date AS next_lease_start
 FROM garagebooks.reminder r
 WHERE r.resolved_at IS NULL
 UNION ALL
 SELECT 'registration', NULL::integer, cl.car_id, 'Registration expires', NULL::smallint, cl.rego_expiry,
-       NULL::numeric(9, 1), 30, 0::numeric(9, 1), cl.rego_renewed_by_provider, NULL::smallint
+       NULL::numeric(9, 1), 30, 0::numeric(9, 1), cl.rego_renewed_by_provider, NULL::smallint, NULL::date
 FROM garagebooks.lease cl
 WHERE cl.rego_expiry IS NOT NULL
   AND cl.id = (SELECT l.id FROM garagebooks.lease l WHERE l.car_id = cl.car_id AND l.end_date >= CURRENT_DATE
                ORDER BY l.start_date LIMIT 1)
 UNION ALL
 SELECT 'lease_end', NULL::integer, cl.car_id, 'Lease ends', NULL::smallint, cl.end_date,
-       NULL::numeric(9, 1), 90, 0::numeric(9, 1), false, NULL::smallint
+       NULL::numeric(9, 1), 90, 0::numeric(9, 1), false, NULL::smallint, NULL::date
 FROM garagebooks.lease cl
 WHERE cl.id = (SELECT l.id FROM garagebooks.lease l WHERE l.car_id = cl.car_id AND l.end_date >= CURRENT_DATE
                ORDER BY l.start_date LIMIT 1);
@@ -1417,3 +1419,38 @@ BEGIN
     END LOOP;
 END
 $fn$;
+
+-- The lease reminders on the app's own day, and a lease that is followed by the next one.
+--   setting.app_tz  APP_TZ, written by the app on every start, so the database judges "today" as the app does: on
+--                   the server's own day (UTC, usually) a lease that ended last night was still current for hours.
+--                   NULL (nothing has started yet) falls back to the server's day.
+-- reminder_due again, with next_lease_start as its last column: the start of another lease of the same car that
+-- begins after the current one does and no later than a week after it ends. With one, the lease end is information
+-- (the next lease is already loaded): never due soon or overdue, never told, not counted.
+ALTER TABLE garagebooks.setting ADD COLUMN IF NOT EXISTS app_tz text
+    CHECK (app_tz IS NULL OR (btrim(app_tz) <> '' AND length(app_tz) <= 64));
+CREATE OR REPLACE VIEW garagebooks.reminder_due AS
+WITH today AS (
+    SELECT COALESCE((SELECT (now() AT TIME ZONE s.app_tz)::date FROM garagebooks.setting s
+                     WHERE s.id = 1 AND s.app_tz IS NOT NULL), CURRENT_DATE) AS d
+), cur AS (
+    SELECT DISTINCT ON (l.car_id) l.id, l.car_id, l.start_date, l.end_date, l.rego_expiry, l.rego_renewed_by_provider
+    FROM garagebooks.lease l, today WHERE l.end_date >= today.d
+    ORDER BY l.car_id, l.start_date, l.id
+)
+SELECT 'reminder'::text AS kind, r.id AS reminder_id, r.car_id, r.title, r.category_id, r.due_date,
+       r.due_km, r.lead_days, r.lead_km, false AS informational, r.service_item_id, NULL::date AS next_lease_start
+FROM garagebooks.reminder r
+WHERE r.resolved_at IS NULL
+UNION ALL
+SELECT 'registration', NULL::integer, cur.car_id, 'Registration expires', NULL::smallint, cur.rego_expiry,
+       NULL::numeric(9, 1), 30, 0::numeric(9, 1), cur.rego_renewed_by_provider, NULL::smallint, NULL::date
+FROM cur
+WHERE cur.rego_expiry IS NOT NULL
+UNION ALL
+SELECT 'lease_end', NULL::integer, cur.car_id, 'Lease ends', NULL::smallint, cur.end_date,
+       NULL::numeric(9, 1), 90, 0::numeric(9, 1), nx.start_date IS NOT NULL, NULL::smallint, nx.start_date
+FROM cur
+LEFT JOIN LATERAL (SELECT min(n.start_date) AS start_date FROM garagebooks.lease n
+                   WHERE n.car_id = cur.car_id AND n.id <> cur.id AND n.start_date > cur.start_date
+                     AND n.start_date <= cur.end_date + 7) nx ON true;

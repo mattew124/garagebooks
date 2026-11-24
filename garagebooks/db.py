@@ -300,6 +300,21 @@ def save_notify_teslamate(conn, on):
     conn.execute("UPDATE garagebooks.setting SET notify_teslamate = %s WHERE id = 1", (bool(on),))
 
 
+def save_app_tz(conn, tz):
+    """Keep APP_TZ in the settings, so the database's views (the reminders derived from a lease) judge "today" on
+    the app's day, not the server's. Done on every start. False, and nothing saved, if the database does not know
+    the zone or can't save it (it then uses its own day, as before)."""
+    try:
+        with conn.transaction():
+            conn.execute("SELECT now() AT TIME ZONE %s", (tz,))
+            conn.execute("UPDATE garagebooks.setting SET app_tz = %s WHERE id = 1 AND app_tz IS DISTINCT FROM %s",
+                         (tz, tz))
+        return True
+    except psycopg.Error as exc:       # a zone the database doesn't know, or a schema from before this column
+        log.warning("APP_TZ (%s) could not be saved for the database's views, which use the server's day: %s", tz, exc)
+        return False
+
+
 def lease_budgets_on(conn):
     """Whether the owner tracks the provider's yearly budget pools (Settings). Off unless turned on."""
     return bool(get_settings(conn)["lease_budgets"])
