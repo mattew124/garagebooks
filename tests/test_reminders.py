@@ -157,6 +157,60 @@ def test_only_the_current_lease_counts_not_one_that_has_ended(app):
     assert connect(url).execute("SELECT count(*) AS n FROM garagebooks.reminder_due").fetchone()["n"] == 2
 
 
+def test_a_lease_followed_by_the_next_one_says_so_and_never_falls_due(app):
+    """Two consecutive leases of one car: the first one's end is information (the next is already loaded), not a
+    reminder that falls due, is told or counts in the header."""
+    client, url, car_id = app
+    ending = good_form(start_date=day(-700), end_date=day(10), rego_expiry="", term_months="24")
+    following = good_form(start_date=day(11), end_date=day(741), rego_expiry="", term_months="24")
+    for f in (ending, following):
+        assert client.post(f"/cars/{car_id}/lease/new", data=f, headers=ORIGIN).status_code == 303
+    with connect(url) as conn:
+        rows = conn.execute("SELECT * FROM garagebooks.reminder_due WHERE kind = 'lease_end'").fetchall()
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["due_date"] == today_here() + timedelta(days=10) and row["informational"]
+    assert row["next_lease_start"] == today_here() + timedelta(days=11)
+    page = client.get("/reminders").data.decode()
+    card = re.search(r'data-kind="lease_end".*?</li>', page, re.S).group(0)
+    assert 'data-status="info"' in card and "Next lease loaded" in card
+    starts = today_here() + timedelta(days=11)
+    assert f"next lease already loaded (starts {starts.day} {starts:%b %Y})" in card
+    assert "overdue" not in card and "due in" not in card
+    assert '<span class="count">' not in page                               # nothing needs attention
+    # a gap of more than a week is not a follow-on: the end is a reminder as before
+    with connect(url) as conn:
+        conn.execute("UPDATE garagebooks.lease SET start_date = %s WHERE start_date = %s",
+                     (today_here() + timedelta(days=30), starts))
+        row = conn.execute("SELECT * FROM garagebooks.reminder_due WHERE kind = 'lease_end'").fetchone()
+    assert not row["informational"] and row["next_lease_start"] is None
+
+
+def test_the_current_lease_is_chosen_on_the_apps_day_not_the_databases(empty_db, monkeypatch):
+    """The view judges "today" in APP_TZ (stored by the app), not the database server's UTC day. UTC+14 and
+    UTC-12 are always on different days, so a lease ending on the UTC-12 day has ended at UTC+14."""
+    try:
+        for tz, current in (("Etc/GMT+12", "ending"), ("Etc/GMT-14", "following")):
+            client = start(empty_db, monkeypatch, APP_TZ=tz)
+            with connect(empty_db) as conn:
+                assert conn.execute("SELECT app_tz FROM garagebooks.setting").fetchone()["app_tz"] == tz
+                conn.execute("DELETE FROM garagebooks.lease")
+                conn.execute("INSERT INTO garagebooks.car (id, name) VALUES (1600, 'Day car') ON CONFLICT DO NOTHING")
+                end = conn.execute("SELECT (now() AT TIME ZONE 'Etc/GMT+12')::date AS d").fetchone()["d"]
+                for start_date, end_date in ((end - timedelta(days=700), end),
+                                             (end + timedelta(days=1), end + timedelta(days=731))):
+                    conn.execute("INSERT INTO garagebooks.lease (car_id, financier, start_date, end_date, term_months, "
+                                 "pay_frequency) VALUES (1600, 'Provider', %s, %s, 24, 'monthly')", (start_date, end_date))
+                row = conn.execute("SELECT * FROM garagebooks.reminder_due WHERE kind = 'lease_end'").fetchone()
+            assert row["due_date"] == (end if current == "ending" else end + timedelta(days=731)), tz
+            assert client.get("/reminders").status_code == 200
+    finally:
+        with connect(empty_db) as conn:
+            conn.execute("DELETE FROM garagebooks.lease")
+            conn.execute("DELETE FROM garagebooks.car WHERE id = 1600")
+            conn.execute("UPDATE garagebooks.setting SET app_tz = NULL")
+
+
 def test_upgrading_twice_keeps_reminders_and_the_view(app, monkeypatch):
     client, url, car_id = app
     rid = add(client, url, car_id, title="Kept")
@@ -601,6 +655,19 @@ def test_the_panel_works_out_the_same_status_as_the_app(app, teslamate):
             assert shown[r["title"]] == expected.label, (r["title"], shown[r["title"]], expected)
     assert len(rows) == len(cases) + 2 and rows[0]["Status"] == "Overdue"          # most urgent first
     assert {"Reminder", "Due date", "Due km", "Days left", "Km left", "Status"} <= set(rows[0])
+
+
+def test_the_panel_says_the_next_lease_is_loaded_as_the_app_does(app):
+    client, url, car_id = app
+    for f in (good_form(start_date=day(-700), end_date=day(10), rego_expiry="", term_months="24"),
+              good_form(start_date=day(11), end_date=day(741), rego_expiry="", term_months="24")):
+        assert client.post(f"/cars/{car_id}/lease/new", data=f, headers=ORIGIN).status_code == 303
+    raw = panel(dashboard.render("Australia/Brisbane", ""))["targets"][0]["rawSql"]
+    with connect(url) as conn:
+        rows = conn.execute(runnable(raw.replace("$car_id", str(car_id)))).fetchall()
+        due = conn.execute("SELECT * FROM garagebooks.reminder_due WHERE car_id = %s", (car_id,)).fetchone()
+    assert [(r["Reminder"], r["Status"]) for r in rows] == [("Lease ends", "Next lease loaded")]
+    assert reminders.status(due, today_here(), None).label == "Next lease loaded"
 
 
 def test_the_panel_says_odometer_unknown_and_leaves_out_resolved_and_other_cars(app):
