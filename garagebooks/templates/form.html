@@ -40,7 +40,7 @@
   <label>Car
     <select name="car_id" required>
       {% if cars|length != 1 %}<option value="">Choose…</option>{% endif %}
-      {% for c in cars %}<option value="{{ c.id }}" data-storage="{{ car_storage.get(c.id, '') }}"{{ ' data-leased="1"' if c.id in leased_cars }}{{ ' data-teslamate="1"' if c.id in teslamate_cars }} {{ 'selected' if values.car_id|string == c.id|string }}>{{ c.name or ('Car ' ~ c.id) }}{{ ' (sold)' if c.sold_at }}</option>{% endfor %}
+      {% for c in cars %}<option value="{{ c.id }}" data-storage="{{ car_storage.get(c.id, '') }}"{{ ' data-leased="1"' if c.id in leased_cars }}{% if c.id in teslamate_cars %} data-teslamate="1"{% endif %} {{ 'selected' if values.car_id|string == c.id|string }}>{{ c.name or ('Car ' ~ c.id) }}{{ ' (sold)' if c.sold_at }}</option>{% endfor %}
     </select>{{ err('car_id') }}
   </label>
 {% endmacro %}

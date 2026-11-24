@@ -46,7 +46,7 @@ def button(html):
 
 def test_a_teslamate_car_gets_the_button_while_teslamate_answers(pg, admin, cars, monkeypatch):
     html = form_for(app_with(pg, monkeypatch, sources.OK), 1)
-    assert "data-teslamate" in option(html, 1) and "data-teslamate" not in option(html, 2)
+    assert 'data-teslamate="1"' in option(html, 1) and "data-teslamate" not in option(html, 2)   # real quotes, not &#34;
     assert button(html) and " hidden" not in button(html)
 
 
