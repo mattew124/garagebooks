@@ -7,6 +7,10 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+- **Claims send an invoice kept in OneDrive.** Claiming an expense whose invoice is in OneDrive used to stop with
+  "only a link: attach the invoice file first", which can't be done when OneDrive is the car's folder. The claim
+  now downloads the file from OneDrive (up to 10 MB) and sends it, and says so plainly when the OneDrive sign-in
+  has lapsed or the file has been moved or deleted. Nothing to do on upgrade.
 - **The kilometre pace counts the whole FBT year when it holds two leases.** When a lease ended and the next one started
   during an FBT year, the lease page and the dashboard's **Kilometre pace** panel were labelled with the FBT year but
   counted only the current lease's part of it. The distance driven under the earlier lease was left out, so a car on
