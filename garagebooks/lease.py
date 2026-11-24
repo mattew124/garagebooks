@@ -375,6 +375,29 @@ def ev_rate(rates, year):
     return (max(earlier), rates[max(earlier)]) if earlier else None
 
 
+def rate_over_days(spans, rate_of_year):
+    """The marginal rate across some day ranges (first, last; both included), each day at the rate of the income year
+    (1 July to 30 June) it falls in, `rate_of_year(year)` (None: not known). -> the rate weighted by days, or None when
+    any day's rate isn't known or there are no days."""
+    total, weighted = 0, Decimal(0)
+    for first, last in spans:
+        day = first
+        while day <= last:
+            year = day.year if day.month >= 7 else day.year - 1
+            end = min(last, date(year + 1, 6, 30))
+            rate = rate_of_year(year)
+            if rate is None:
+                return None
+            days = (end - day).days + 1
+            total, weighted = total + days, weighted + Decimal(rate) * days
+            day = end + timedelta(days=1)
+    if not total:
+        return None
+    with localcontext() as ctx:
+        ctx.prec = 60
+        return weighted / total
+
+
 def charging_reimbursement(km, cents_per_km, rate_percent):
     """The home charging reimbursement for `km` driven at `cents_per_km`, and the tax saved on it (at the
     marginal rate). None when the distance or the rate isn't known, or the readings run backwards: never 0."""
@@ -399,15 +422,16 @@ def reimbursed_spans(leases, year, today):
     return sorted(spans)
 
 
-def after_tax_lines(rows, key, rate_percent):
-    """The year's after-tax part of the report, from its expenses (db.after_tax_facts): `key(row)` names the
-    line each belongs to. -> {line: {"invoice": total, "effective": total or None, "packaged": n}}. A line's
-    effective total is None while any of its packaged expenses has none (no rate)."""
+def after_tax_lines(rows, key):
+    """The year's after-tax part of the report, from its expenses (db.after_tax_facts, each with the marginal rate
+    of its date's income year): `key(row)` names the line each belongs to.
+    -> {line: {"invoice": total, "effective": total or None, "packaged": n}}. A line's effective total is None while
+    any of its packaged expenses has none (no bracket chosen for its year)."""
     lines = {}
     for row in rows:
         packaged = is_packaged(row["packaged"], row["lease_id"] is not None, row["budget_pool"], row["kind"])
         cost = effective_cost(row["amount"], packaged, row["gst_free"], row["pretax_payment"], row["posttax_payment"],
-                              rate_percent, gst_amount=row["gst_amount"])
+                              row["marginal_rate"], gst_amount=row["gst_amount"])
         line = lines.setdefault(key(row), {"invoice": Decimal(0), "effective": Decimal(0), "packaged": 0})
         line["invoice"] += row["amount"]
         line["packaged"] += 1 if packaged else 0
@@ -476,3 +500,52 @@ def km_pace(lease, year, today, start_km, current_km):
         out["per_day_to_go"] = _tenth(max(expected - driven, Decimal(0)) / out["remaining_days"])
     return out
 
+
+
+def km_pace_year(parts, year, today):
+    """The kilometre pace of a whole FBT year for a car, across every lease held in it: a lease that ends part-way
+    and the next one each count their own days and their own estimate. `parts` is a list of (lease, start_km,
+    current_km), the odometers as km_pace takes them. A lease with no estimate, or not held in the year, is left
+    out; None when none is left. `leases` is how many count. A distance needs every counted lease's odometers
+    (one still to start has driven nothing yet): else it is None, never a part standing in for the whole.
+    Rounded to 0.1 once, at the end, so one lease gives exactly what km_pace gives."""
+    in_year = days_in_fbt_year(year)
+    counted = []
+    for row, start_km, current_km in sorted(parts, key=lambda p: p[0]["start_date"]):
+        pace = km_pace(row, year, today, start_km, current_km)
+        if pace["state"] != "not_held" and pace["estimate"] is not None:
+            counted.append((pace, _decimal(start_km), _decimal(current_km)))
+    if not counted:
+        return None
+    held = sum(p["days_held"] for p, _, _ in counted)
+    elapsed = sum(p["elapsed_days"] for p, _, _ in counted)
+    expected = sum((Decimal(p["estimate"]) * p["days_held"] / in_year for p, _, _ in counted), Decimal(0))
+    so_far = sum((Decimal(p["estimate"]) * p["elapsed_days"] / in_year for p, _, _ in counted), Decimal(0))
+    states = {p["state"] for p, _, _ in counted}
+    state = states.pop() if len(states) == 1 else "current"
+    first_pace, first_start, _ = counted[0]
+    start = None if first_pace["state"] == "upcoming" else first_start
+    driven = Decimal(0)
+    for pace, begin, now in counted:
+        if pace["state"] == "upcoming":
+            continue
+        if begin is None or now is None:
+            driven = None
+            break
+        driven += max(now - begin, Decimal(0))
+    if state == "upcoming":
+        driven = None
+    out = {"year": year, "leases": len(counted), "first": first_pace["first"], "last": counted[-1][0]["last"],
+           "days_held": held, "days_in_year": in_year, "elapsed_days": elapsed, "remaining_days": held - elapsed,
+           "state": state, "start_km": _tenth(start), **dict.fromkeys(PACE_FIGURES)}
+    out["expected_km"], out["per_day_needed"] = _tenth(expected), _tenth(expected / held)
+    if start is not None:
+        out["end_km_needed"] = _tenth(start + expected)
+    if driven is None:
+        return out
+    out.update(driven=_tenth(driven), expected_so_far=_tenth(so_far), ahead=_tenth(driven - so_far))
+    if elapsed:
+        out["per_day_driven"] = _tenth(driven / elapsed)
+    if out["remaining_days"]:
+        out["per_day_to_go"] = _tenth(max(expected - driven, Decimal(0)) / out["remaining_days"])
+    return out

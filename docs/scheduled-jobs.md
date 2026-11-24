@@ -10,6 +10,7 @@ move it to a container of its own.
 | --- | --- | --- |
 | `teslamate` | every hour | Looks at TeslaMate again: adds its new cars, and holds its figures back or lets them through (see [TeslaMate version](reference.md#teslamate-version)). With no TeslaMate it records that, and nothing else. |
 | `dashboard` | every 6 hours | Rewrites the Grafana dashboard file, so its time range and panels follow the data. |
+| `ato_rates` | every 7 days | Reads the income tax brackets and the home charging rate for an electric car from the ATO's pages (see [Live rates from the ATO](lease-calculations.md#live-rates-from-the-ato)). If a page can't be read (an install with no internet) or has changed shape, it fails and keeps the rates it has. |
 | `mail` | every 30 minutes | Looks in each car's [mailbox folder](mailbox.md) and counts the emails not yet imported, for the Invoice storage page and a notice. It only reads. Says *no mailbox connected* until the mailbox is. |
 | `notifications` | every 15 minutes | Sends the [notices](notifications.md) you asked for: a reminder coming due, the Microsoft client secret nearing its expiry, the OneDrive or mailbox sign-in lost. Does nothing, and says *off*, until an address is set on the Settings page. |
 

@@ -46,30 +46,48 @@
       budgets already entered are kept.</small></span></label>
   <section class="stack" id="after-tax-settings">
     <h2 class="card-title">Cost after tax</h2>
-    <label>Marginal tax rate (%)
-      <input type="text" name="marginal_tax_rate" inputmode="decimal" maxlength="7" autocomplete="off" placeholder="e.g. 34"
-             value="{{ values.marginal_tax_rate if values.marginal_tax_rate is not none else '' }}">
-      {% if errors.marginal_tax_rate %}<span class="error">{{ errors.marginal_tax_rate }}</span>{% endif %}
-      <small>Your marginal income tax rate, <strong>including the 2% Medicare levy</strong> (32% plus the levy is entered as 34). Used to show what an expense paid
-        from a lease package costs after tax, beside what the invoice says. Only the rate is kept, never a salary. Leave it blank and no after-tax figure is shown.
-        This is arithmetic on what you enter, not tax advice.</small></label>
-    <fieldset class="due-fields" id="ev-rates">
-      <legend>ATO rate for home charging an electric car (cents per km)</legend>
-      <small>What a provider may reimburse for charging an electric car at home on a novated or associate lease, by FBT year (the year it starts in:
-        2026 is 1 April 2026 to 31 March 2027). A year with no rate here uses the latest earlier year's, and the FBT year report says which it used.
-        Check the ATO's current figure; add a year when it publishes one.</small>
-      {% for year, cents in ev_rates.items() %}
-      <label class="row"><span>FBT {{ year }}–{{ '%02d' % ((year + 1) % 100) }}</span>
-        <input type="text" name="ev_rate_{{ year }}" inputmode="decimal" maxlength="8" autocomplete="off" value="{{ ev_rate_values.get(year, cents) }}">
-        {% if errors.get('ev_rate_' ~ year) %}<span class="error">{{ errors['ev_rate_' ~ year] }}</span>{% endif %}</label>
+    <p><small>For each income year (1 July to 30 June), the tax bracket your taxable income falls in and your Medicare levy status. An expense's date decides
+      its year, and its marginal rate is the bracket's rate plus the levy (2%, 1% when half exempt, none when exempt). It shows what an expense paid from a lease
+      package costs after tax. A year left blank uses the latest earlier year's choice (for the income its bracket stands for). Only the bracket is kept, never a
+      salary. With no year chosen, no after-tax figure is shown. This is arithmetic on what you choose, not tax advice.</small></p>
+    <div class="table-wrap"><table id="tax-years" class="compact">
+      <thead><tr><th>Income year</th>{% for person, name in tax_people.items() %}<th>{{ name }}: tax bracket</th><th>Medicare levy</th>{% endfor %}</tr></thead>
+      <tbody>
+      {% for row in tax_rows %}
+      <tr data-year="{{ row.year }}"><th scope="row">{{ row.label }}{% if row.table_note %}<br><small>{{ row.table_note }}</small>{% endif %}</th>
+        {% for person in tax_people %}{% set p = row.people[person] %}
+        {% set bname = tax_field(person, row.year, 'bracket') %}{% set mname = tax_field(person, row.year, 'medicare') %}
+        {% set chosen = tax_values.get(bname, p.choice.bracket_lower|string if p.choice else '') %}
+        {% set status = tax_values.get(mname, p.choice.medicare if p.choice else 'not_exempt') %}
+        <td><select name="{{ bname }}" aria-label="{{ tax_people[person] }}: tax bracket for {{ row.label }}">
+            <option value="">{{ 'Same as the year before' }}</option>
+            {% for b in row.brackets %}<option value="{{ b.lower_income }}" {{ 'selected' if chosen == b.lower_income|string }}>{{ b.label }}</option>
+            {% endfor %}</select>
+          {% if errors.get(bname) %}<span class="error">{{ errors[bname] }}</span>{% endif %}
+          {% if p.note %}<br><small class="tax-note">{{ p.note }}</small>{% endif %}</td>
+        <td><select name="{{ mname }}" aria-label="{{ tax_people[person] }}: Medicare levy for {{ row.label }}">
+            {% for key, text in medicare.items() %}<option value="{{ key }}" {{ 'selected' if status == key }}>{{ text }}</option>
+            {% endfor %}</select>
+          {% if errors.get(mname) %}<span class="error">{{ errors[mname] }}</span>{% endif %}</td>
+        {% endfor %}
+      </tr>
       {% endfor %}
-      <div class="row">
-        <label>Add a year <input type="text" name="new_rate_year" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="e.g. 2027" value="{{ new_rate.year }}">
-          {% if errors.new_rate_year %}<span class="error">{{ errors.new_rate_year }}</span>{% endif %}</label>
-        <label>Cents per km <input type="text" name="new_rate_cents" inputmode="decimal" maxlength="8" autocomplete="off" value="{{ new_rate.cents }}">
-          {% if errors.new_rate_cents %}<span class="error">{{ errors.new_rate_cents }}</span>{% endif %}</label>
-      </div>
-    </fieldset>
+      </tbody>
+    </table></div>
+    <h3 class="card-title">ATO rate for home charging an electric car</h3>
+    <div class="table-wrap"><table id="ev-rates" class="compact">
+      <thead><tr><th>FBT year</th><th class="num">Cents per km</th><th>Source</th><th>Last checked</th></tr></thead>
+      <tbody>
+      {% for r in ev_rates %}
+      <tr><td>{{ fbt_label(r.fbt_year) }}</td><td class="num">{{ r.cents_per_km }}</td>
+        <td>{% if r.source_url %}<a href="{{ r.source_url }}" target="_blank" rel="noopener noreferrer">ATO, PCG 2024/2</a>{% else %}Shipped with GarageBooks{% endif %}</td>
+        <td>{{ r.checked_at | when if r.checked_at else 'Not yet' }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+    <small>What a provider may reimburse for charging an electric car at home on a novated or associate lease, by FBT year. A year with no row uses the latest
+      earlier year's rate, and the FBT year report says which it used. The <strong>ato_rates</strong> job below reads these, and the tax brackets, from the
+      <a href="{{ ev_source }}" target="_blank" rel="noopener noreferrer">ATO's pages</a> each week, and keeps the last good set if a page can't be read.</small>
   </section>
   <button type="submit" class="button">Save</button>
 </form>

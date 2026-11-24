@@ -11,6 +11,7 @@ import pytest
 from psycopg.rows import dict_row
 
 from garagebooks import create_app, jobs
+from tests.test_tax_years import pages as ato_pages
 
 NOW = datetime(2026, 11, 16, 2, 0, tzinfo=UTC)
 HOUR = timedelta(hours=1)
@@ -243,7 +244,7 @@ def test_an_unknown_scheduler_setting_is_refused():
 def test_the_app_has_its_scheduler_with_the_built_in_jobs_and_starts_no_thread_under_test(pg, admin, monkeypatch, connect):
     monkeypatch.delenv("BASE_PATH", raising=False)
     before = threading.active_count()
-    app = create_app(connect=connect)
+    app = create_app(connect=connect, ato_fetch=ato_pages())          # the ATO's pages as saved: no network in tests
     s = app.extensions["scheduler"]
     assert {"teslamate", "dashboard"} <= set(s.jobs)
     assert threading.active_count() == before

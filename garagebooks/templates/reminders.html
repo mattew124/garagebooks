@@ -47,6 +47,7 @@
     {% else %}
     <p class="meta"><small><a href="{{ url_for('car_lease', car_id=i.car_id) }}">Lease details</a>
       {% if i.kind == 'registration' and i.informational %} · Registration is renewed by the provider; this is for your information.
+      {% elif i.kind == 'lease_end' and i.next_lease_start %} · The next lease is already entered, so there is nothing to do; this is for your information.
       {% else %} · From the car's lease: change the date there, and this follows.{% endif %}</small></p>
     {% endif %}
   </li>
