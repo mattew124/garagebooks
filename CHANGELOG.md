@@ -15,6 +15,9 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
   rest. Expenses already saved that break the rule stay and show as before. Upgrade: pull the new image (the schema
   gains `category.applies_to` and `service_item.applies_to`; on the restricted database role re-run
   `scripts/provision-db.sh` first).
+- **Tests never read the ATO's pages.** The weekly `ato_rates` job reached the real ATO site in every test that
+  started the app, which made the suite slow and a scheduler test fail at random in CI. Tests now get a stand-in
+  that refuses at once. Nothing changes for installers.
 - **The Categories page saves everything at once, and GST can be "only partly applies".** Every category and service
   item is edited in one form with one **Save** button at the bottom: each changed row is saved in one go, a wrong row
   is flagged beside it and nothing is saved until it is fixed. A service item is deleted with a small **×** on its row
