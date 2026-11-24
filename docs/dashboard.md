@@ -106,7 +106,7 @@ not on the dashboard. The existing total cost of ownership figures are unchanged
 The **Reminders** table, above the expenses, lists what is open for the selected car, most urgent
 first: the title, due date and due odometer reading, **Days left**, **Km left** and **Status**
 (Overdue, Due soon, Upcoming, Odometer unknown, or Provider renews for a registration the lease provider
-looks after). The rules are the same as in the app: see [Reminders](reminders.md#what-the-statuses-mean).
+looks after, or Next lease loaded for a lease end whose next lease is already entered). The rules are the same as in the app: see [Reminders](reminders.md#what-the-statuses-mean).
 It needs no TeslaMate table, so it is there with or without TeslaMate. The odometer it counts from is the
 car's latest known one (the same as **Distance** above). With none known, a reminder due by odometer says
 *Odometer unknown* and its **Km left** is empty. A reminder due today or later is *Due soon* inside its lead time; the days
@@ -115,11 +115,12 @@ and includes the registration and lease end from the car's [lease](leases.md).
 
 ## Kilometre pace
 
-The **Kilometre pace** table, at the bottom of the dashboard, shows the selected car's current lease against its
-estimated km per year, for the current FBT year: **Expected km** (pro rata for the days held), **Odometer at start** and
+The **Kilometre pace** table, at the bottom of the dashboard, shows the selected car's current FBT year against
+its estimated km per year. When a lease ends during the year and the next one starts, both leases are added up, each
+with its own days and estimate (see [Lease calculations](lease-calculations.md#kilometre-pace-l4)). The figures are: **Expected km** (pro rata for the days held), **Odometer at start** and
 **Odometer needed at end**, **Km per day needed**, **Driven so far**, **Km per day driven**, **Ahead (+) or behind (-)** the
 pro-rata pace and **Km per day needed from today**. They are the same figures as the
-[FBT year report](leases.md#kilometre-pace) works out. The table is empty for a car with no current lease or no estimate, and
+[FBT year report](leases.md#kilometre-pace) works out. The table is empty when no lease held in the current FBT year has an estimate, and
 the panel is left out of the dashboard altogether until a lease has an estimate. A figure that needs an odometer that isn't
 known is empty, not 0.
 

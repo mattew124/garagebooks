@@ -193,6 +193,18 @@ def test_what_was_told_about_a_deleted_reminder_goes_with_it(world):
     assert keys(url) == []
 
 
+def test_a_lease_end_is_not_told_when_the_next_lease_is_already_loaded(world):
+    _, url, sender = world
+    today = today_here()
+    with connect(url) as conn:
+        for start_date, end_date in ((today - timedelta(days=700), today + timedelta(days=5)),
+                                     (today + timedelta(days=6), today + timedelta(days=736))):
+            conn.execute("INSERT INTO garagebooks.lease (car_id, financier, start_date, end_date, term_months, "
+                         "pay_frequency) VALUES (1500, 'Provider', %s, %s, 24, 'monthly')", (start_date, end_date))
+    tell(url, sender, now=datetime.now(TZ))
+    assert not any("Lease ends" in t for t in sender.titles())
+
+
 def test_a_lease_registration_and_the_lease_end_are_told_but_a_provider_renewed_registration_is_not(world):
     _, url, sender = world
     with connect(url) as conn:
