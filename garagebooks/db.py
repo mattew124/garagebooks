@@ -353,6 +353,16 @@ def tax_positions(conn, person, years):
     return {y: conn.execute("SELECT * FROM garagebooks.tax_position(%s, %s)", (person, y)).fetchone() for y in years}
 
 
+def any_associate_lease(conn):
+    return conn.execute("SELECT EXISTS (SELECT 1 FROM garagebooks.lease WHERE associate_lease) AS x").fetchone()["x"]
+
+
+def lease_years(conn, car_id):
+    """garagebooks.lease_income_year() for one car's leases, by lease and income year."""
+    return conn.execute("SELECT * FROM garagebooks.lease_income_year() WHERE car_id = %s ORDER BY income_year, lease_id",
+                        (car_id,)).fetchall()
+
+
 def any_tax_choice(conn, person="employee"):
     return conn.execute("SELECT EXISTS (SELECT 1 FROM garagebooks.tax_choice WHERE person = %s) AS x", (person,)).fetchone()["x"]
 
@@ -800,7 +810,7 @@ LEASE_FIELDS = ("package_name", "financier", "start_date", "end_date", "refinanc
                 "pay_frequency", "pretax_payment", "posttax_payment", "admin_fee", "car_cost",
                 "residual_amount", "residual_percent", "fbt_base_value", "fbt_method", "statutory_percent",
                 "ev_exempt", "tax_treatment", "tax_treatment_note", "estimated_km_per_year",
-                "rego_expiry", "rego_renewed_by_provider", "associate_lease", "charging_reimbursed",
+                "rego_expiry", "rego_renewed_by_provider", "associate_lease", "charging_reimbursed", "depreciation_value",
                 "form_url", "form_path", "agreement_url", "agreement_path")
 
 

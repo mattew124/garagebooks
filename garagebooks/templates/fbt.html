@@ -205,6 +205,30 @@
   {% endif %}
 </section>
 
+{% if associate %}
+<section class="card stack fbt" id="fbt-associate" aria-labelledby="fbt-associate-h">
+  <h2 id="fbt-associate-h">Associate lease, for the household</h2>
+  <p><small>The associate owns the car and receives the lease payments as business income, less depreciation; you save tax on the pre-tax
+    payments. By income year (1 July to 30 June), the two this FBT year runs across. Every year is on the dashboard's <strong>After-tax cost of
+    ownership</strong> row.</small></p>
+  <div class="table-wrap"><table class="compact">
+    <thead><tr><th>Income year</th><th class="num">Payments received</th><th class="num">Depreciation</th><th class="num">Associate's extra tax</th>
+      <th class="num">Your tax saved</th><th class="num">Household</th></tr></thead>
+    <tbody>
+    {% for r in associate %}
+    <tr data-income-year="{{ r.income_year }}"><td>{{ tax_label(r.income_year) }}</td><td class="num">{{ r.payments|money }}</td>
+      <td class="num">{{ amount(r.depreciation, "Enter the car's cost or value for depreciation on the lease.") }}</td>
+      <td class="num">{{ amount(r.associate_cost, "Choose the associate's tax bracket in Settings.") }}</td>
+      <td class="num">{{ amount(r.employee_saving, "Choose your tax bracket in Settings.") }}</td>
+      <td class="num"><strong>{% if r.household_cost is none %}{{ amount(none) }}{% elif r.household_cost < 0 %}{{ (-r.household_cost)|money }} saved{% else %}{{ r.household_cost|money }} cost{% endif %}</strong></td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <p><small>The associate's extra tax is the tax and Medicare levy on the payments less depreciation (diminishing value, 25% a year, on the car's value up to the
+    ATO's car limit), less the small business income tax offset. Their bracket stands for their income without the lease. See the documentation. Not tax advice.</small></p>
+</section>
+{% endif %}
+
 <section class="card stack fbt" id="purchases" aria-labelledby="fbt-purchases">
   <h2 id="fbt-purchases">Purchases</h2>
   {% if report.purchases %}

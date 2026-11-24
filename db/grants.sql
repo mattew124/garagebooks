@@ -47,6 +47,9 @@ GRANT EXECUTE ON FUNCTION garagebooks.expense_after_tax(text) TO :"app_role";
 GRANT SELECT, INSERT, UPDATE, DELETE ON garagebooks.tax_bracket, garagebooks.tax_choice TO :"app_role";
 GRANT EXECUTE ON FUNCTION garagebooks.income_year(date), garagebooks.tax_table_year(integer),
     garagebooks.tax_position(text, integer), garagebooks.marginal_rate(text, date) TO :"app_role";
+-- An associate lease after tax: the ATO's car limit (data, read only) and each lease's figures by income year.
+GRANT SELECT ON garagebooks.car_limit TO :"app_role";
+GRANT EXECUTE ON FUNCTION garagebooks.income_tax(integer, numeric), garagebooks.lease_income_year() TO :"app_role";
 -- Scheduled jobs: the scheduler adds a row for each job and records each run.
 GRANT SELECT, INSERT, UPDATE ON garagebooks.job TO :"app_role";
 -- Notifications: what has been sent is added, read and pruned, never rewritten. (The settings and the

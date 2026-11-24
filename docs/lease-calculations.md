@@ -324,6 +324,55 @@ cash in hand     = salary + lease payments − tax − Medicare + LITO − HELP 
 
 **Net benefit** = both people's cash in hand with the lease − both without it.
 
+### In GarageBooks: an associate lease after tax
+
+For a lease marked **Associate lease**, GarageBooks works the household's side of this model out for each
+income year (1 July to 30 June) the lease is held in, from what is entered: the lease's payments and dates,
+the car's **value for depreciation** (on the lease form; blank uses the car's cost), and in Settings a tax
+bracket and Medicare status for you and for the **Associate** (the associate's columns appear once a car has
+an associate lease). A bracket stands for an income without the lease (its middle, or $10,000 into the top
+one), as in the workbook. No salary is asked for.
+
+```text
+payments            = (pre-tax + post-tax payment) × pay dates in the year       (received by the associate)
+depreciation        = value at the start of the year × 25% × days held ÷ days in the year
+                      (first year: the lower of the value for depreciation and the car limit of the
+                       income year the lease starts in; later years: that less the depreciation before)
+business income     = payments − depreciation
+associate's tax     = tax on (their income + business income) − tax on their income   (the year's brackets)
+Medicare            = their levy (2%, 1%, 0) × business income
+small business offset = min(16% × tax on (income + business income) × business income ÷ that income, $1,000)
+                        (0 for a loss)
+associate's extra tax = associate's tax + Medicare − small business offset
+your tax saved      = (pre-tax payment + admin fee) × pay dates × your marginal rate
+household cost      = admin fees − your tax saved + associate's extra tax       (negative: a saving)
+```
+
+For a lease that isn't an associate lease the household cost is the payments plus admin fees less your tax
+saved. Each figure is rounded to the cent. Without the associate's bracket (or the car's value), their
+figures and the household figure are *unavailable*, never 0. Not modelled here: the low income tax offset,
+the Medicare levy's low-income phase-in and family thresholds, HELP, and GST on the payments. The ATO's car
+limit is data in `garagebooks.car_limit` ($69,674 for 2024–25 and 2025–26; a later year uses the latest
+earlier one: check the ATO's figure).
+
+**Worked example** (invented figures). A car valued at $40,000 leased to the employer from 1 July 2026 to
+30 June 2028 for $1,000 a month, all pre-tax. You: $135,001 – $190,000 (37%), not exempt, so 39%. The
+associate: $45,001 – $135,000 (30%), not exempt, which stands for $90,000.50.
+
+```text
+2026–27  payments 12,000.00; depreciation 40,000 × 25% × 365 ÷ 365 = 10,000.00; business income 2,000.00
+         associate's tax = tax on 92,000.50 − tax on 90,000.50 = 600.00; Medicare 2% × 2,000 = 40.00
+         small business offset = 16% × 18,120.15 × 2,000 ÷ 92,000.50 = 63.03
+         associate's extra tax = 600.00 + 40.00 − 63.03 = 576.97
+         your tax saved = 12,000.00 × 39% = 4,680.00
+         household = 576.97 − 4,680.00 = −4,103.03, a saving of $4,103.03
+2027–28  depreciation 30,000 × 25% = 7,500.00; business income 4,500.00
+         associate's extra tax = 1,350.00 + 90.00 − 143.77 = 1,296.23; household −3,383.77
+```
+
+The FBT year report shows these for the two income years the FBT year runs across, and the dashboard every
+year. The one definition is `garagebooks.lease_income_year()` in the database.
+
 ### Tax tables
 
 - **Income tax:** The year's five brackets from the ATO: a base amount plus a rate on income over the bracket's start.

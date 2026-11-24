@@ -687,6 +687,10 @@ def parse_lease_form(form, pools, frequencies, fbt_methods, tax_treatments, budg
         errors["pretax_payment"] = "Enter the payment, pre-tax or post-tax."
 
     money("car_cost", "the car's cost")
+    money("depreciation_value", "the value for depreciation")
+    if not associate:    # only the associate's depreciation uses it
+        values["depreciation_value"] = None
+        errors.pop("depreciation_value", None)
     money("residual_amount", "the residual amount")
     attempt("residual_percent", _percent, form.get("residual_percent"), "The residual percentage", 3)
     if associate:        # no balloon on an associate lease: whatever was in the hidden boxes is dropped

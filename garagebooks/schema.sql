@@ -1300,3 +1300,120 @@ AS $fn$
                                     THEN l.posttax_payment ELSE 0 END AS post) q
     CROSS JOIN LATERAL (SELECT garagebooks.marginal_rate('employee', (e.occurred_at AT TIME ZONE tz)::date) AS rate) r
 $fn$;
+
+-- An associate lease after tax, for the household (roadmap L7, docs/lease-calculations.md "The what-if model").
+--   lease.depreciation_value  the car's value for depreciation at the lease's start (the associate owns it); NULL
+--                             uses the lease's car cost. Never more than the car limit counts.
+--   car_limit                 the ATO's car limit by income year (the year it starts in), as data: the most of a
+--                             car's cost that can be depreciated. A lease uses the limit of the income year it starts
+--                             in, or the latest earlier year's.
+ALTER TABLE garagebooks.lease ADD COLUMN IF NOT EXISTS depreciation_value numeric(12, 2)
+    CHECK (depreciation_value IS NULL OR depreciation_value >= 0);
+CREATE TABLE IF NOT EXISTS garagebooks.car_limit (
+    income_year integer PRIMARY KEY CHECK (income_year BETWEEN 1990 AND 2200),
+    amount      numeric(12, 2) NOT NULL CHECK (amount > 0)
+);
+INSERT INTO garagebooks.car_limit (income_year, amount) VALUES
+    (2020, 59136), (2021, 60733), (2022, 64741), (2023, 68108), (2024, 69674), (2025, 69674)
+ON CONFLICT (income_year) DO NOTHING;
+
+-- The income tax on a taxable income by an income year's brackets (base + rate% x (income - threshold)); 0 for
+-- an income of 0 or less. Unrounded: callers round once, at the end.
+CREATE OR REPLACE FUNCTION garagebooks.income_tax(table_year integer, income numeric) RETURNS numeric
+LANGUAGE sql STABLE
+AS $$ SELECT COALESCE((SELECT b.base_tax + b.rate / 100 * (income - b.threshold) FROM garagebooks.tax_bracket b
+                       WHERE b.income_year = table_year AND b.lower_income <= income AND income > 0
+                       ORDER BY b.lower_income DESC LIMIT 1), 0) $$;
+
+-- Each lease's figures for each income year (1 July to 30 June) it is held in: the one definition the FBT year
+-- report and the dashboard share. Money is rounded to the cent once per figure. A figure that needs something not
+-- entered (a bracket, the car's value) is NULL, never 0.
+--   pays              pay dates in the year, stepping from the lease's start by its frequency (as lease.pay_dates)
+--   payments          (pre-tax + post-tax payment) x pays: the lease payments. For an associate lease the associate
+--                     receives them.
+--   pretax            the pre-tax part of them, plus the admin fee x pays: what comes from pre-tax salary
+--   employee_saving   pretax x your marginal rate for the year
+--   depreciation      associate lease only: diminishing value, 25% a year (200% / 8 years) of the value at the
+--                     start of the year x days held / days in the year; the first year's value is the lower of
+--                     depreciation_value (or car_cost) and the car limit, each later year's is that less the
+--                     depreciation before it
+--   business_income   payments - depreciation (the associate's; a loss is negative)
+--   associate_tax     the associate's income tax on (the income their bracket stands for + business_income), less on
+--                     the income alone, by the year's brackets
+--   associate_medicare  their levy (2%, 1% or 0) x business_income
+--   small_business_offset  min(16% x their tax on the higher income x business_income / that income, $1,000); 0 for a loss
+--   associate_cost    associate_tax + associate_medicare - small_business_offset: their extra tax
+--   household_cost    associate lease: admin fees - employee_saving + associate_cost (the payments stay in the
+--                     household); otherwise payments + admin fees - employee_saving. Negative is a saving.
+-- Not modelled: the low income tax offset, the Medicare levy's low-income phase-in, GST on the payments, HELP.
+CREATE OR REPLACE FUNCTION garagebooks.lease_income_year()
+RETURNS TABLE (lease_id integer, car_id smallint, associate boolean, income_year integer, days_held integer,
+               days_in_year integer, pays integer, payments numeric, pretax numeric, admin_fees numeric,
+               employee_rate numeric, employee_saving numeric, depreciation numeric, business_income numeric,
+               associate_rate numeric, associate_tax numeric, associate_medicare numeric, small_business_offset numeric,
+               associate_cost numeric, household_cost numeric)
+LANGUAGE plpgsql STABLE
+AS $fn$
+#variable_conflict use_column
+DECLARE
+    l record;
+    y integer;
+    first_day date;
+    last_day date;
+    value numeric;
+    emp record;
+    asc_pos record;
+    net numeric;
+    higher numeric;
+BEGIN
+    FOR l IN SELECT * FROM garagebooks.lease ORDER BY id LOOP
+        value := least(COALESCE(l.depreciation_value, l.car_cost),
+                       (SELECT c.amount FROM garagebooks.car_limit c
+                        WHERE c.income_year <= garagebooks.income_year(l.start_date) ORDER BY c.income_year DESC LIMIT 1));
+        FOR y IN garagebooks.income_year(l.start_date) .. garagebooks.income_year(l.end_date) LOOP
+            first_day := greatest(l.start_date, make_date(y, 7, 1));
+            last_day := least(l.end_date, make_date(y + 1, 6, 30));
+            lease_id := l.id; car_id := l.car_id; associate := l.associate_lease; income_year := y;
+            days_held := last_day - first_day + 1;
+            days_in_year := make_date(y + 1, 7, 1) - make_date(y, 7, 1);
+            SELECT count(*) INTO pays FROM generate_series(0, 2000) n
+            CROSS JOIN LATERAL (SELECT CASE l.pay_frequency WHEN 'weekly' THEN l.start_date + 7 * n
+                                                            WHEN 'fortnightly' THEN l.start_date + 14 * n
+                                                            ELSE (l.start_date + make_interval(months => n))::date END AS d) p
+            WHERE p.d BETWEEN first_day AND last_day;
+            payments := round((l.pretax_payment + l.posttax_payment) * pays, 2);
+            admin_fees := round(l.admin_fee * pays, 2);
+            pretax := round((l.pretax_payment + l.admin_fee) * pays, 2);
+            SELECT * INTO emp FROM garagebooks.tax_position('employee', y);
+            employee_rate := emp.marginal_rate;
+            employee_saving := round(pretax * employee_rate / 100, 2);
+            depreciation := NULL; business_income := NULL; associate_rate := NULL; associate_tax := NULL;
+            associate_medicare := NULL; small_business_offset := NULL; associate_cost := NULL;
+            IF l.associate_lease THEN
+                IF value IS NOT NULL THEN
+                    depreciation := round(value * 0.25 * days_held / days_in_year, 2);
+                    value := value - depreciation;
+                    business_income := payments - depreciation;
+                END IF;
+                SELECT * INTO asc_pos FROM garagebooks.tax_position('associate', y);
+                IF asc_pos.income IS NOT NULL AND business_income IS NOT NULL THEN
+                    net := business_income;
+                    higher := asc_pos.income + net;
+                    associate_rate := asc_pos.marginal_rate;
+                    associate_tax := round(garagebooks.income_tax(asc_pos.table_year, higher)
+                                           - garagebooks.income_tax(asc_pos.table_year, asc_pos.income), 2);
+                    associate_medicare := round(asc_pos.levy / 100 * net, 2);
+                    small_business_offset := CASE WHEN net > 0 AND higher > 0
+                        THEN round(least(1000, 0.16 * garagebooks.income_tax(asc_pos.table_year, higher) * net / higher), 2)
+                        ELSE 0 END;
+                    associate_cost := associate_tax + associate_medicare - small_business_offset;
+                END IF;
+                household_cost := admin_fees - employee_saving + associate_cost;
+            ELSE
+                household_cost := payments + admin_fees - employee_saving;
+            END IF;
+            RETURN NEXT;
+        END LOOP;
+    END LOOP;
+END
+$fn$;

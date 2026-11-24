@@ -43,7 +43,7 @@ the lease form can still be read to fill in the boxes.
 
 | Group | What you enter |
 |---|---|
-| Finance | Whether it is an associate lease, the salary packaging provider, the financier, start and end dates, the refinance date if there was one, the term in months, the car's cost (or financed amount), and the residual (balloon) as an amount or a percentage of the cost. |
+| Finance | Whether it is an associate lease, the salary packaging provider, the financier, start and end dates, the refinance date if there was one, the term in months, the car's cost (or financed amount), and the residual (balloon) as an amount or a percentage of the cost. For an associate lease, the car's value for depreciation at the lease start (blank uses its cost). |
 | Payments | How often it is paid (weekly, fortnightly or monthly), the pre-tax and post-tax parts of each payment, and the provider's admin fee for each pay. |
 | Fringe benefits tax | The FBT base value, the valuation method (statutory formula or operating cost), the statutory percentage (20 unless your statement says otherwise), whether the car is exempt as an eligible electric car, the tax treatment (for example the employee contribution method) and the provider's estimated km per year. |
 | Yearly budgets | Only when [budgets are turned on](#lease-budgets). The yearly budget for each running cost: lease payments, fuel or charging, insurance, registration and CTP, maintenance, tyres and other running costs. They take effect from the lease's start date. |
@@ -118,10 +118,18 @@ FBT year, with links to the previous and next years that have a lease or an expe
   [reimbursement](#cost-after-tax): the km driven, the ATO's rate used, the reimbursement and the tax saved on it.
   With no tax bracket chosen in Settings it says so and shows no after-tax figure.
 
+- **Associate lease, for the household** (an associate lease only): for the income years the FBT year runs
+  across, the payments the associate receives, their depreciation, their extra tax (net of the small business
+  income tax offset), the tax you save on the pre-tax payments, and what the lease costs or saves the household.
+  It needs the associate's tax bracket in Settings and the car's value (the lease form's **Value for
+  depreciation**, or its cost). The arithmetic is on
+  [Novated lease calculations](lease-calculations.md#in-garagebooks-an-associate-lease-after-tax).
+
 These are the statement's figures worked through the published formula. They are not tax advice, and no
 personal details are stored.
 
 <!-- screenshot: fbt-report - The FBT year report for a car: days held, taxable value, contributions and running costs by pool -->
+<!-- screenshot: fbt-associate - The Associate lease part of the FBT year report: depreciation, the associate's extra tax and the household figure -->
 
 ## Cost after tax
 

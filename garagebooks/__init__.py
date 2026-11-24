@@ -97,7 +97,8 @@ MESSAGES = {
 TESLAMATE_RECHECK_SECONDS = 60   # how often the app looks again at whether TeslaMate is there and readable
 TOKEN_MARGIN_SECONDS = 120   # a kept access token is dropped this long before it expires
 IMPORT_BATCH = 10
-TAX_PEOPLE = ("employee",)   # whose tax bracket the Settings page asks for, by income year
+TAX_PEOPLE = ("employee", "associate")   # whose tax bracket Settings can take, by income year (the associate's only
+                                         # shows once a car has an associate lease)
 LEASE_FOLDER = "Lease"       # the subfolder of a car's folder that its lease documents are saved in
 # ...and stop reading more files once a round has taken this long (OCR can take 10+ seconds a file,
 # and a request that outlasts gunicorn's timeout (180 s, in gunicorn.conf.py) is killed), leaving the rest for the next round.
@@ -1405,11 +1406,13 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                                              datetime(year + 1, 4, 1, tzinfo=zone), include_manual=False)
             report = lease.fbt_report(leases, costs, charging, year, today)
             after = fbt_after_tax(conn, car, leases, report, year, today, budgets_on)
+            # An associate lease's household figures for the income years this FBT year runs across (L7).
+            associate = [r for r in db.lease_years(conn, car_id) if r["associate"] and r["income_year"] in (year - 1, year)]
             paces = [km_pace_for(conn, car, row, year, today) for row, _budgets, _figures in report["leases"]]
         earlier, later = [y for y in years if y < year], [y for y in years if y > year]
         return render_template("fbt.html", car=car, report=report, paces=paces, today=today, budgets_on=budgets_on, frequencies={k: v[0] for k, v in lease.FREQUENCIES.items()},
                                previous=earlier[-1] if earlier else None, following=later[0] if later else None,
-                               label=lease.fbt_label, after=after)
+                               label=lease.fbt_label, after=after, associate=associate, tax_label=tax.year_label)
     # ---- reminders (roadmap item 4) ------------------------------------------------
 
     def open_items(conn, car_id=None):
@@ -3063,11 +3066,12 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             ev_rates = db.ev_charging_table(conn)
             rows, today = db.tax_brackets(conn), today_here()
             years = tax.settings_years(rows, today)
-            tax_rows = tax.settings_rows(rows, db.tax_choices(conn), {p: db.tax_positions(conn, p, years) for p in TAX_PEOPLE},
-                                         today, TAX_PEOPLE)
+            people = TAX_PEOPLE if db.any_associate_lease(conn) else TAX_PEOPLE[:1]
+            tax_rows = tax.settings_rows(rows, db.tax_choices(conn), {p: db.tax_positions(conn, p, years) for p in people},
+                                         today, people)
         return render_template("settings.html", values=values, errors=errors, aliases=validation.NAME_ALIASES,
                                job_list=job_list, jobs_mode=jobs_mode, ev_rates=ev_rates, ev_source=ato.URLS["ev_charging"],
-                               tax_rows=tax_rows, tax_people={p: tax.PEOPLE[p] for p in TAX_PEOPLE}, tax_values=tax_values or {},
+                               tax_rows=tax_rows, tax_people={p: tax.PEOPLE[p] for p in people}, tax_values=tax_values or {},
                                medicare=tax.MEDICARE, tax_field=tax.field, fbt_label=lease.fbt_label,
                                date_default=validation.DEFAULT_DATE_PATTERN, name_default=validation.DEFAULT_NAME_FORMAT,
                                multi_choices=validation.MULTI_AMOUNT_CHOICES, example=name_example(values),

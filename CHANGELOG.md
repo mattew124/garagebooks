@@ -7,6 +7,15 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+- **An associate lease's after-tax saving is the household's.** For an associate lease GarageBooks now works out,
+  for each income year, the associate's side: the lease payments they receive as business income, less
+  depreciation (diminishing value, 25% a year on the car's value up to the ATO's car limit), the extra tax and
+  Medicare levy on it, and the small business income tax offset. The household figure is that less the tax you
+  save on the pre-tax payments. Settings asks for the associate's tax bracket and Medicare status by income year
+  (once a car has an associate lease), the lease form for the car's value for depreciation (blank uses its cost),
+  and the FBT year report shows the figures briefly. Upgrade: pull the new image (the schema gains
+  `lease.depreciation_value`, `car_limit` and `lease_income_year()`; on the restricted database role re-run
+  `scripts/provision-db.sh` first).
 - **The tax rate is chosen per income year.** Settings has a compact table, one row per income year (1 July to
   30 June): the tax bracket your taxable income falls in, from that year's ATO brackets, and your Medicare levy
   status (not exempt, half exempt, exempt). An expense's after-tax cost uses its own year's rate (bracket plus
