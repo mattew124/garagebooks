@@ -1117,18 +1117,20 @@ def test_folder_browser(page):
     expect(page.locator("h1")).to_contain_text("Folder for")
     expect(page.locator("form.new-folder input[name=name]")).to_be_visible()
     expect(page.locator("button:has-text('Use ')")).to_be_visible()
-    # Going up and back again swaps the listing in place: a mark left on the window survives.
+    # Opening a folder and going back swaps the listing in place: a mark left on the window survives. Only the
+    # test folder is opened from the top of the drive; elsewhere, going up.
     page.evaluate("window.samePage = true")
     here, start = page.locator("p.here code").inner_text(), page.url
-    up = page.locator("ul.folder-list a", has_text="Up")
-    if up.count():
-        up.click()
-        expect(page.locator("p.here code")).not_to_have_text(here)
-        assert page.evaluate("window.samePage"), "opening a folder loaded a new page"
-        assert page.url != start
-        page.go_back()
-        expect(page.locator("p.here code")).to_have_text(here)
-        assert page.evaluate("window.samePage"), "going back loaded a new page"
+    links = page.locator("ul.folder-list a")
+    link = links.filter(has_text="Up" if here != "/" else "Expenses test").first
+    expect(link).to_be_visible()
+    link.click()
+    expect(page.locator("p.here code")).not_to_have_text(here)
+    assert page.evaluate("window.samePage"), "opening a folder loaded a new page"
+    assert page.url != start
+    page.go_back()
+    expect(page.locator("p.here code")).to_have_text(here)
+    assert page.evaluate("window.samePage"), "going back loaded a new page"
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
     shot(page, "folder-browser-phone")
 
