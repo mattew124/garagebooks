@@ -435,3 +435,16 @@ def test_every_up_fills_in_lost_addresses_and_keeps_saved_ones(empty_db):
         conn.execute("UPDATE garagebooks.setting SET grafana_url = 'https://mine/grafana/'")
         conn.execute(seed_settings_sql("https://h/app/", "https://h/grafana/"))
         assert conn.execute("SELECT grafana_url FROM garagebooks.setting").fetchone() == ("https://mine/grafana/",)
+
+
+def test_test_browser_can_run_one_step_or_only_the_last_failures():
+    """A failed browser step is rerun on its own (--failed, or --only TEXT), not the whole 15-minute suite."""
+    body = function_body("test_browser")
+    assert '-e "ONLY=' in body and '-e "RERUN_FAILED=' in body
+    dispatch = (ROOT / "scripts" / "dev.sh").read_text()
+    assert "--failed" in dispatch and "--only" in dispatch
+
+
+def test_the_browser_runner_saves_its_failures_and_can_rerun_just_those():
+    run = (ROOT / "tests" / "browser" / "run.py").read_text()
+    assert "failed.txt" in run and "RERUN_FAILED" in run
