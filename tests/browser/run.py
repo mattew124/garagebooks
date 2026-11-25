@@ -518,6 +518,25 @@ ACAR_CSV = (
     '"Example","1/6/2026","23:59","20,500","km","Sold","","$2,500.00","","",""\n')
 
 
+def test_wheel_ticks(page):
+    """Which wheels: offered only under a ticked per-wheel item, or for Tyres. Nothing is saved."""
+    page.goto(UI + "new")
+    tyres = page.locator("form [data-wheels-field]")
+    page.select_option("select[name=category_id]", label="Tyres")
+    expect(tyres).to_be_visible()
+    page.select_option("select[name=category_id]", label="Service")
+    expect(tyres).to_be_hidden()
+    item = page.locator("#service-fields .service-item", has_text="Brakes").first
+    ticks = item.locator(".wheels")
+    expect(ticks).to_be_hidden()
+    item.get_by_label("Brakes", exact=True).check()
+    expect(ticks).to_be_visible()
+    ticks.get_by_title("Rear left").click()
+    expect(ticks.get_by_label("Rear left")).to_be_checked()
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+    shot(page, "wheel-ticks")
+
+
 def test_acar_import_preview(page):
     """Upload an aCar CSV: the preview shows the costs and the sale, and nothing is saved."""
     page.goto(UI + "import/acar")
@@ -2173,6 +2192,7 @@ def main():
         step("amount field works out sums", test_amount_calculator, page)
         step("payment calculator works out the true cost", test_payment_calculator, page)
         step("aCar import previews without saving", test_acar_import_preview, page)
+        step("wheel ticks show only where they apply", test_wheel_ticks, page)
         step("list: tiles or rows, sorting, and back to the same view", test_list_toggle_sort_and_return, page)
         step("rows on a phone show whole dates, categories and amounts", test_rows_on_a_phone_show_whole_values, page)
         step("no sideways scroll on a phone", test_phone_layout_has_no_sideways_scroll, page)

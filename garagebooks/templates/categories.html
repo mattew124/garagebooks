@@ -63,6 +63,8 @@
         <select name="item_applies_to_{{ i.id }}" aria-label="Which cars {{ i.name }} is for">
           {% for key, label in applies_to.items() %}<option value="{{ key }}" {{ 'selected' if i.applies_to == key }}>{{ label }}</option>{% endfor %}
         </select></label>
+      <label class="inline per-wheel" title="Ask which wheels when it is ticked"><input type="checkbox" name="item_per_wheel_{{ i.id }}" value="1" {{ 'checked' if i.per_wheel }}> <small>Per wheel</small></label>
+      <input type="hidden" name="item_per_wheel_asked_{{ i.id }}" value="1">
       <button type="submit" class="icon-button" form="remove-item-{{ i.id }}" aria-label="Delete {{ i.name }}" title="Delete {{ i.name }}">&times;</button>
     </div>
     {% if row_errors.get('s' ~ i.id) %}<span class="error">{{ row_errors['s' ~ i.id] }}</span>{% endif %}

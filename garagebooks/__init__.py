@@ -391,6 +391,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         return value.astimezone(ZoneInfo(tz)).strftime("%d %b %Y %H:%M")
 
     app.jinja_env.globals["applies"] = db.applies
+    app.jinja_env.globals["wheel_names"] = validation.WHEELS
+    app.jinja_env.globals["wheels_text"] = db.wheels_text
     app.jinja_env.filters["every"] = jobtext.every_in_words
     app.jinja_env.filters["job_state"] = jobtext.state
 
@@ -576,6 +578,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             items = db.service_items(conn)
         car_ids, cat_ids = set(cars), set(cats)
         values, errors = validation.parse_expense_form(form, tz, car_ids, cat_ids)
+        values["wheels"] = category_wheels(cats, values.get("category_id"), form.getlist("wheels"))
         if not errors:
             car_now = values["car_id"]
             errors.update(powertrain_errors(cars[car_now].get("kind"), values["category_id"], form.getlist("service_item"),
@@ -742,16 +745,32 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             return g.service_items
         return {"service_items": service_items}
 
-    def save_services(conn, expense_id, category_id, raw_ids):
+    def wheels_from(getlist, prefix, item_values):
+        """{service item value: wheels} from a form's ticks, named `<prefix>_wheels_<value>`."""
+        got = {str(v): validation.parse_wheels(getlist(f"{prefix}_wheels_{v}")) for v in item_values}
+        return {v: w for v, w in got.items() if w}
+
+    def category_wheels(categories_by_id, category_id, raw):
+        """The wheels ticked for the expense itself, only where its category asks which."""
+        return validation.parse_wheels(raw) if (categories_by_id.get(category_id) or {}).get("per_wheel") else None
+
+    def save_services(conn, expense_id, category_id, raw_ids, wheels=None):
         """Keep the service items ticked for an expense: only for the Service category, and only real items."""
         ids = []
         if category_id == db.service_category_id(conn):
-            ids = validation.parse_service_ids(raw_ids, {i["id"] for i in db.service_items(conn)})
-        db.set_expense_services(conn, expense_id, ids)
+            items = db.service_items(conn)
+            ids = validation.parse_service_ids(raw_ids, {i["id"] for i in items})
+        else:
+            items = []
+        per_wheel = {i["id"] for i in items if i["per_wheel"]}
+        db.set_expense_services(conn, expense_id, ids,
+                                {i: (wheels or {}).get(str(i)) for i in ids if i in per_wheel})
 
     def form_values(form):
         """Echo the raw submission back into the form after a validation error."""
-        return {"service_item": form.getlist("service_item"), **{k: form.get(k, "") for k in (
+        items = form.getlist("service_item")
+        return {"service_item": items, "wheels": form.getlist("wheels"),
+                "item_wheels": wheels_from(form.getlist, "service_item", items), **{k: form.get(k, "") for k in (
             "car_id", "category_id", "date", "time", "amount", "odometer_km",
             "vendor", "notes", "invoice_url", "invoice_path", "packaged", "period_start", "period_end", "gst_amount",
         "card_payment_ref", "bpay_biller_code", "bpay_ref")}}
@@ -934,7 +953,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             return render_template("form.html", **form_context(form_values(request.form), errors)), 400
         with connect() as conn:
             expense_id = db.insert_expense(conn, values)
-            save_services(conn, expense_id, values["category_id"], request.form.getlist("service_item"))
+            save_services(conn, expense_id, values["category_id"], request.form.getlist("service_item"),
+                          wheels_from(request.form.getlist, "service_item", request.form.getlist("service_item")))
         refresh_dashboard()
         log.info("expense %s saved (car %s, category %s)", expense_id, values["car_id"], values["category_id"])
         with connect() as conn:
@@ -972,6 +992,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             offer = bool(db.stored_open_reminders(conn, row["car_id"]))
             claim = claim_summary(conn, row)
             values["service_item"] = [str(i) for i in db.expense_service_ids(conn, expense_id)]
+            values["item_wheels"] = {str(i): w for i, w in db.expense_service_wheels(conn, expense_id).items()}
+            values["wheels"] = row["wheels"] or []
         return render_template("form.html", **form_context(values, expense_id=expense_id), reminder_offer=offer,
                                claim=claim)
 
@@ -987,7 +1009,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         with connect() as conn:
             if not db.update_expense(conn, expense_id, values):
                 abort(404)
-            save_services(conn, expense_id, values["category_id"], request.form.getlist("service_item"))
+            save_services(conn, expense_id, values["category_id"], request.form.getlist("service_item"),
+                          wheels_from(request.form.getlist, "service_item", request.form.getlist("service_item")))
         refresh_dashboard()
         log.info("expense %s updated", expense_id)
         return redirect(url_for("index", **list_view(), msg=saved_msg("updated")), 303)
@@ -1015,7 +1038,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         with connect() as conn:
             cats = [{**c, **overlay.get(f"c{c['id']}", {})} for c in db.categories(conn)]
             service = [{**i, "name": overlay.get(f"s{i['id']}", i["name"]),
-                        "applies_to": overlay.get(f"a{i['id']}", i["applies_to"])} for i in db.service_items(conn)]
+                        "applies_to": overlay.get(f"a{i['id']}", i["applies_to"]),
+                        "per_wheel": overlay.get(f"w{i['id']}", i["per_wheel"])} for i in db.service_items(conn)]
             budgets_on = db.lease_budgets_on(conn)
         return render_template("categories.html", categories=cats, items=service, error=error, item_error=item_error,
                                row_errors=row_errors or {}, pools=lease.POOLS, budgets_on=budgets_on, applies_to=db.APPLIES_TO,
@@ -1057,6 +1081,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         service = {i["id"]: i["name"] for i in service_rows}
         item_applies = {i["id"]: i["applies_to"] for i in service_rows}
         errors, overlay, category_changes, renames = {}, {}, {}, {}
+        per_wheel = {i["id"]: i["per_wheel"] for i in service_rows}
+        wheel_changes = {}
         for cid in (i for i in posted_ids("category_id") if i in cats):
             typed = {"gst_free": form.get(f"gst_partial_{cid}") == "1", "has_period": form.get(f"has_period_{cid}") == "1"}
             if f"upload_folder_{cid}" in form:
@@ -1085,6 +1111,11 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         names, applies_changes = {}, {}
         for iid in item_ids:
             overlay[f"s{iid}"] = form.get(f"item_name_{iid}", "")
+            if f"item_per_wheel_asked_{iid}" in form:
+                ticked = form.get(f"item_per_wheel_{iid}") == "1"
+                overlay[f"w{iid}"] = ticked
+                if ticked != per_wheel[iid]:
+                    wheel_changes[iid] = ticked
             if f"item_applies_to_{iid}" in form:
                 value = form[f"item_applies_to_{iid}"]
                 overlay[f"a{iid}"] = value
@@ -1111,8 +1142,9 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 db.update_category(conn, cid, **changed)
             db.rename_service_items(conn, renames)
             db.set_service_items_applies(conn, applies_changes)
+            db.set_service_items_per_wheel(conn, wheel_changes)
         log.info("categories saved: %d categories, %d service items changed", len(category_changes),
-                 len(set(renames) | set(applies_changes)))
+                 len(set(renames) | set(applies_changes) | set(wheel_changes)))
         return redirect(url_for("categories", msg="categories_saved"), 303)
 
     # ---- cars ----------------------------------------------------------------
@@ -2132,16 +2164,16 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         with connect() as conn:
             item = db.add_service_item(conn, name)
             if item is not None:
-                return jsonify(id=item["id"], name=item["name"]), 201
+                return jsonify(id=item["id"], name=item["name"], per_wheel=item["per_wheel"]), 201
             item = db.service_item_named(conn, name)
-        return jsonify(id=item["id"], name=item["name"], existing=True)
+        return jsonify(id=item["id"], name=item["name"], per_wheel=item["per_wheel"], existing=True)
 
     # ---- change history ---------------------------------------------------------
 
     # Field -> label, in the order they are shown. id and the created/updated stamps are never shown.
     history_fields = {
         "expense": (("car_id", "Car"), ("category_id", "Category"), ("occurred_at", "Date and time"),
-                    ("amount", "Amount"), ("odometer_km", "Odometer"), ("vendor", "Vendor"), ("notes", "Notes"),
+                    ("amount", "Amount"), ("odometer_km", "Odometer"), ("wheels", "Wheels"), ("vendor", "Vendor"), ("notes", "Notes"),
                     ("invoice_url", "Invoice link"), ("invoice_path", "Invoice file"), ("packaged", "Paid from"),
                     ("period_start", "Period start"), ("period_end", "Period end"), ("gst_amount", "GST")),
         "category": (("name", "Name"), ("kind", "Kind"), ("sort_order", "Sort order"),
@@ -2559,7 +2591,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
     def import_row(n, **fields):
         return {"n": n, "include": False, "skip": False, "date": "", "category_id": "", "vendor": "",
                 "amount": "", "odometer_km": "", "url": "", "name": "", "folder": "",
-                "note": "", "id": "", "attach": "", "car_fill": False, "car_fields": [], "services": [], "notes": "", "gst_amount": "", "card_payment_ref": "",
+                "note": "", "id": "", "attach": "", "car_fill": False, "car_fields": [], "services": [], "wheels": [], "item_wheels": {}, "notes": "", "gst_amount": "", "card_payment_ref": "",
                 "bpay_biller_code": "", "bpay_ref": "", "car_vin": "", "car_build_year": "", "car_model_year": "",
                 "car_body_type": "", "car_make": "", "car_model": "", "period_start": "", "period_end": "", "guess": {}, "new_name": "", "rename": False, "odo_note": "", "duplicates": [],
                 "candidates": [], "action": "new", **fields}
@@ -2966,6 +2998,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                                  vendor=f("vendor"), amount=f("amount"), odometer_km=f("odometer_km"),
                                  notes=f("notes"), period_start=f("period_start"), period_end=f("period_end"),
                                  services=request.form.getlist(f"service_item_{n}"), gst_amount=f("gst_amount"),
+                                 wheels=request.form.getlist(f"wheels_{n}"),
+                                 item_wheels=wheels_from(request.form.getlist, f"service_item_{n}", request.form.getlist(f"service_item_{n}")),
                                  card_payment_ref=f("card_payment_ref"), bpay_biller_code=f("bpay_biller_code"),
                                  bpay_ref=f("bpay_ref"), car_fill=bool(f("car_fill")), attach=f("attach"),
                                  car_fields=[k for k in CAR_KEYS if f"car_{k}_{n}" in request.form],
@@ -2998,6 +3032,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                     "gst_amount": row["gst_amount"], "card_payment_ref": row["card_payment_ref"],
                     "bpay_biller_code": row["bpay_biller_code"], "bpay_ref": row["bpay_ref"],
                     ref_field: row["url"]}, tz, car_ids, cat_ids)
+                values["wheels"] = category_wheels(cats_by_id, values.get("category_id"), row["wheels"])
                 if not row["url"]:
                     row_errors[ref_field] = "Missing link to the PDF."
                 if not row_errors:
@@ -3098,7 +3133,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                     expense_id = db.insert_expense(conn, values)
                     if kind == "mail":
                         db.record_mail_import(conn, car_id, row["url"], expense_id)
-                    save_services(conn, expense_id, values["category_id"], row["services"])
+                    save_services(conn, expense_id, values["category_id"], row["services"], row["item_wheels"])
                     if row["car_fill"] and row.get("car_details"):      # blanks only: never replaces what the car has
                         db.fill_car_details(conn, car_id, row["car_details"])
                     for extra in attachments.get(row["n"], []):         # the other PDFs of this expense
@@ -3194,10 +3229,11 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         offered = [c for c in categories if db.applies(c["applies_to"], car_kind)]
         if with_catchall:
             offered.append({"id": ACAR_CATCHALL, "name": f"{ACAR_CATCHALL_NAME} (new category)", "kind": "running",
-                            "applies_to": "all", "has_period": False, "gst_free": False})
+                            "applies_to": "all", "has_period": False, "gst_free": False, "per_wheel": False})
         with connect() as conn:
             items = list(db.service_items(conn))
-        items += [{"id": f"new:{name}", "name": f"{name} (new)", "applies_to": "all"} for name in new_items]
+        items += [{"id": f"new:{name}", "name": f"{name} (new)", "applies_to": "all",
+                   "per_wheel": db.looks_per_wheel(name)} for name in new_items]
         return {"categories": offered, "items": items, "car_kind": car_kind, "new_items": new_items,
                 "with_catchall": with_catchall}
 
@@ -3235,7 +3271,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 row = {"n": n, "kind": "sale" if rec.kind == "sale" else "expense", "include": True, "action": "new",
                        "date": rec.date.isoformat(), "time": rec.time.strftime("%H:%M"), "category_id": "", "vendor": rec.vendor,
                        "amount": f"{rec.amount:.2f}", "odometer_km": "" if rec.odometer_km is None else f"{rec.odometer_km:.1f}",
-                       "notes": rec.notes, "label": rec.label, "duplicates": [], "candidates": [], "services": [], "note": ""}
+                       "notes": rec.notes, "label": rec.label, "duplicates": [], "candidates": [], "services": [], "note": "",
+                       "wheels": [], "item_wheels": {}}
                 if rec.kind == "sale":
                     row["include"] = car["sold_at"] is None
                     row["note"] = "" if row["include"] else "This car already has a sale recorded; importing this replaces it."
@@ -3243,6 +3280,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                     continue
                 match = acar.match_category(rec, list(names))
                 row["category_id"] = str(names[match]) if match else catch_value
+                if match and next(c for c in offered if c["name"] == match)["per_wheel"]:
+                    row["wheels"] = acar.wheels_in(rec.subtypes) or []
                 if match == db.SERVICE_CATEGORY:
                     for subtype in rec.service_subtypes:
                         known = acar.match_service_item(subtype, list(items))
@@ -3255,6 +3294,11 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                             continue        # the notes still say it was done
                         if value not in row["services"]:
                             row["services"].append(value)
+                        sides = acar.wheels_in([subtype])
+                        asks = items[known]["per_wheel"] if known else db.looks_per_wheel(value[4:])
+                        if sides and asks:      # front and rear named separately add up
+                            both = set(row["item_wheels"].get(value, [])) | set(sides)
+                            row["item_wheels"][value] = validation.parse_wheels(both)
                 found, row["duplicates"], row["candidates"] = acar_matches(conn, car["id"], when, rec.amount)
                 row["include"] = not found
                 if rec.amount and rec.odometer_km is not None:
@@ -3358,7 +3402,9 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             row = {"n": n, "kind": f("kind") if f("kind") == "sale" else "expense", "include": bool(f("include")), "date": f("date"),
                    "time": f("time"), "category_id": f("category_id"), "vendor": f("vendor"), "amount": f("amount"),
                    "odometer_km": f("odometer_km"), "notes": f("notes"), "label": f("label"), "action": f("action") or "new",
-                   "services": request.form.getlist(f"service_item_{n}"), "duplicates": [], "candidates": [], "note": ""}
+                   "services": request.form.getlist(f"service_item_{n}"), "duplicates": [], "candidates": [], "note": "",
+                   "wheels": request.form.getlist(f"wheels_{n}")}
+            row["item_wheels"] = wheels_from(request.form.getlist, f"service_item_{n}", row["services"])
             rows.append(row)
             if not row["include"]:
                 continue
@@ -3381,7 +3427,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 except ValueError as exc:
                     errors[n] = str(exc) if "odometer" in str(exc) or "expense" in str(exc) else "Choose which expense to merge into."
                 else:
-                    merges.append((target, km, row["vendor"].strip()[:validation.MAX_TEXT_LEN], row["services"]))
+                    merges.append((target, km, row["vendor"].strip()[:validation.MAX_TEXT_LEN], row))
             else:
                 posted = {k: row[k] for k in ("category_id", "date", "time", "amount", "odometer_km", "vendor", "notes")}
                 if posted["category_id"] == ACAR_CATCHALL:
@@ -3399,7 +3445,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 if row_errors:
                     errors[n] = " ".join(row_errors.values())
                 else:
-                    new.append((values, row["services"]))
+                    values["wheels"] = category_wheels(cats_by_id, values["category_id"], row["wheels"])
+                    new.append((values, row))
         def again(notice=None):
             """The preview as it was sent, with its choices, to put right."""
             with connect() as conn:
@@ -3425,24 +3472,26 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         saved = merged = skipped = 0
         created_items, created_category = [], None
         with connect() as conn:
-            def item_ids(chosen):
-                """The ids of a row's ticked service items, making the new ones now that they are needed."""
-                ids = []
-                for value in chosen:
-                    if not value.startswith("new:"):
-                        ids.append(value)
-                        continue
-                    name = validation.parse_service_item_name(value[4:])
-                    made = db.add_service_item(conn, name)
-                    if made is not None:
-                        created_items.append(made["name"])
-                    ids.append(str((made or db.service_item_named(conn, name))["id"]))
-                return ids
+            def items_of(row):
+                """(ids, {id: wheels}) of a row's ticked service items, making the new ones now they are needed."""
+                ids, wheels = [], {}
+                for value in row["services"]:
+                    ident = value
+                    if value.startswith("new:"):
+                        name = validation.parse_service_item_name(value[4:])
+                        made = db.add_service_item(conn, name)
+                        if made is not None:
+                            created_items.append(made["name"])
+                        ident = str((made or db.service_item_named(conn, name))["id"])
+                    ids.append(ident)
+                    if value in row["item_wheels"]:
+                        wheels[ident] = row["item_wheels"][value]
+                return ids, wheels
 
             if making:
                 car_id = db.add_car(conn, car_values)
             catch_id = None
-            for values, chosen in new:
+            for values, row in new:
                 values["car_id"] = car_id
                 if values["category_id"] == ACAR_CATCHALL_ID:
                     if catch_id is None:
@@ -3455,14 +3504,17 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                     continue
                 expense_id = db.insert_expense(conn, values)
                 if values["category_id"] == db.service_category_id(conn):
-                    save_services(conn, expense_id, values["category_id"], item_ids(chosen))
+                    save_services(conn, expense_id, values["category_id"], *items_of(row))
                 saved += 1
-            for target, km, vendor, chosen in merges:
+            for target, km, vendor, row in merges:
                 changed = db.merge_into_expense(conn, car_id, target, km, vendor)
+                wheels = validation.parse_wheels(row["wheels"])
+                if wheels and db.fill_wheels(conn, car_id, target, wheels):
+                    changed = 1
                 existing = db.get_expense(conn, target)
-                if (chosen and existing is not None and existing["category"] == db.SERVICE_CATEGORY
+                if (row["services"] and existing is not None and existing["category"] == db.SERVICE_CATEGORY
                         and not db.expense_service_ids(conn, target)):      # blank only, like the rest of a merge
-                    save_services(conn, target, existing["category_id"], item_ids(chosen))
+                    save_services(conn, target, existing["category_id"], *items_of(row))
                     changed = 1
                 merged += changed
             for sale in sales:
@@ -3484,7 +3536,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         elsewhere without losing what has been typed on it."""
         with connect() as conn:
             return jsonify(categories=[category_json(c) for c in db.categories(conn)],
-                           service_items=[{"id": i["id"], "name": i["name"], "applies": i["applies_to"]}
+                           service_items=[{"id": i["id"], "name": i["name"], "applies": i["applies_to"], "per_wheel": i["per_wheel"]}
                                           for i in db.service_items(conn)])
 
     @app.post("/api/categories")
@@ -3509,7 +3561,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
     def category_json(c):
         """A category with what an import row's choice needs to know about it (see _category_choice.html)."""
         return {"id": c["id"], "name": c["name"], "applies": c["applies_to"], "period": bool(c["has_period"]),
-                "service": c["name"] == db.SERVICE_CATEGORY, "gstfree": bool(c["gst_free"]), "purchase": c["kind"] == "purchase"}
+                "service": c["name"] == db.SERVICE_CATEGORY, "wheels": bool(c["per_wheel"]), "gstfree": bool(c["gst_free"]), "purchase": c["kind"] == "purchase"}
 
     def name_example(values):
         """What an uploaded file would be called under the saved (or just-typed, if valid) settings."""

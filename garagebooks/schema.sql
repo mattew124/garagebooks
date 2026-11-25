@@ -1518,3 +1518,26 @@ BEGIN
             WHERE lower(name) IN ('fuel filter', 'oil filter', 'engine oil', 'timing belt', 'air filter', 'engine air filter', 'spark plugs');
     END IF;
 END $$;
+
+-- Which wheels a cost was for (FL, FR, RL, RR): on a per-wheel service item an expense had (brakes), and on the
+-- expense itself for a per-wheel category (Tyres). per_wheel says which items and categories ask. It is set once,
+-- when the column is added, and not as anyone's edit; the owner's later choices are never overwritten.
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_schema = 'garagebooks' AND table_name = 'category' AND column_name = 'per_wheel') THEN
+        ALTER TABLE garagebooks.category ADD COLUMN per_wheel boolean NOT NULL DEFAULT false;
+        ALTER TABLE garagebooks.category DISABLE TRIGGER log_change;
+        UPDATE garagebooks.category SET per_wheel = true WHERE name = 'Tyres';
+        ALTER TABLE garagebooks.category ENABLE TRIGGER log_change;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_schema = 'garagebooks' AND table_name = 'service_item' AND column_name = 'per_wheel') THEN
+        ALTER TABLE garagebooks.service_item ADD COLUMN per_wheel boolean NOT NULL DEFAULT false;
+        UPDATE garagebooks.service_item SET per_wheel = true WHERE lower(name) IN ('brakes', 'brake pads', 'brake rotors');
+    END IF;
+END $$;
+ALTER TABLE garagebooks.expense ADD COLUMN IF NOT EXISTS wheels text[]
+    CHECK (wheels <@ ARRAY['FL', 'FR', 'RL', 'RR']);
+ALTER TABLE garagebooks.expense_service_item ADD COLUMN IF NOT EXISTS wheels text[]
+    CHECK (wheels <@ ARRAY['FL', 'FR', 'RL', 'RR']);

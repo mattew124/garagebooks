@@ -1,10 +1,10 @@
 {# A row's service item ticks on an import page, shown when its category is Service. app.js shows and hides it
    with the category, and adds to it what the "Add an item" dialog makes. #}
 {% import "_category_choice.html" as choice with context %}
-{% macro field(n, items, chosen, car_kind, hidden) %}
+{% macro field(n, items, chosen, car_kind, hidden, item_wheels=none) %}
 <fieldset class="service-items" data-service-fields data-n="{{ n }}" {{ 'hidden' if hidden }}>
   <legend><small>Service items</small></legend>
-  <span data-service-list>{% for i in items %}{{ choice.service_item_box(i, 'service_item_' ~ n, i.id|string in chosen, car_kind, 'small') }}{% endfor %}</span>
+  <span data-service-list>{% for i in items %}{{ choice.service_item_box(i, 'service_item_' ~ n, i.id|string in chosen, car_kind, 'small', item_wheels) }}{% endfor %}</span>
   <button type="button" class="linklike" data-add-service>Add an item…</button>
 </fieldset>
 {%- endmacro %}

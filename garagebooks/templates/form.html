@@ -105,9 +105,11 @@
 
   {# What a service covered: shown by app.js while the category is Service. Items are edited on the Categories page. #}
   {% set service_on = (categories|selectattr('id', 'equalto', values.get('category_id', 0)|int(0))|selectattr('name', 'equalto', 'Service')|list) %}
+  {% set asks_wheels = categories|selectattr('id', 'equalto', values.get('category_id', 0)|int(0))|selectattr('per_wheel')|list %}
+  {{ choice.category_wheels('wheels', values.get('wheels', []), not asks_wheels) }}
   <fieldset class="service-items" id="service-fields" {{ '' if service_on else 'hidden' }}>
     <legend>Service items</legend>
-    {% for i in service_items() %}{{ choice.service_item_box(i, 'service_item', i.id|string in values.get('service_item', []), car_kind) }}
+    {% for i in service_items() %}{{ choice.service_item_box(i, 'service_item', i.id|string in values.get('service_item', []), car_kind, item_wheels=values.get('item_wheels')) }}
     {% endfor %}{{ err('service_item') }}
     <small><a href="{{ url_for('categories') }}">Add or rename items</a></small>
   </fieldset>

@@ -487,3 +487,19 @@ small.after-tax { display: block; font-weight: 400; color: var(--muted); font-si
 .service-items [hidden], .import-table [hidden] { display: none !important; }
 .import-table .row-extras .service-items label.inline { display: inline-flex; align-items: center; gap: .25rem; margin: 0 .6rem .15rem 0; }
 .import-table .service-items input[type=checkbox] { width: auto; }
+
+/* Which wheels: four small toggles, front pair then rear pair. A service item's appear only while it is ticked. */
+.service-item { display: inline-flex; flex-wrap: wrap; align-items: center; gap: .25rem; }
+.service-item > .wheels { display: none; margin-right: .6rem; }
+.service-item > label:has(> input:checked) + .wheels { display: inline-flex; }
+.wheels { gap: .2rem; }
+.wheel-field { border: 0; padding: 0; margin: .25rem 0; }
+.wheel-field .wheels { display: inline-flex; }
+.wheels label.wheel, .import-table .row-extras .wheels label.wheel { display: inline-flex; margin: 0; cursor: pointer; }
+.wheels .wheel input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.wheels .wheel span { border: 1px solid var(--line); border-radius: var(--r-small); padding: .15rem .4rem; font-size: .8rem; min-width: 2.1rem; text-align: center; background: var(--surface); }
+.wheels .wheel input:checked + span { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.wheels .wheel input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* An item's Per wheel tick takes only its own width, and its own line on a phone, so the delete button stays beside the name. */
+.item-row > label.per-wheel { flex: 0 0 auto; white-space: nowrap; }
+@media (max-width: 40rem) { .item-row > label.per-wheel { order: 4; } }

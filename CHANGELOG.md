@@ -7,6 +7,10 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+- **Which wheels.** A tyre expense, and a per-wheel service item such as brakes, can record front left, front right,
+  rear left and rear right. The ticks appear only where they apply, the expense list shows them, and **Per wheel** on
+  the Categories page sets which items ask. Upgrade: pull the new image (the schema gains `wheels` and `per_wheel`
+  columns; on the restricted database role re-run `scripts/provision-db.sh` first).
 - **Importing an invoice attaches it to an expense you already have.** When an invoice in the import preview matches an
   expense with no invoice yet (same car and amount within 14 days, typically one made from an aCar import), the row now
   offers **Attach this invoice to** it, selected by default, rather than creating a second expense. The invoice goes on

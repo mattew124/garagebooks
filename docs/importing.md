@@ -119,6 +119,15 @@ expenses that had it; renaming keeps it on them). Missing one while importing? *
 dialog; the new item is added to every row's list and ticked on the row you were in, and nothing else on the
 page changes.
 
+**Which wheels.** For an item done wheel by wheel (brakes), four small ticks (**FL FR RL RR**: front left and right,
+rear left and right) appear under it once it is ticked. An expense in **Tyres** has the same four under its category.
+They are optional, and the expense list reads them back as "Brakes (rear)" or "front left, rear right". Which items ask
+is the **Per wheel** tick on the Categories page; Brakes starts with it, and so does a new item whose name says brakes,
+a wheel bearing, stud or repair, or a shock or strut (not brake fluid, alignment or rotation). From aCar, *Brakes, Rear*
+or *Front* ticks that pair, and *Tire A* to *D* together tick all four; aCar doesn't say which wheel a single letter is.
+
+<!-- screenshot: wheel-ticks - The Add form with Brakes ticked and the four wheel ticks under it -->
+
 <!-- screenshot: categories-page - The Categories page: every category and service item in one form with one Save button, and the small x that deletes a service item -->
 
 <!-- screenshot: import-service-items - An import row in the Service category, with its service items and the Add an item dialog -->

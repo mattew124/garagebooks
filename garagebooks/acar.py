@@ -196,6 +196,21 @@ def split_subtypes(cell):
     return got
 
 
+TYRE_POSITIONS = {"tire a", "tire b", "tire c", "tire d"}
+
+
+def wheels_in(subtypes):
+    """The wheels aCar's sub-types say were done, or None: 'Brakes (rear)' is the rear pair, and all of Tire A
+    to D is all four (which wheel each letter is, aCar doesn't say, so fewer of them say nothing)."""
+    lower = {s.strip().lower() for s in subtypes}
+    if TYRE_POSITIONS <= lower:
+        return ["FL", "FR", "RL", "RR"]
+    got = set()
+    for name in lower:
+        got |= {"FL", "FR"} if name.endswith("(front)") else {"RL", "RR"} if name.endswith("(rear)") else set()
+    return [w for w in ("FL", "FR", "RL", "RR") if w in got] or None
+
+
 def match_service_item(subtype, names):
     """The service item in `names` that aCar's sub-type is, or None."""
     by_key = {_key(n): n for n in names}

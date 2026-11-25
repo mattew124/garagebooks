@@ -80,6 +80,8 @@ document.addEventListener("DOMContentLoaded", () => {
       if (gst) gst.hidden = !(chosen && chosen.dataset.gstfree === "1") && !gst.querySelector("input").value;
       if (fields) fields.hidden = !(chosen && chosen.dataset.period === "1");
       if (services) services.hidden = !(chosen && chosen.dataset.service === "1");
+      const wheels = row.querySelector("[data-wheels-field]");
+      if (wheels) wheels.hidden = !(chosen && chosen.dataset.wheels === "1");
     });
   }
 
@@ -115,7 +117,27 @@ document.addEventListener("DOMContentLoaded", () => {
         const text = document.createElement("small");
         text.textContent = " " + item.name;
         label.append(box, text);
-        list.append(label);
+        const wrap = document.createElement("span");
+        wrap.className = "service-item";
+        wrap.append(label);
+        if (item.per_wheel) {      // the same four ticks the server draws
+          const wheels = document.createElement("span");
+          wheels.className = "wheels";
+          [["FL", "Front left"], ["FR", "Front right"], ["RL", "Rear left"], ["RR", "Rear right"]].forEach(([code, name]) => {
+            const tick = document.createElement("label");
+            tick.className = "wheel";
+            tick.title = name;
+            const input = document.createElement("input");
+            Object.assign(input, { type: "checkbox", value: code, name: `${box.name}_wheels_${item.id}` });
+            input.setAttribute("aria-label", name);
+            const short = document.createElement("span");
+            short.textContent = code;
+            tick.append(input, short);
+            wheels.append(tick);
+          });
+          wrap.append(wheels);
+        }
+        list.append(wrap);
       }
       if (tick) box.checked = true;
     };
@@ -867,6 +889,11 @@ document.addEventListener("DOMContentLoaded", () => {
     const chosen = form.elements.category_id.selectedOptions[0];
     gstField.hidden = !(chosen && chosen.dataset.gstfree === "1") && !form.elements.gst_amount.value;
   });
+  const wheelField = form.querySelector("[data-wheels-field]");
+  if (wheelField) form.elements.category_id.addEventListener("change", () => {
+    const chosen = form.elements.category_id.selectedOptions[0];
+    wheelField.hidden = !(chosen && chosen.dataset.wheels === "1");
+  });
   const serviceFields = document.getElementById("service-fields");
   if (serviceFields) form.elements.category_id.addEventListener("change", () => {
     const chosen = form.elements.category_id.selectedOptions[0];
@@ -1110,7 +1137,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (carKind && suits[c.applies] && !suits[c.applies].includes(carKind)) return;
     const option = new Option(c.name, String(c.id));
     Object.assign(option.dataset, { period: c.period ? "1" : "0", service: c.service ? "1" : "0",
-      gstfree: c.gstfree ? "1" : "0", purchase: c.purchase ? "1" : "0", applies: c.applies });
+      gstfree: c.gstfree ? "1" : "0", purchase: c.purchase ? "1" : "0", wheels: c.wheels ? "1" : "0", applies: c.applies });
     select.add(option, select.querySelector(`option[value="${NEW}"]`));
   };
   // Rows are also added while a folder is being read, so each list gets its "New category…" as it appears.

@@ -26,7 +26,9 @@
           {{ choice.category_options(categories, r.category_id, car_kind) }}
         </select>
         {% set is_service = categories|selectattr('id', 'equalto', r.category_id|int(0))|selectattr('name', 'equalto', 'Service')|list %}
-        {{ service_field(n, items, r.services, car_kind, not is_service) }}</div>{% endif %}</td>
+        {{ service_field(n, items, r.services, car_kind, not is_service, r.item_wheels) }}
+        {% set asks_wheels = categories|selectattr('id', 'equalto', r.category_id|int(0))|selectattr('per_wheel')|list %}
+        {{ choice.category_wheels('wheels_' ~ n, r.wheels, not asks_wheels) }}</div>{% endif %}</td>
       <td data-label="Vendor"><input name="vendor_{{ n }}" maxlength="500" value="{{ r.vendor }}"></td>
       <td class="num" data-label="Amount"><input name="amount_{{ n }}" inputmode="decimal" value="{{ r.amount }}"></td>
       <td class="num" data-label="Odometer"><input name="odometer_km_{{ n }}" inputmode="decimal" value="{{ r.odometer_km }}"></td>

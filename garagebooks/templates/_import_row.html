@@ -62,5 +62,7 @@
         </fieldset>
         {% endif %}
         {% set is_service = categories|selectattr('id', 'equalto', r.category_id|int(0))|selectattr('name', 'equalto', 'Service')|list %}
-        {{ service_field(n, service_items(), r.services, car.get('kind') if car else none, not is_service) }}</div></td>
+        {{ service_field(n, service_items(), r.services, car.get('kind') if car else none, not is_service, r.item_wheels) }}
+        {% set asks_wheels = categories|selectattr('id', 'equalto', r.category_id|int(0))|selectattr('per_wheel')|list %}
+        {{ choice.category_wheels('wheels_' ~ n, r.wheels, not asks_wheels) }}</div></td>
     </tr>
