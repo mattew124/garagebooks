@@ -55,7 +55,9 @@ a **period**: the start and end dates, read from `Period of insurance: from … 
 a notice offers 6 and 12 months, Settings → When an invoice offers several amounts decides which one is read, as it does for the amount.
 Which categories have a period is the **Has a period** tick on the **Categories** page (Insurance and
 Registration are ticked to begin with), so a category you add, such as roadside assistance, can have one too.
-A period can't end before it starts.
+A period can't end before it starts. Only a category with a period shows the fields: if a PDF in another category
+names one, it stays out of sight and isn't saved, and appears if you change the row to a category that has a period.
+(An expense that already has a period still shows it when you edit it.)
 
 <!-- screenshot: import-row-period - An import row for an insurance policy, with its notes and period -->
 
@@ -114,7 +116,8 @@ is worked out on. Registration starts as **GST only partly applies** on the Cate
 no GST is counted.
 
 The notice's **card payment reference** (the `Ref:` under `Enter Payment Reference Number`), **BPAY biller code** and **BPAY reference** are kept with the expense, in a
-**Payment references** section of the Edit form that starts closed. They are never shown in the expense list or tiles,
+**Payment references** section of the Edit form that starts closed. Only categories in the **registration** budget pool
+(Registration, as installed) have the section or keep references: changing an expense to another category drops them. They are never shown in the expense list or tiles,
 on the dashboard, or in the change history's displayed values. When you
 [claim the expense](leases.md), the claim page starts with the stored GST in its GST field (empty it to leave the GST
 to the provider).

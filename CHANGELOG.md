@@ -17,6 +17,32 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
   box lists only the car's own categories, so a petrol car no longer offers Charging. Upgrade: pull the new image;
   fuel entered before keeps counting, and its litres can be added by editing it (installers on the restricted
   database role re-run `scripts/provision-db.sh`).
+
+- **Development:** `scripts/dev.sh down` and the test runs now delete the anonymous Docker volumes their
+  containers made, keeping the dev stack's test database. The test databases are on disk again, not in RAM.
+
+- **Clicking through OneDrive folders is quicker.** The folder chooser and the file picker now list the whole drive
+  once, with one `delta` query from the top, and keep its folders and PDFs in memory, so opening a folder then asks
+  Microsoft nothing. Starting to browse again asks only what has changed. The listing runs in the background (it can
+  take a few minutes for thousands of files); until it is ready, and if the drive is too big to list whole, each
+  folder is asked for by itself, with one request. Nothing to do on upgrade.
+- **Ask the provider to pay a registration.** Claiming a Registration expense now offers a **registration renewal
+  request** as well as a claim for one already paid, with the notice's payment references filled in and the
+  provider's declaration to accept. The lease's **The provider renews it** tick picks which the page starts on. It
+  needs a claims connector with the new renewal calls (docs: claims connector). Nothing changes for other installers.
+- **Payment references are for registrations only.** Other categories no longer show the section or keep
+  references.
+- **No period fields on categories without one.** An import row showed **Period from** and **to** whenever the PDF
+  named a period or expiry date, whatever the category. The fields now follow the category's **Has a period** tick,
+  and a period in another category isn't saved. Reading an invoice on the Add form no longer fills one in either.
+  An expense already saved with a period keeps it. Nothing changes for installers.
+- **Claiming an insurance or registration expense fills in its period.** The Claim page starts with the period
+  stored on the expense, so the provider no longer asks for dates you already entered. Reading a registration
+  notice also finds the period when the words "expiry date" or "Amount due" appear earlier without a figure, and
+  no longer drops the 12-month column of a widely spaced notice. Nothing changes for installers.
+- **Browser tests rerun only what failed.** `scripts/dev.sh test-browser --failed` reruns just the steps the last
+  run failed, and `--only TEXT` the steps whose name contains TEXT: seconds instead of the whole suite. The
+  contributing rules now leave the full pytest run to CI. Nothing changes for installers.
 - **The header stays on one line, on a phone too.** A phone shows the title, All, Reminders, + Add and a menu
   button, which opens the other links. On a wide screen **Settings** is a dropdown holding **Invoice storage**,
   which no longer has its own link. Without JavaScript the links wrap as before and the dropdown opens on

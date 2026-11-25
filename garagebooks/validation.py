@@ -550,8 +550,9 @@ def parse_gst_amount(raw, amount):
     return gst
 
 
-def parse_expense_form(form, tz, valid_car_ids, valid_category_ids):
-    """-> (values, errors). `values` is only meaningful when `errors` is empty."""
+def parse_expense_form(form, tz, valid_car_ids, valid_category_ids, ref_category_ids=None):
+    """-> (values, errors). `values` is only meaningful when `errors` is empty. Payment references are only kept
+    for the categories in `ref_category_ids` (registrations; None: any): for another they are neither checked nor saved."""
     values, errors = {}, {}
 
     def attempt(field, fn, *args):
@@ -589,7 +590,8 @@ def parse_expense_form(form, tz, valid_car_ids, valid_category_ids):
     attempt("gst_amount", parse_gst_amount, form.get("gst_amount"), values.get("amount"))
     for field, label in (("card_payment_ref", "Card payment reference"), ("bpay_biller_code", "BPAY biller code"),
                          ("bpay_ref", "BPAY reference")):
-        attempt(field, parse_payment_ref, form.get(field), label)
+        referenced = ref_category_ids is None or values.get("category_id") in ref_category_ids
+        attempt(field, parse_payment_ref, form.get(field) if referenced else "", label)
     start, end = values.get("period_start"), values.get("period_end")
     if start and end and end < start:
         errors["period_end"] = "The period's end can't be before its start."

@@ -45,8 +45,9 @@ echo "compat: TeslaMate $version (this release was tested with $tested)"
 name="garagebooks-compat-$$"
 trap 'docker rm -fv "$name" >/dev/null 2>&1 || true' EXIT
 pass="$(openssl rand -hex 16)"
-# --tmpfs: the postgres image's data dir is a VOLUME; without it every run leaks an anonymous volume.
-docker run -d --rm --name "$name" --tmpfs /var/lib/postgresql -e POSTGRES_USER=teslamate -e POSTGRES_DB=teslamate \
+# The postgres image's data dir is a VOLUME: every `docker rm` of this container needs -v, or its
+# anonymous volume is left behind.
+docker run -d --rm --name "$name" -e POSTGRES_USER=teslamate -e POSTGRES_DB=teslamate \
     -e "POSTGRES_PASSWORD=$pass" postgres:18-trixie >/dev/null
 until docker exec "$name" pg_isready -q -U teslamate -d teslamate; do sleep 1; done
 sleep 2   # initdb restarts the server once
@@ -68,7 +69,7 @@ status=0
 # once recorded: compat.py is changed for the run, and put back unless --record keeps it.
 backup="$(mktemp)"
 cp garagebooks/compat.py "$backup"
-trap 'cp "$backup" garagebooks/compat.py; rm -f "$backup"; docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
+trap 'cp "$backup" garagebooks/compat.py; rm -f "$backup"; docker rm -fv "$name" >/dev/null 2>&1 || true' EXIT
 sed -i -E "s/^TESTED_TESLAMATE = .*/TESTED_TESLAMATE = \"$version\"/; s/^TESTED_MIGRATION = .*/TESTED_MIGRATION = $newest/" \
     garagebooks/compat.py
 

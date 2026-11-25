@@ -29,9 +29,11 @@
 #   scripts/dev.sh auto-prune [on|off]
 #                                    run `prune` hourly from cron (the main checkout's copy), or stop it;
 #                                    with neither, says whether it is on
-#   scripts/dev.sh test-browser [--onedrive]
+#   scripts/dev.sh test-browser [--onedrive] [--failed] [--only TEXT]
 #                                    run the browser tests against the dev stack;
 #                                    --onedrive fails if the real OneDrive checks can't run
+#                                    --failed reruns only the steps the last run failed;
+#                                    --only TEXT runs only the steps whose name contains TEXT
 #   scripts/dev.sh onedrive-save     keep this stack's OneDrive sign-in in a file outside
 #                                    the repository (ONEDRIVE_DEV_FILE)
 #   scripts/dev.sh onedrive-link     load that sign-in into this stack, pointed at the
@@ -423,12 +425,23 @@ setup() {
 }
 
 test_browser() {
-    local require_onedrive="${1:-0}"
+    local require_onedrive=0 only="" rerun_failed=0
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --onedrive) require_onedrive=1 ;;
+            --failed) rerun_failed=1 ;;
+            --only) [ -n "${2:-}" ] || { echo "dev: --only needs part of a step's name" >&2; exit 2; }
+                    only="$2"; shift ;;
+            *) echo "dev: test-browser [--onedrive] [--failed] [--only TEXT]" >&2; exit 2 ;;
+        esac
+        shift
+    done
     ensure_env
     docker build -q -t garagebooks:browser-tests tests/browser >/dev/null
     # Straight to the containers on the dev network, past the proxy's login.
     docker run --rm --network "${PROJECT}_dev" --user "$(id -u):$(id -g)" \
         -e HOME=/tmp -e OUT=/out -e "BASE_PATH=$DEV_BASE_PATH" -e "REQUIRE_ONEDRIVE=$require_onedrive" \
+        -e "ONLY=$only" -e "RERUN_FAILED=$rerun_failed" \
         -v "$ROOT/tests/browser:/tests:ro" -v "$ROOT/$SHOTS:/out" \
         garagebooks:browser-tests python3 /tests/run.py
 }
@@ -699,7 +712,11 @@ case "${1:-}" in
     refresh) [ "$DEMO" = 0 ] || { echo "dev: the demo has nothing to refresh; use 'demo reset'" >&2; exit 2; }
         ensure_env; copy_data ;;
     reset) claims_check; ensure_env; compose down -v; start "" ;;
-    down) ensure_env; compose down ;;
+    down) ensure_env
+        # `compose down` leaves anonymous volumes behind (any image with a VOLUME gets one, such as
+        # dev-dashboards-owner's postgres), and `down -v` would delete the test database too.
+        compose rm --stop --force --volumes
+        compose down ;;
     destroy)
         ensure_env
         compose down -v --remove-orphans
@@ -723,7 +740,7 @@ case "${1:-}" in
             echo "dev: the browser tests submit claims, so they only run against the stand-in connector." >&2
             echo "dev: STAND_IN=1 scripts/dev.sh up, then STAND_IN=1 scripts/dev.sh test-browser." >&2
             exit 2; }
-        if [ "${2:-}" = --onedrive ]; then test_browser 1; else test_browser 0; fi ;;
+        shift; test_browser "$@" ;;
     onedrive-save) onedrive_save ;;
     onedrive-link) onedrive_link ;;
     sample-expenses)

@@ -1519,6 +1519,10 @@ BEGIN
     END IF;
 END $$;
 
+--   onedrive_account.signed_in_at  when OneDrive was last signed in. The app keeps a listing of the drive in
+--   memory for browsing, and this is how each web worker knows the listing belongs to an earlier sign-in.
+ALTER TABLE garagebooks.onedrive_account ADD COLUMN IF NOT EXISTS signed_in_at timestamptz;
+
 -- Fuel: litres on a fill-up, and what they say about the car. Added to databases made before them; safe to
 -- run again.
 --   expense.litres      litres put in (a fuel expense; NULL for any other, and for fuel entered before this)

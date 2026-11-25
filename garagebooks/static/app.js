@@ -916,6 +916,13 @@ document.addEventListener("DOMContentLoaded", () => {
     const chosen = form.elements.category_id.selectedOptions[0];
     gstField.hidden = !(chosen && chosen.dataset.gstfree === "1") && !form.elements.gst_amount.value;
   });
+  // A notice's payment references belong to registrations only.
+  const payRefs = form.querySelector(".payment-refs");
+  const payRefsShown = () => {
+    const chosen = form.elements.category_id.selectedOptions[0];
+    payRefs.hidden = !(chosen && chosen.dataset.payrefs === "1");
+  };
+  if (payRefs) form.elements.category_id.addEventListener("change", payRefsShown);
   const serviceFields = document.getElementById("service-fields");
   if (serviceFields) form.elements.category_id.addEventListener("change", () => {
     const chosen = form.elements.category_id.selectedOptions[0];
@@ -1021,6 +1028,7 @@ document.addEventListener("DOMContentLoaded", () => {
       set("period_start", "period start", data.period_start);
       set("period_end", "period end", data.period_end);
       if (periodFields) periodShown();
+      if (payRefs) payRefsShown();
       if (gstField && form.elements.gst_amount.value) gstField.hidden = false;
       if (data.odometer_km && filled.includes("odometer")) hint.textContent = "Read from the invoice.";
       else if (!data.odometer_km && !touched.has("odometer_km")) await fill(false);

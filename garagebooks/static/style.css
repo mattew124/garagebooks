@@ -515,3 +515,6 @@ small.after-tax { display: block; font-weight: 400; color: var(--muted); font-si
 .import-table .row-extras .period { display: grid; gap: .4rem; }
 .import-table .row-extras input[type=date] { min-width: 0; }
 [data-view=tiles] .import-table td.extras { flex-direction: column; align-items: stretch; gap: .25rem; }
+
+/* The provider's declaration on a registration renewal request: its own lines, read before it is accepted. */
+.declaration { white-space: pre-line; font-size: .9rem; }

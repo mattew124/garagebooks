@@ -31,6 +31,12 @@ account (OneDrive Personal). To keep the PDFs on your own server instead, see
     if it doesn't exist yet. Uploads go by the folder's ID, so renaming or moving it later
     doesn't break them.
 
+    To make browsing quick, the app lists your whole drive in the background when you first browse it, and keeps
+    the names of its folders and PDFs in memory (nothing is saved to the database or disk). The listing can take a
+    few minutes for thousands of files; until it is ready, each folder is fetched as you open it. Later the app asks
+    only what has changed: whenever you start browsing again, and as you click if five minutes have passed. Each of
+    the app's two web workers makes its own listing, and a restart starts again.
+
 ## Where files go
 
 Each invoice goes into a subfolder of the car's folder, set per category on the **Categories** page.

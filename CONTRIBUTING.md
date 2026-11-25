@@ -26,11 +26,13 @@ elevation when it copies positions. Don't copy more than that.
 
 1. One feature or fix per pull request.
 2. Write the failing test first, then the fix.
-3. Run both test suites before you open the pull request:
+3. Run the tests your change touches, and the browser tests once, before you open the pull request.
+   CI runs the whole pytest suite on every push, so you don't need to run all of it yourself:
 
    ```bash
-   .venv/bin/python -m pytest -q    # needs docker; starts a throwaway Postgres
+   .venv/bin/python -m pytest -q tests/test_x.py   # needs docker; starts a throwaway Postgres
    scripts/dev.sh test-browser      # Playwright, real Chromium
+   scripts/dev.sh test-browser --failed   # after a fix: only the steps that failed
    ```
 
 4. After a UI or dashboard change, look at the screenshots in `.dev/screenshots`.

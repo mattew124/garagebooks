@@ -35,6 +35,14 @@ TIMEOUT_SECONDS = 150
 SYNC_TIMEOUT_SECONDS = 900   # a full history sync; it runs in the background, not in a web request
 # What the connector may ask for in a 422, and how each is typed. Anything else is ignored.
 FIELD_KEYS = ("policy_number", "start", "end", "description", "provider", "invoice_date")
+# What a registration renewal request takes: the renewal notice's own figures, and who is renewing.
+RENEWAL_FIELD_LABELS = {"card_payment_ref": "Card payment reference", "bpay_biller_code": "BPAY biller code",
+                        "bpay_ref": "BPAY reference", "ctp_gst": "GST on the CTP insurance",
+                        "customer_number": "Customer number", "licence_number": "Driver licence number"}
+# How an expense goes to the provider: claimed back once paid, or (a registration only) the provider asked to pay it.
+METHODS = ("reimburse", "renewal")
+RENEWAL_POOL = "registration"
+DECLARATION_LIMIT = 6000
 FIELD_TYPES = ("date", "text")
 SIGNIN_STATES = ("idle", "starting", "code_needed", "checking", "signed_in", "failed")
 FIELD_LIMIT = 500
@@ -75,7 +83,7 @@ class Reply:
             return []
         out = []
         for item in self.body.get("needs_fields") or []:
-            if isinstance(item, dict) and item.get("key") in FIELD_KEYS:
+            if isinstance(item, dict) and item.get("key") in (*FIELD_KEYS, *RENEWAL_FIELD_LABELS):
                 out.append({"key": item["key"], "label": text(item.get("label")) or item["key"],
                             "type": item.get("type") if item.get("type") in FIELD_TYPES else "text"})
         return out
@@ -210,6 +218,15 @@ class Connector:
     def submit(self, expense, invoice):
         return self.call("POST", "submit", {"expense": expense, "invoice": invoice, "confirm": True})
 
+    def renewal_preview(self, expense, invoice):
+        """A registration the provider is to pay. Its own calls, so a connector that only knows claims answers
+        404 and can never take it for money to pay back."""
+        return self.call("POST", "renewal/preview", {"expense": expense, "invoice": invoice})
+
+    def renewal_submit(self, expense, invoice):
+        return self.call("POST", "renewal/submit",
+                         {"expense": expense, "invoice": invoice, "confirm": True, "accept_declaration": True})
+
     def status(self, provider_ids):
         return self.call("POST", "status", {"provider_ids": list(provider_ids)})
 
@@ -268,8 +285,47 @@ def expense_payload(row, local_day, fields=None):
             "fields": {k: v for k, v in (fields or {}).items() if v}}
 
 
+def stored_fields(row, method="reimburse"):
+    """The protocol fields an expense already holds. To claim it back: the GST stated on its document, and the
+    period an insurance policy or a registration covers. For a renewal request: the notice's payment references
+    and its GST, which on a registration is the CTP insurance's."""
+    out = {}
+    if method == "renewal":
+        out = {key: row[key] for key in ("card_payment_ref", "bpay_biller_code", "bpay_ref") if row.get(key)}
+        if row.get("gst_amount") is not None:
+            out["ctp_gst"] = f"{row['gst_amount']:.2f}"
+        return out
+    if row.get("gst_amount") is not None:
+        out["gst"] = f"{row['gst_amount']:.2f}"
+    for key, column in (("start", "period_start"), ("end", "period_end")):
+        if row.get(column):
+            out[key] = row[column].isoformat()
+    return out
+
+
 def invoice_payload(name, content, content_type="application/pdf"):
     return {"name": name, "content_type": content_type, "data_base64": base64.b64encode(content).decode("ascii")}
+
+
+def clean_renewal_fields(form):
+    """What the claim page's form sent for a renewal request -> (fields, errors). The CTP GST is a money value."""
+    out, errors = {}, []
+    for key in RENEWAL_FIELD_LABELS:
+        value = (form.get(f"field_{key}") or "").strip()[:FIELD_LIMIT]
+        if value:
+            out[key] = value
+    if "ctp_gst" in out:
+        amount = number(out["ctp_gst"].replace("$", "").replace(",", ""))
+        if amount is None or amount < 0:
+            errors.append("The GST on the CTP insurance must be an amount such as 12.34.")
+        else:
+            out["ctp_gst"] = str(amount)
+    return out, errors
+
+
+def declaration_text(value):
+    """The provider's declaration as the page shows it: its lines kept, bounded. None if there is none."""
+    return text(value, DECLARATION_LIMIT)
 
 
 def clean_fields(form):

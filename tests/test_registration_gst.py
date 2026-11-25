@@ -294,3 +294,33 @@ def test_a_gst_of_the_whole_ctp_premium_is_never_taken():
     text = LAYOUT.replace("incl GST of $20.00", "").replace("incl GST of $10.00", "")
     assert invoices.propose("", "x.pdf", text, CATS)["gst_amount"] in (None, D("10.00"), D("20.00"))
     assert invoices.propose("", "x.pdf", text, CATS)["gst_amount"] not in (D("400.00"), D("200.00"))
+
+
+# ---- the references belong to registrations only --------------------------------------------------
+
+REF_FIELDS = {"card_payment_ref": "1234 5678 9012", "bpay_biller_code": "12345", "bpay_ref": "9876 5432 1098"}
+
+
+def refs_of(row):
+    return {k: row[k] for k in REF_FIELDS}
+
+
+def test_another_category_neither_shows_nor_keeps_payment_references(client, admin):  # noqa: F811
+    insurance = str(category_id(admin, "Insurance"))
+    client.post("/new", data=form(admin, category_id=insurance, **REF_FIELDS), headers=ORIGIN)
+    row = rows(admin)[0]
+    assert refs_of(row) == dict.fromkeys(REF_FIELDS)
+    page = client.get(f"/{row['id']}/edit").data.decode()
+    assert re.search(r'<details class="payment-refs"[^>]*\shidden', page)
+    assert re.search(rf'<option value="{category_id(admin, "Registration")}"[^>]*data-payrefs="1"', page)
+    assert re.search(rf'<option value="{insurance}"[^>]*data-payrefs="0"', page)
+
+
+def test_changing_a_registration_to_another_category_drops_the_references(client, admin):  # noqa: F811
+    client.post("/new", data=saved_form(admin, **REF_FIELDS), headers=ORIGIN)
+    row = rows(admin)[0]
+    assert refs_of(row) == REF_FIELDS
+    assert not re.search(r'<details class="payment-refs"[^>]*\shidden', client.get(f"/{row['id']}/edit").data.decode())
+    client.post(f"/{row['id']}/edit", headers=ORIGIN,
+                data=form(admin, category_id=str(category_id(admin, "Insurance")), **REF_FIELDS))
+    assert refs_of(rows(admin)[0]) == dict.fromkeys(REF_FIELDS)

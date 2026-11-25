@@ -146,3 +146,157 @@ def test_a_mailbox_scan_is_one_call_per_page_of_emails_with_attachments_included
     assert len(asked) == math.ceil(120 / outlook.PAGE) == 3
     assert "expand=attachments" in asked[0] and "/delta" not in asked[0], \
         "mail delta can't expand attachments, so it would need a call per email as well"
+
+
+# ---- browsing: the whole drive once, then from memory -----------------------------------------------------
+
+class WholeDrive:
+    """Graph's delta for the drive root: the full listing, then only what `changes` holds."""
+
+    def __init__(self, page=3):
+        self.asked, self.page, self.changes = [], page, []
+        root = {"id": "R", "name": "root", "root": {}, "folder": {}}
+        self.items = [self.pdf("P1", "b.pdf", "B"), self.pdf("P2", "A.pdf", "B"),
+                      {"id": "TXT", "name": "n.txt", "file": {}, "parentReference": {"id": "B"}},
+                      self.dir("B", "beta", "A"), self.dir("Z", "Zed", "R"), self.dir("A", "Alpha", "R"), root]
+
+    @staticmethod
+    def dir(fid, name, parent):
+        return {"id": fid, "name": name, "folder": {}, "parentReference": {"id": parent}}
+
+    @staticmethod
+    def pdf(fid, name, parent):
+        return {"id": fid, "name": name, "file": {}, "size": 10, "webUrl": f"https://onedrive.live.com/?id={fid}",
+                "parentReference": {"id": parent}}
+
+    def __call__(self, method, url, data=None, headers=None, raw=False):
+        self.asked.append(url)
+        parsed = urlparse(url)
+        assert unquote(parsed.path).endswith("/me/drive/root/delta"), url
+        token = parse_qs(parsed.query).get("token", ["0"])[0]
+        base = f"{onedrive.GRAPH}/me/drive/root/delta?token="
+        if token == "since":
+            changed, self.changes = self.changes, []
+            return 200, {"value": changed, "@odata.deltaLink": base + "since"}
+        n = int(token)
+        body = {"value": self.items[n * self.page:(n + 1) * self.page]}
+        if (n + 1) * self.page < len(self.items):
+            body["@odata.nextLink"] = base + str(n + 1)
+        else:
+            body["@odata.deltaLink"] = base + "since"
+        return 200, body
+
+
+def tree_of(graph):
+    return onedrive.DriveTree.load(onedrive.OneDrive(KEY, graph), "AT-1")
+
+
+def test_the_whole_drive_is_listed_once_and_every_folder_is_then_read_from_memory():
+    graph = WholeDrive()
+    tree = tree_of(graph)
+    loaded = len(graph.asked)
+    assert loaded == 3                                          # 7 items, 3 a page
+    here, folders, files = tree.contents(None)
+    assert (here["id"], here["path"], here["is_root"]) == ("R", "/", True)
+    assert [f["name"] for f in folders] == ["Alpha", "Zed"] and files == []
+    here, folders, files = tree.contents("B")
+    assert here == {"id": "B", "name": "beta", "path": "/Alpha/beta", "parent_id": "A", "is_root": False}
+    assert folders == [] and [f["name"] for f in files] == ["A.pdf", "b.pdf"]
+    assert files[0] == {"id": "P2", "name": "A.pdf", "size": 10, "web_url": "https://onedrive.live.com/?id=P2"}
+    assert len(graph.asked) == loaded
+
+
+def test_a_folder_the_tree_does_not_hold_is_not_found():
+    tree = tree_of(WholeDrive())
+    for missing in ("NOPE", "P1"):                              # unknown, and a file
+        with pytest.raises(onedrive.NotFound):
+            tree.contents(missing)
+
+
+def test_an_update_is_one_call_that_applies_adds_renames_moves_and_deletes():
+    graph = WholeDrive()
+    tree = tree_of(graph)
+    before = len(graph.asked)
+    graph.changes = [graph.dir("NEW", "New", "R"), graph.dir("B", "Beta 2", "Z"),
+                     {"id": "P1", "deleted": {}},
+                     {"id": "P2", "name": "A.txt", "file": {}, "parentReference": {"id": "B"}}]
+    tree.update(onedrive.OneDrive(KEY, graph), "AT-1")
+    assert len(graph.asked) == before + 1
+    assert [f["name"] for f in tree.contents(None)[1]] == ["Alpha", "New", "Zed"]
+    assert tree.contents("A")[1] == []
+    assert tree.contents("B")[0]["path"] == "/Zed/Beta 2" and tree.contents("B")[2] == []
+
+
+def live_or_delta(graph, asked):
+    """A WholeDrive that also answers for one folder, as `?$expand=children` does."""
+    def transport(method, url, data=None, headers=None, raw=False):
+        if "/delta" not in url:
+            asked.append(url)
+            return 200, {"id": "A", "name": "Alpha", "folder": {}, "children": []}
+        return graph(method, url)
+    return onedrive.OneDrive(KEY, transport)
+
+
+def test_a_click_is_not_kept_waiting_while_the_drive_is_listed():
+    graph, asked, waiting = WholeDrive(), [], []
+    cache = onedrive.TreeCache(live_or_delta(graph, asked), start=waiting.append)
+    for _ in range(2):
+        assert cache.contents("me", "AT-1", "A")[0]["id"] == "A"
+    assert len(asked) == 2 and graph.asked == []                  # one folder each, from Graph itself
+    assert len(waiting) == 1                                       # and only one listing started
+    waiting.pop()()
+    assert [f["name"] for f in cache.contents("me", "AT-1", "A")[1]] == ["beta"]
+    assert len(asked) == 2
+
+
+def test_a_listing_that_finishes_after_another_sign_in_is_thrown_away():
+    graph, asked, waiting = WholeDrive(), [], []
+    cache = onedrive.TreeCache(live_or_delta(graph, asked), start=waiting.append)
+    cache.contents("old", "AT-1", "A")
+    cache.contents("new", "AT-2", "A")
+    assert len(waiting) == 2
+    waiting.pop(0)()
+    cache.contents("new", "AT-2", "A")
+    assert len(asked) == 3                                         # still live: the old listing isn't used
+
+
+def test_a_drive_that_cannot_be_listed_is_not_tried_again_on_every_click():
+    asked, tried = [], []
+
+    def transport(method, url, data=None, headers=None, raw=False):
+        if "/delta" in url:
+            tried.append(url)
+            return 400, {"error": {"code": "invalidRequest"}}
+        asked.append(url)
+        return 200, {"id": "X", "name": "X", "folder": {}, "children": []}
+    cache = onedrive.TreeCache(onedrive.OneDrive(KEY, transport), start=lambda load: load())
+    for _ in range(3):
+        assert cache.contents("me", "AT-1", "X")[0]["id"] == "X"
+    assert len(tried) == 1 and len(asked) == 3
+
+
+def test_the_cache_picks_up_a_new_folder_and_starts_again_when_the_delta_link_expires():
+    graph, asked = WholeDrive(), []
+    cache = onedrive.TreeCache(live_or_delta(graph, asked), start=lambda load: load())
+    cache.contents("me", "AT-1")
+    graph.changes = [graph.dir("NEW", "New", "R")]
+    assert cache.contents("me", "AT-1", "NEW")[0]["path"] == "/New"       # not held: asks what changed
+    expired, before = [True], cache.drive.transport
+
+    def transport(method, url, data=None, headers=None, raw=False):
+        if "token=since" in url and expired:
+            expired.pop()
+            return 410, {"error": {"code": "resyncRequired"}}
+        return before(method, url)
+    cache.drive.transport = transport
+    live = len(asked)
+    cache.contents("me", "AT-1", fresh=True)                       # answered live; the drive is listed again
+    assert len(asked) == live + 1
+    assert [f["name"] for f in cache.contents("me", "AT-1")[1]] == ["Alpha", "Zed"]
+    assert len(asked) == live + 1
+
+
+def test_a_drive_too_big_to_list_whole_is_refused_rather_than_shown_in_part(monkeypatch):
+    monkeypatch.setattr(onedrive, "MAX_DELTA_PAGES", 2)
+    with pytest.raises(onedrive.OneDriveError):
+        tree_of(WholeDrive())

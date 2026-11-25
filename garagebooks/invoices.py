@@ -542,11 +542,13 @@ def _registration_months(text, multi):
     """The months a registration notice covers: its 'Registration period' line, or the 6 and 12 month options
     on the 'Amount due' line (the Settings choice picks one, as it does for the amount)."""
     for pattern in (r"registration\s+period\b", r"\bamount\s+due\b"):
-        figures = sorted({int(n) for n in _MONTHS.findall(_after(text, pattern, 70).split("\n")[0])})
-        if len(figures) == 1:
-            return figures[0]
-        if len(figures) > 1:
-            return {"max": figures[-1], "min": figures[0]}.get(multi)
+        # Every place the label appears: a header's "Amount due" has only the total, with no months.
+        for m in re.finditer(pattern, text, re.I):
+            figures = sorted({int(n) for n in _MONTHS.findall(text[m.end():m.end() + 200].split("\n")[0])})
+            if len(figures) == 1:
+                return figures[0]
+            if len(figures) > 1:
+                return {"max": figures[-1], "min": figures[0]}.get(multi)
     return None
 
 
@@ -561,7 +563,10 @@ def _period(text, category, multi):
         ends = _find_dates(_after(text, r"policy\s+(?:end|expiry|finish)(?:\s+date)?\s*:?", 40), 1)
         start, end = begins[0] if begins else None, ends[0] if ends else None
     if end is None:
-        expiries = _find_dates(_after(text, r"(?:registration\s+)?expiry\s+date\s*:?", 70).split("\n")[0], 2)
+        # The first "expiry date" with a date on its line: a notice also uses the words in its instructions.
+        found = (_find_dates(text[m.end():m.end() + 70].split("\n")[0], 2)
+                 for m in re.finditer(r"(?:registration\s+)?expiry\s+date\s*:?\s*", text, re.I))
+        expiries = next((dates for dates in found if dates), [])
         if len(expiries) == 1:
             end = expiries[0]
         elif len(expiries) == 2 and multi in ("max", "min"):
