@@ -1075,7 +1075,7 @@ def test_settings_lists_the_scheduled_jobs(page):
     assert section.locator("h2").text_content() == "Scheduled jobs", section.locator("h2").text_content()
     assert section.locator("#jobs-where").inner_text().strip(), "it says where the jobs run"
     names = section.locator("li[data-job]").evaluate_all("els => els.map(e => e.dataset.job)")
-    assert names == ["ato_rates", "dashboard", "mail", "notifications", "teslamate"], names
+    assert names == ["ato_rates", "dashboard", "mail", "notifications", "onedrive_folders", "teslamate"], names
     states = section.locator("li[data-job]").evaluate_all("els => els.map(e => e.dataset.state)")
     assert set(states) <= {"never", "ok", "failed", "running"}, states
     assert "every hour" in section.locator('li[data-job="teslamate"]').inner_text()
@@ -1117,6 +1117,18 @@ def test_folder_browser(page):
     expect(page.locator("h1")).to_contain_text("Folder for")
     expect(page.locator("form.new-folder input[name=name]")).to_be_visible()
     expect(page.locator("button:has-text('Use ')")).to_be_visible()
+    # Going up and back again swaps the listing in place: a mark left on the window survives.
+    page.evaluate("window.samePage = true")
+    here, start = page.locator("p.here code").inner_text(), page.url
+    up = page.locator("ul.folder-list a", has_text="Up")
+    if up.count():
+        up.click()
+        expect(page.locator("p.here code")).not_to_have_text(here)
+        assert page.evaluate("window.samePage"), "opening a folder loaded a new page"
+        assert page.url != start
+        page.go_back()
+        expect(page.locator("p.here code")).to_have_text(here)
+        assert page.evaluate("window.samePage"), "going back loaded a new page"
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
     shot(page, "folder-browser-phone")
 
