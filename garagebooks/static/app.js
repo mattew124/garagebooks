@@ -988,7 +988,8 @@ document.addEventListener("DOMContentLoaded", () => {
       litresFields.hidden = !((chosen && chosen.dataset.litres === "1") || form.elements.litres.value);
       soon();
     });
-    document.getElementById("fill-odometer").addEventListener("click", () => setTimeout(soon, 1500));
+    // The button is only there for a car TeslaMate tracks.
+    if (fillButton) fillButton.addEventListener("click", () => setTimeout(soon, 1500));
     refresh();
   }
   // Fill the form from what /api/prefill read in a PDF; `body` is the form data to send it.

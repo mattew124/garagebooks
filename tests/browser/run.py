@@ -1818,6 +1818,23 @@ def reminder_checks(page):
     expect(page.locator("#resolved .reminder", has_text=title)).to_have_count(0)
 
 
+def test_add_form_runs_without_the_teslamate_button(page):
+    """The Fill from TeslaMate button isn't drawn without a car TeslaMate tracks (or while TeslaMate isn't usable).
+    The form's script must carry on past that: reading a chosen PDF and the duplicate warning come after it."""
+    other = page.context.new_page()
+    errors = []
+    other.on("pageerror", lambda e: errors.append(str(e)))
+    other.add_init_script("new MutationObserver(() => { const b = document.getElementById('fill-odometer'); if (b) b.remove(); })"
+                          ".observe(document, {childList: true, subtree: true});")
+    try:
+        other.goto(UI + "new")
+        other.wait_for_load_state("networkidle")
+        expect(other.locator("#fill-odometer")).to_have_count(0)
+        assert not errors, errors
+    finally:
+        other.close()
+
+
 def test_dashboard(page):
     add_expense(page, "62000", "Initial purchase")
     add_expense(page, "1500", "Tyres")
@@ -2138,6 +2155,7 @@ def main():
 
         step("form renders on a phone", test_form, page)
         step("odometer fills itself in", test_odometer_autofills, page)
+        step("the Add form works without the Fill from TeslaMate button", test_add_form_runs_without_the_teslamate_button, page)
         step("odometer button uses the chosen date", test_odometer_button_for_past_date, page)
         step("a bad invoice link is explained, input kept", test_bad_link_is_explained, page)
         step("add, list, invoice link, edit, delete", test_add_list_edit_delete, page)
