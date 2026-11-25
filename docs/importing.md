@@ -116,7 +116,8 @@ is worked out on. Registration starts as **GST only partly applies** on the Cate
 no GST is counted.
 
 The notice's **card payment reference** (the `Ref:` under `Enter Payment Reference Number`), **BPAY biller code** and **BPAY reference** are kept with the expense, in a
-**Payment references** section of the Edit form that starts closed. They are never shown in the expense list or tiles,
+**Payment references** section of the Edit form that starts closed. Only categories in the **registration** budget pool
+(Registration, as installed) have the section or keep references: changing an expense to another category drops them. They are never shown in the expense list or tiles,
 on the dashboard, or in the change history's displayed values. When you
 [claim the expense](leases.md), the claim page starts with the stored GST in its GST field (empty it to leave the GST
 to the provider).

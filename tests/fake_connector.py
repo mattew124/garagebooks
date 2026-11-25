@@ -122,6 +122,8 @@ class Fake:
             since, until = body.get("since") or "0000-00-00", body.get("to") or "9999-99-99"
             keep = [t for t in cfg["transactions"] if not isinstance(t, dict) or since <= str(t.get("date")) <= until]
             return 200, {"ok": True, "provider": PROVIDER, "transactions": keep, "claims": [c for c in cfg["claims"] if not isinstance(c, dict) or str(c.get("date")) >= since]}
+        if method == "POST" and path in ("/v1/renewal/preview", "/v1/renewal/submit"):
+            return self.renewal(path.rsplit("/", 1)[1], body)
         if method == "POST" and path in ("/v1/preview", "/v1/submit"):
             return self.claim(path.rsplit("/", 1)[1], body)
         return 404, {"ok": False, "error": "no such call"}
@@ -184,6 +186,31 @@ class Fake:
         self.submitted[exp["id"]] = f"REF{n:04d}"
         return 200, {"ok": True, "provider_id": f"P{n:04d}", "reference": f"REF{n:04d}", "status": "Submitted",
                      "amount": amount}
+
+    def renewal(self, kind, body):
+        cfg = self.config
+        if f"renewal_{kind}" in cfg["override"]:
+            return cfg["override"][f"renewal_{kind}"]
+        if not cfg["signed_in"]:
+            return 409, {"ok": False, "error": "Not signed in to the provider.", "needs": "signin"}
+        exp = body.get("expense") or {}
+        missing = [f for f in cfg["needs_fields"] if not (exp.get("fields") or {}).get(f["key"])]
+        if missing:
+            return 422, {"ok": False, "error": "The form needs more details.", "needs_fields": missing}
+        warnings = list(cfg["warnings"])
+        if exp.get("id") in self.submitted:
+            warnings.append("A renewal is already in progress for this car.")
+        if kind == "preview":
+            return 200, {"ok": True, "provider": PROVIDER, "kind": "registration renewal",
+                         "car": exp.get("car", {}).get("name", ""), "summary": ["Renewal request for the registration"],
+                         "warnings": warnings, "declaration": "Example declaration:\n- The details are correct."}
+        if body.get("confirm") is not True or body.get("accept_declaration") is not True:
+            return 400, {"ok": False, "error": "confirm and accept_declaration must be true"}
+        if warnings:
+            return 400, {"ok": False, "error": warnings[0]}
+        self.submitted[exp["id"]] = f"RENEWAL{len(self.submitted) + 1:04d}"
+        return 200, {"ok": True, "provider_id": self.submitted[exp["id"]], "reference": None,
+                     "status": "Renewal requested"}
 
     def invoice_bytes(self, body):
         """The invoice the last request carried, decoded (None if it carried none)."""

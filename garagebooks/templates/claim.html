@@ -13,9 +13,21 @@
   <a href="{{ url_for('index', **view) }}">Back</a></p>
 {% else %}
 {% if error %}<p class="notice bad" role="alert">{{ error }}</p>{% endif %}
+{% if renewable %}
+<section class="card stack" id="claim-method">
+  <h2 class="card-title">Who pays this registration?</h2>
+  <div class="row" role="group" aria-label="How this registration goes to the provider">
+    {% for key, label in (('renewal', 'Ask the provider to pay it'), ('reimburse', 'Claim it back (I have paid it)')) %}
+    <a class="button{{ '' if method == key else ' secondary-link' }}" {{ 'aria-current=true' if method == key }}
+       href="{{ url_for('claim_page', expense_id=expense.id, method=key, **view) }}">{{ '✓ ' if method == key }}{{ label }}</a>
+    {% endfor %}
+  </div>
+  <p><small>{% if method == 'renewal' %}A registration renewal request: send the unpaid renewal notice, and the provider pays it.{% else %}A claim for a registration you have already paid. If it isn't paid yet, ask the provider to pay it instead.{% endif %}</small></p>
+</section>
+{% endif %}
 
 {% if signin %}
-{% set retry_url = url_for('claim_page', expense_id=expense.id, **view) %}
+{% set retry_url = url_for('claim_page', expense_id=expense.id, method=method if renewable else none, **view) %}
 {% include "_claim_signin.html" %}
 <script src="{{ url_for('static', filename='claims.js') }}" defer></script>
 {% endif %}
@@ -23,7 +35,7 @@
 {% if preview or needs or (error and not signin) %}
 {% if preview %}
 <section class="card stack" id="claim-preview">
-  <h2 class="card-title">What will be claimed{% if preview.provider %} from {{ preview.provider }}{% endif %}</h2>
+  <h2 class="card-title">{{ 'What will be requested' if method == 'renewal' else 'What will be claimed' }}{% if preview.provider %} from {{ preview.provider }}{% endif %}</h2>
   {% if preview.warnings %}
   <div class="notice bad" role="alert"><strong>Check before claiming</strong>
     <ul class="plain">{% for w in preview.warnings %}<li>{{ w }}</li>{% endfor %}</ul></div>
@@ -38,31 +50,45 @@
   </dl>
 </section>
 {% endif %}
+{% set sendable = preview and not preview.warnings and (method != 'renewal' or preview.declaration) %}
 <form method="post" action="{{ url_for('claim_preview', expense_id=expense.id) }}" class="card stack" data-claim-wait>
   <h2 class="card-title">{{ 'More details for the provider' if needs else 'Details' }}</h2>
+  {% if renewable %}<input type="hidden" name="method" value="{{ method }}">{% endif %}
+  {% set shown = needs|map(attribute='key')|list %}
   {% for n in needs %}
   <label>{{ n.label }}
-    <input name="field_{{ n.key }}" type="{{ n.type }}" value="{{ fields.get(n.key, '') }}" required>
+    <input name="field_{{ n.key }}" type="{{ n.type }}" value="{{ fields.get(n.key, '') }}" autocomplete="off" required>
   </label>
   {% endfor %}
-  {% set shown = needs|map(attribute='key')|list %}
+  {% if method == 'renewal' %}
+  {# The notice's figures stay in view: a wrong one makes the renewal fail, so they are checked before sending. #}
+  {% for key, label in renewal_labels.items() if key in fields and key not in shown %}
+  <label>{{ label }} <input name="field_{{ key }}" value="{{ fields[key] }}" autocomplete="off"></label>
+  {% endfor %}
+  {% else %}
   {% for key, value in fields.items() if key != 'gst' and key not in shown %}<input type="hidden" name="field_{{ key }}" value="{{ value }}">{% endfor %}
   <label>GST included in the amount (optional)
     <input name="field_gst" value="{{ fields.get('gst', '') }}" inputmode="decimal" autocomplete="off">
     <small>Leave empty to let the provider work it out from the invoice.</small>
   </label>
+  {% endif %}
   {% for name, value in view.items() %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}
+  {% if sendable and method == 'renewal' %}
+  <div class="declaration" id="claim-declaration">{{ preview.declaration }}</div>
+  <label class="check"><input type="checkbox" name="accept_declaration" value="1" required>
+    <span>I accept the declaration above</span></label>
+  {% endif %}
   <div class="row">
-    {% if preview and not preview.warnings %}
-    <button type="submit" class="button" formaction="{{ url_for('claim_submit', expense_id=expense.id) }}">Submit claim</button>
-    <button type="submit" class="secondary">Check again</button>
+    {% if sendable %}
+    <button type="submit" class="button" formaction="{{ url_for('claim_submit', expense_id=expense.id) }}">{{ 'Send renewal request' if method == 'renewal' else 'Submit claim' }}</button>
+    <button type="submit" class="secondary" formnovalidate>Check again</button>
     {% else %}
     <button type="submit" class="button">Check again</button>
     {% endif %}
     <a href="{{ url_for('index', **view) }}">Cancel</a>
   </div>
   <p class="claim-wait" role="status" hidden>Asking the provider. This can take a minute: please don't close the page.</p>
-  {% if preview and not preview.warnings %}<p><small>Submitting sends this expense and its invoice to the provider as a real claim.</small></p>{% endif %}
+  {% if sendable %}<p><small>{% if method == 'renewal' %}Sending asks the provider to pay this registration: a real request.{% else %}Submitting sends this expense and its invoice to the provider as a real claim.{% endif %}</small></p>{% endif %}
 </form>
 <script src="{{ url_for('static', filename='claims.js') }}" defer></script>
 {% elif not signin %}
