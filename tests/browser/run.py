@@ -24,6 +24,17 @@ TEST_FOLDER = "Expenses test"
 REQUIRE_ONEDRIVE = os.environ.get("REQUIRE_ONEDRIVE") == "1"
 # ONLY=header runs just the steps whose name contains it (for working on one thing; the full run is the check).
 ONLY = os.environ.get("ONLY", "")
+# Every run saves the names of the steps that failed in OUT/failed.txt. RERUN_FAILED=1 runs only those (and the
+# clean-up), so a failure is checked again in a minute, not by the whole suite. A step that needs data an earlier
+# step made can fail on its own: then run that step too (ONLY), or the whole suite.
+FAILED_FILE = os.path.join(OUT, "failed.txt")
+RERUN = None
+if os.environ.get("RERUN_FAILED") == "1":
+    try:
+        with open(FAILED_FILE, encoding="utf-8") as f:
+            RERUN = {line.strip() for line in f if line.strip()}
+    except FileNotFoundError:
+        RERUN = set()
 passed, failed, skipped = 0, [], []
 
 
@@ -34,6 +45,8 @@ class Skip(Exception):
 def step(name, fn, *args):
     global passed
     if ONLY and ONLY not in name:
+        return
+    if RERUN is not None and name not in RERUN:
         return
     try:
         fn(*args)
@@ -2202,6 +2215,11 @@ def main():
         remove_marked(page)
         browser.close()
     print(f"\n{passed} passed, {len(failed)} failed, {len(skipped)} skipped")
+    if not ONLY:     # a run of one step leaves the list of the last full (or rerun) run as it was
+        with open(FAILED_FILE, "w", encoding="utf-8") as f:
+            f.writelines(f"{name}\n" for name in failed)
+    if failed:
+        print("Run only these again: scripts/dev.sh test-browser --failed")
     sys.exit(1 if failed else 0)
 
 

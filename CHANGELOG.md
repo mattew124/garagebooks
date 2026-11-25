@@ -7,6 +7,9 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+- **Browser tests rerun only what failed.** `scripts/dev.sh test-browser --failed` reruns just the steps the last
+  run failed, and `--only TEXT` the steps whose name contains TEXT: seconds instead of the whole suite. The
+  contributing rules now leave the full pytest run to CI. Nothing changes for installers.
 - **The header stays on one line, on a phone too.** A phone shows the title, All, Reminders, + Add and a menu
   button, which opens the other links. On a wide screen **Settings** is a dropdown holding **Invoice storage**,
   which no longer has its own link. Without JavaScript the links wrap as before and the dropdown opens on
