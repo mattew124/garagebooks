@@ -676,7 +676,11 @@ case "${1:-}" in
     refresh) [ "$DEMO" = 0 ] || { echo "dev: the demo has nothing to refresh; use 'demo reset'" >&2; exit 2; }
         ensure_env; copy_data ;;
     reset) claims_check; ensure_env; compose down -v; start "" ;;
-    down) ensure_env; compose down ;;
+    down) ensure_env
+        # `compose down` leaves anonymous volumes behind (any image with a VOLUME gets one, such as
+        # dev-dashboards-owner's postgres), and `down -v` would delete the test database too.
+        compose rm --stop --force --volumes
+        compose down ;;
     destroy)
         ensure_env
         compose down -v --remove-orphans

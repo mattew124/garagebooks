@@ -173,6 +173,19 @@ def test_destroy_does_not_need_the_share_and_leaves_its_files(repo, tmp_path):
     assert "left" in out.stdout and str(share / "old-branch") in out.stdout
 
 
+def test_down_removes_the_containers_anonymous_volumes_and_keeps_the_test_database(repo, tmp_path):
+    """An image with a VOLUME gets an anonymous volume per container, which a plain `compose down` leaves behind."""
+    wt = worktree(repo, "waiting")
+    env = fake_tools(tmp_path, {})
+    r = dev(wt, env, "down")
+    assert r.returncode == 0, r.stderr
+    calls = [c.split() for c in docker_calls(tmp_path) if c.startswith("compose")]
+    removed = next(i for i, c in enumerate(calls) if "rm" in c and {"--stop", "--force", "--volumes"} <= set(c))
+    down = next(i for i, c in enumerate(calls) if "down" in c)
+    assert removed < down
+    assert not {"-v", "--volumes"} & set(calls[down]), "down -v would delete the test database"
+
+
 # ---- prune: removing the stacks of branches that have merged ----------------------------
 
 def fake_tools(tmp_path, stacks, images=None):

@@ -81,3 +81,18 @@ def test_if_new_does_nothing_for_the_recorded_release(tmp_path):
     result, _, log = run(tmp_path, "4.4.0", "--if-new", "--record")
     assert result.returncode == 0 and "nothing new" in result.stdout
     assert log == ""                                  # no docker, no tests
+
+
+def test_the_throwaway_database_is_on_disk_and_removed_with_its_volume(tmp_path):
+    """Not tmpfs, which holds the database in RAM. The postgres image makes an anonymous volume, so every removal needs -v."""
+    _, _, log = run(tmp_path, "4.5.0")
+    calls = log.splitlines()
+    assert not any("--tmpfs" in c for c in calls)
+    removals = [c.split() for c in calls if c.startswith("docker rm ")]
+    assert removals and all("-fv" in c for c in removals), removals
+
+
+def test_the_test_suites_database_is_on_disk_and_removed_with_its_volume():
+    source = (ROOT / "tests" / "conftest.py").read_text()
+    assert '"--tmpfs"' not in source
+    assert '"docker", "rm", "-fv", name' in source
