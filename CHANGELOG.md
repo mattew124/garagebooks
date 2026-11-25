@@ -7,6 +7,10 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+- **No period fields on categories without one.** An import row showed **Period from** and **to** whenever the PDF
+  named a period or expiry date, whatever the category. The fields now follow the category's **Has a period** tick,
+  and a period in another category isn't saved. Reading an invoice on the Add form no longer fills one in either.
+  An expense already saved with a period keeps it. Nothing changes for installers.
 - **Claiming an insurance or registration expense fills in its period.** The Claim page starts with the period
   stored on the expense, so the provider no longer asks for dates you already entered. Reading a registration
   notice also finds the period when the words "expiry date" or "Amount due" appear earlier without a figure, and

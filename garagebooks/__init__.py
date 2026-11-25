@@ -2990,10 +2990,13 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                     continue
                 if not row["include"]:
                     continue
+                # A hidden period (the category has none) isn't saved, or checked.
+                dated = any(str(c["id"]) == row["category_id"] and c["has_period"] for c in cat_rows)
                 values, row_errors = validation.parse_expense_form({
                     "car_id": car_id, "category_id": row["category_id"], "date": row["date"], "time": "12:00",
                     "amount": row["amount"], "odometer_km": row["odometer_km"], "vendor": row["vendor"],
-                    "notes": row["notes"], "period_start": row["period_start"], "period_end": row["period_end"],
+                    "notes": row["notes"], "period_start": row["period_start"] if dated else "",
+                    "period_end": row["period_end"] if dated else "",
                     "gst_amount": row["gst_amount"], "card_payment_ref": row["card_payment_ref"],
                     "bpay_biller_code": row["bpay_biller_code"], "bpay_ref": row["bpay_ref"],
                     ref_field: row["url"]}, tz, car_ids, cat_ids)
@@ -3315,6 +3318,9 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         log.debug("prefill file=%s bytes=%d sha256=%s found=%s missing=%s ms=%d", docinfo.quote(filename), len(pdf),
                   docinfo.sha12(pdf), have, missing, timer.ms)
         by_name = {c["name"]: c["id"] for c in categories}
+        # The form shows any period it holds, so it is only given one its category has.
+        if not any(c["name"] == guess["category"] and c["has_period"] for c in categories):
+            guess.update(period_start=None, period_end=None)
         return jsonify(
             date=guess["date"].isoformat() if guess["date"] else None,
             category_id=by_name.get(guess["category"]), vendor=guess["vendor"],
