@@ -7,6 +7,9 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+- **The import previews fit a phone.** On a phone both import pages are always cards, even if you chose **Rows**
+  for the expense list, with each field labelled above and as wide as the card. In rows, a service's item ticks now
+  wrap instead of stretching the table far past the screen. Nothing changes for installers.
 - **Which wheels.** A tyre expense, and a per-wheel service item such as brakes, can record front left, front right,
   rear left and rear right. The ticks appear only where they apply, the expense list shows them, and **Per wheel** on
   the Categories page sets which items ask. Upgrade: pull the new image (the schema gains `wheels` and `per_wheel`

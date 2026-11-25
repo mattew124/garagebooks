@@ -2,6 +2,7 @@
 {% from "_provider.html" import mark, brand with context %}
 {% from "_error_summary.html" import summary %}
 {% block title %}Import invoices{% endblock %}
+{% block html_attrs %} data-cards-on-phones{% endblock %}
 {% block content %}
 <h1>{% if kind == 'onedrive' %}{{ mark() }} {% elif kind == 'mail' %}{{ brand('outlook') }} {% endif %}Import invoices for {{ 'a new car' if car.id == 0 else (car.name or ('Car ' ~ car.id)) }}</h1>
 {% if car.id == 0 %}<p>This folder has no car yet. The car is made from the purchase invoice you tick (its make, model, VIN, year and body

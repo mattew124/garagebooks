@@ -13,6 +13,9 @@ importing (a brochure, say) and they stop being offered; **Offer them again** at
 brings them back. When you press Import with some files left unticked, the page asks whether to
 skip those too; choose Cancel to leave them for next time.
 
+On a phone the table of this page, and of the [aCar import](#importing-from-acar), is shown as one card for each cost,
+whichever of **Rows** or **Tiles** you chose for the expense list.
+
 ![The import table, with its guesses to check, correct and untick](images/import-preview.png)
 
 ## How it guesses

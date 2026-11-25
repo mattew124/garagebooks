@@ -555,6 +555,50 @@ def test_wheel_ticks(page):
     shot(page, "wheel-ticks")
 
 
+def test_acar_import_layout(page):
+    """A car with many service items, on a phone that chose Rows for the expense list and on a desktop:
+    the ticks wrap, the form stays inside the screen, and on a phone each cost is a card whose fields
+    are as wide as it is. Nothing is saved."""
+    items = ", ".join(f"Example Part {n}" for n in range(1, 19))
+    csv = ACAR_CSV.replace('"Engine Oil, Inspection"', f'"{items}"')
+
+    def preview(tab):
+        tab.goto(UI + "import/acar")
+        tab.select_option("select[name=car_id]", value="new")
+        tab.set_input_files("input[name=file]", {"name": "aCar-records.csv", "mimeType": "text/csv", "buffer": csv.encode()})
+        tab.click("button[type=submit]")
+        expect(tab.locator("tr#row-0 [data-service-fields]")).to_be_visible()
+
+    def width(tab, selector):
+        return tab.locator(selector).first.bounding_box()["width"]
+
+    page.goto(UI)
+    saved = page.evaluate("localStorage.getItem('expenses-view')")
+    size = page.viewport_size
+    try:
+        page.evaluate("localStorage.setItem('expenses-view', 'rows')")
+        page.set_viewport_size({"width": 360, "height": 780})
+        preview(page)
+        shot(page, "acar-import-phone")
+        table = width(page, "table.import-table")
+        assert table <= 360, f"on a phone the table is {table}px wide"
+        for field in ("select[name=category_id_0]", "input[name=vendor_0]", "input[name=amount_0]", "tr#row-0 .file"):
+            assert width(page, field) <= 360, field
+        for field in ("select[name=category_id_0]", "input[name=vendor_0]", "tr#row-0 .file"):
+            assert width(page, field) >= 260, f"{field} is squeezed to {width(page, field)}px"
+        assert page.evaluate("localStorage.getItem('expenses-view')") == "rows"      # the list's choice is kept
+
+        page.set_viewport_size({"width": 1280, "height": 900})
+        preview(page)
+        shot(page, "acar-import-desktop")
+        table, wrap = width(page, "table.import-table"), width(page, ".import .table-wrap")
+        assert table <= wrap + 1, f"on a desktop the table is {table}px in {wrap}px"
+        assert width(page, "tr#row-0 .file") >= 120, "the What column is squeezed"
+    finally:
+        page.set_viewport_size(size)
+        page.evaluate("(v) => v === null ? localStorage.removeItem('expenses-view') : localStorage.setItem('expenses-view', v)", saved)
+
+
 def test_acar_import_preview(page):
     """Upload an aCar CSV: the preview shows the costs and the sale, and nothing is saved."""
     page.goto(UI + "import/acar")
@@ -2299,6 +2343,7 @@ def main():
         step("amount field works out sums", test_amount_calculator, page)
         step("payment calculator works out the true cost", test_payment_calculator, page)
         step("aCar import previews without saving", test_acar_import_preview, page)
+        step("aCar import fits a phone and a desktop", test_acar_import_layout, page)
         step("wheel ticks show only where they apply", test_wheel_ticks, page)
         step("list: tiles or rows, sorting, and back to the same view", test_list_toggle_sort_and_return, page)
         step("rows on a phone show whole dates, categories and amounts", test_rows_on_a_phone_show_whole_values, page)

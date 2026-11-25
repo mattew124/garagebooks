@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from "_error_summary.html" import summary %}
 {% block title %}Import from aCar{% endblock %}
+{% block html_attrs %} data-cards-on-phones{% endblock %}
 {% block content %}
 <h1>Import from aCar{% if vehicle %}: {{ vehicle }}{% endif %}</h1>
 {% if error %}<p class="notice bad" role="alert">{{ error }}</p>{% endif %}

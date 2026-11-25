@@ -509,7 +509,22 @@ small.after-tax { display: block; font-weight: 400; color: var(--muted); font-si
 .import-table .row-extras label.inline { display: flex; }
 .import-table .row-extras .period { display: grid; gap: .4rem; }
 .import-table .row-extras input[type=date] { min-width: 0; }
-[data-view=tiles] .import-table td.extras { flex-direction: column; align-items: stretch; gap: .25rem; }
+/* In rows, the Category or Notes cell's ticks wrap: kept on one line, a car's service items stretch the table
+   to thousands of pixels. The description keeps a readable width. */
+.import-table td.extras { white-space: normal; min-width: 14rem; }
+[data-view=rows] .import-table .file { min-width: 9rem; }
+.import-table fieldset { min-width: 0; }
+/* In tiles, each field has its label above it and the card's full width; only the amount and odometer share a
+   line. A tick stays beside its label. */
+[data-view=tiles] .import-table tr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+[data-view=tiles] .import-table td { grid-column: 1 / -1; }
+[data-view=tiles] .import-table td.num { grid-column: auto; }
+[data-view=tiles] .import-table td, [data-view=tiles] .import-table td.num { flex-direction: column; align-items: stretch; gap: .15rem; min-width: 0; text-align: left; }
+[data-view=tiles] .import-table td:has(> input[type=checkbox]) { flex-direction: row; align-items: center; justify-content: flex-start; gap: .75rem; }
+[data-view=tiles] .import-table .file { max-width: none; }
+[data-view=tiles] .import-table input[name^=amount_], [data-view=tiles] .import-table input[name^=odometer_km_] { width: 100%; text-align: left; }
+/* The new car's type takes a line of its own on a phone, so its longest choice isn't cut off. */
+@media (max-width: 40rem) { #new-car .row > label:has(select) { flex-basis: 100%; } }
 
 /* A long form that came back with errors: the list of them, and each wrong row marked and easy to jump to. */
 .error-summary { border: 2px solid var(--bad); border-radius: var(--r); background: var(--bad-soft); padding: .8rem 1rem; margin: 0 0 1rem; scroll-margin-top: 1rem; }
