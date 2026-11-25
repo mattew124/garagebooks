@@ -1820,10 +1820,10 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         row, refused = claim_context(expense_id)
         if refused:
             return refused
-        if first_visit and "gst" not in fields and row["gst_amount"] is not None:
-            # The GST stated on the document goes in the protocol's `gst` field. Only the first time the page
-            # opens: an owner who clears it has said to leave it to the provider.
-            fields = {**fields, "gst": f"{row['gst_amount']:.2f}"}
+        if first_visit:
+            # What the expense already holds starts the claim's fields. Only the first time the page opens: after
+            # that the form's own values count (an owner who clears the GST leaves it to the provider).
+            fields = {**claim_lib.stored_fields(row), **fields}
         invoice, blocked, notice = claim_invoice(row)
         if blocked:
             return render_claim(row, fields, blocked=blocked, errors=errors)

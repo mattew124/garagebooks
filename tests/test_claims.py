@@ -659,3 +659,33 @@ def test_a_money_value_too_big_for_the_database_is_refused_not_a_crash(value):
     assert claims.number(value) is None
     fields, errors = claims.clean_fields({"field_gst": str(value)})
     assert "gst" not in fields and errors or str(value).startswith("-") and errors
+
+
+# ---- the period the expense covers ------------------------------------------------------------------
+
+def registration(admin):
+    lease(admin)
+    eid = expense(admin, category="Registration", amount="500.00")
+    admin.execute("UPDATE garagebooks.expense SET period_start='2026-12-01', period_end='2027-11-30' WHERE id=%s", (eid,))
+    return eid
+
+
+def test_the_claim_page_starts_with_the_expenses_period(client, admin, fake):
+    eid = registration(admin)
+    page = client.get(f"/{eid}/claim").data.decode()
+    assert last(fake, "/v1/preview")[3]["expense"]["fields"] == {"start": "2026-12-01", "end": "2027-11-30"}
+    # and carries it on to Submit
+    assert 'name="field_start" value="2026-12-01"' in page and 'name="field_end" value="2027-11-30"' in page
+
+
+def test_a_period_changed_on_the_claim_page_wins_over_the_expenses(client, admin, fake):
+    eid = registration(admin)
+    client.post(f"/{eid}/claim", data={"field_start": "2026-12-02", "field_end": "2027-12-01"}, headers=ORIGIN)
+    assert last(fake, "/v1/preview")[3]["expense"]["fields"] == {"start": "2026-12-02", "end": "2027-12-01"}
+
+
+def test_an_expense_with_half_a_period_sends_the_half_it_has(client, admin, fake):
+    eid = registration(admin)
+    admin.execute("UPDATE garagebooks.expense SET period_start=NULL WHERE id=%s", (eid,))
+    client.get(f"/{eid}/claim")
+    assert last(fake, "/v1/preview")[3]["expense"]["fields"] == {"end": "2027-11-30"}
