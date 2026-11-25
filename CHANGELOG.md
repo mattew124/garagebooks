@@ -7,6 +7,10 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+- **Claiming an insurance or registration expense fills in its period.** The Claim page starts with the period
+  stored on the expense, so the provider no longer asks for dates you already entered. Reading a registration
+  notice also finds the period when the words "expiry date" or "Amount due" appear earlier without a figure, and
+  no longer drops the 12-month column of a widely spaced notice. Nothing changes for installers.
 - **Browser tests rerun only what failed.** `scripts/dev.sh test-browser --failed` reruns just the steps the last
   run failed, and `--only TEXT` the steps whose name contains TEXT: seconds instead of the whole suite. The
   contributing rules now leave the full pytest run to CI. Nothing changes for installers.

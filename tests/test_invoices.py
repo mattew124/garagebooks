@@ -573,3 +573,14 @@ def test_a_vin_with_the_wrong_letters_or_length_is_not_one():
 def test_a_plain_year_is_the_model_year_and_manufacture_dates_are_the_build_year():
     got = invoices.propose("", "x.pdf", "TAX INVOICE\nYear: 2024\nBuild date: 03/2023\nTotal $1.00\n", CATS)["car_details"]
     assert got == {"model_year": 2024, "build_year": 2023}
+
+
+def test_a_notice_whose_first_labels_have_no_figures_still_gives_the_period():
+    # "expiry date" appears in prose, and the header's "Amount due" has no months, before the lines that count.
+    text = ("VEHICLE REGISTRATION RENEWAL NOTICE          Amount due:          $500.00\n"
+            "Add a vehicle before the expiry\n"
+            "                          date of its registration.\n"
+            "Amount due" + " " * 45 + "6 months" + " " * 30 + "12 months\n"
+            "Next registration expiry date                      30/12/2026              30/06/2027\n")
+    got = invoices.propose("", "Registration.pdf", text, CATS + ["Registration"])
+    assert (got["period_start"], got["period_end"]) == (_date(2026, 7, 1), _date(2027, 6, 30))

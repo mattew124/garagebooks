@@ -232,7 +232,8 @@ is more than $0, falls inside a lease of the car and has not been claimed yet.
 
 1. Choose **Claim** (on the list, the **Claims** page or the expense's Edit page). The page asks the
    connector what it would claim and shows the provider's own summary, the amount, the GST and the
-   amount without GST. This can take up to a minute.
+   amount without GST. This can take up to a minute. The GST and the period stored on the expense are
+   filled in for you.
 2. If the provider needs more, such as a description or the dates of an insurance policy, the page
    shows those boxes with the provider's own labels. Fill them in and choose **Check again**. You can
    also type the GST included in the amount, or leave it empty and let the provider work it out.
