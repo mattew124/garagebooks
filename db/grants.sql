@@ -12,6 +12,8 @@ GRANT UPDATE (upload_folder, budget_pool, gst_free, has_period, applies_to, has_
 GRANT SELECT, INSERT, UPDATE, DELETE ON garagebooks.lease, garagebooks.lease_budget TO :"app_role";
 GRANT EXECUTE ON FUNCTION garagebooks.fbt_year(date) TO :"app_role";
 GRANT SELECT, INSERT, UPDATE, DELETE ON garagebooks.car_folder, garagebooks.onedrive_account TO :"app_role";
+-- The app's copy of the OneDrive folder listing.
+GRANT SELECT, INSERT, UPDATE, DELETE ON garagebooks.drive_item, garagebooks.drive_sync TO :"app_role";
 GRANT SELECT, INSERT, UPDATE, DELETE ON garagebooks.learned_label, garagebooks.learned_vendor, garagebooks.import_skip TO :"app_role";
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA garagebooks TO :"app_role";
 -- Its own car list and odometer readings; sync_teslamate_cars() runs as the app.

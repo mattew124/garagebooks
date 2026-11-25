@@ -1,5 +1,36 @@
 // No inline scripts: the CSP only allows this file.
 document.addEventListener("DOMContentLoaded", () => {
+  // The folder chooser: opening a folder (or going up) swaps the listing in place instead of loading a new page.
+  // The address and the Back button keep working; anything unexpected is left to an ordinary page load.
+  let browser = document.querySelector("[data-folder-browser]");
+  if (browser) {
+    let wanted = 0;
+    const openFolder = async (url, push) => {
+      const ticket = ++wanted;
+      browser.setAttribute("aria-busy", "true");
+      try {
+        const res = await fetch(url);
+        const next = new DOMParser().parseFromString(await res.text(), "text/html").querySelector("[data-folder-browser]");
+        if (ticket !== wanted) return;      // a newer click has replaced this one
+        if (!res.ok || res.redirected || !next) { location.assign(url); return; }
+        const adopted = document.adoptNode(next);
+        browser.replaceWith(adopted);
+        browser = adopted;
+        listen();
+        if (push) history.pushState(null, "", url);
+      } catch {
+        if (ticket === wanted) location.assign(url);
+      }
+    };
+    const listen = () => browser.addEventListener("click", (e) => {
+      const link = e.target.closest(".folder-list a");
+      if (!link || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      e.preventDefault();
+      openFolder(link.href, true);
+    });
+    listen();
+    window.addEventListener("popstate", () => openFolder(location.href, false));
+  }
   document.querySelectorAll("form:not([data-live]) [data-autosubmit]").forEach((el) =>
     el.addEventListener("change", () => el.form.submit()));
 

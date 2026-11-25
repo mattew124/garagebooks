@@ -161,7 +161,7 @@ def admin(pg):
         script = [
             "TRUNCATE garagebooks.expense, garagebooks.car_folder, garagebooks.car_mail_folder, garagebooks.onedrive_account,"
             " garagebooks.learned_label, garagebooks.learned_vendor, garagebooks.import_skip,"
-            " garagebooks.odometer_reading, garagebooks.reminder RESTART IDENTITY CASCADE",
+            " garagebooks.odometer_reading, garagebooks.reminder, garagebooks.drive_item, garagebooks.drive_sync RESTART IDENTITY CASCADE",
         ]
         if TESLAMATE:
             # CASCADE: real TeslaMate tables (drives...) reference them
