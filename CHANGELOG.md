@@ -7,18 +7,22 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+- **Browsing OneDrive no longer waits for Microsoft.** The app keeps a listing of your drive's folders and PDFs in
+  its database, made in the background with one `delta` query, so the folder chooser and the file picker open
+  folders from it, and changes are fetched afterwards (also hourly, by the new `onedrive_folders` scheduled job).
+  Until the first listing is complete, each folder is fetched as you open it. The listing holds the names of all
+  your folders and PDFs, so database backups do too; **Disconnect** deletes it. Upgrade: pull the new image. On the
+  restricted database role, re-run `scripts/provision-db.sh` first.
+- **The folder chooser stays on the page.** Opening a folder or going up replaces the list instead of loading a new
+  page; Back still works.
+- **A silent Microsoft address no longer stalls a request for a minute.** The app now gives up connecting to an
+  address after 5 seconds and tries the next.
 - **Development: the browser tests can't reach a real claims connector.** `scripts/dev.sh onedrive-link` could
   restart a stack started with `STAND_IN=1` on the connector `dev.env` names, and `test-browser`, which submits
   claims, only checked its own settings. It now refuses unless the running app is on the stand-in, and
   `onedrive-link` keeps a stack on it. Nothing changes for installers.
 - **Development:** `scripts/dev.sh down` and the test runs now delete the anonymous Docker volumes their
   containers made, keeping the dev stack's test database. The test databases are on disk again, not in RAM.
-
-- **Clicking through OneDrive folders is quicker.** The folder chooser and the file picker now list the whole drive
-  once, with one `delta` query from the top, and keep its folders and PDFs in memory, so opening a folder then asks
-  Microsoft nothing. Starting to browse again asks only what has changed. The listing runs in the background (it can
-  take a few minutes for thousands of files); until it is ready, and if the drive is too big to list whole, each
-  folder is asked for by itself, with one request. Nothing to do on upgrade.
 - **Ask the provider to pay a registration.** Claiming a Registration expense now offers a **registration renewal
   request** as well as a claim for one already paid, with the notice's payment references filled in and the
   provider's declaration to accept. The lease's **The provider renews it** tick picks which the page starts on. It

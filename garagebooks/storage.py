@@ -64,15 +64,16 @@ class OneDriveStore:
     _CALLS = ("folder", "subfolders", "contents", "create_folder", "ensure_subfolder", "upload",
               "pdfs", "download", "rename", "fetch")
 
-    def __init__(self, drive, access_token, tree=None, sign_in=None):
+    def __init__(self, drive, access_token, folders=None):
         self.drive, self._access_token, self._token = drive, access_token, None
-        self.tree, self._sign_in = tree, sign_in
+        self.folders = folders       # drivestore.DriveStore: the listing kept in the database
 
     def browse(self, folder_id=None, fresh=False):
-        """contents() for someone clicking through folders: answered from the drive tree in memory."""
+        """contents() for someone clicking through folders: from the listing in the database when it has the
+        folder, and otherwise from Graph."""
         if self._token is None:
-            self._token = self._access_token()     # first: a lost sign-in must not be answered from memory
-        return self.tree.contents(self._sign_in(), self._token, folder_id, fresh)
+            self._token = self._access_token()     # first: a lost sign-in must not be answered from the listing
+        return self.folders.browse(folder_id, fresh) or self.drive.contents(self._token, folder_id)
 
     def __getattr__(self, name):
         if name not in self._CALLS:

@@ -1522,3 +1522,26 @@ END $$;
 --   onedrive_account.signed_in_at  when OneDrive was last signed in. The app keeps a listing of the drive in
 --   memory for browsing, and this is how each web worker knows the listing belongs to an earlier sign-in.
 ALTER TABLE garagebooks.onedrive_account ADD COLUMN IF NOT EXISTS signed_in_at timestamptz;
+
+-- The folders and PDFs of the signed-in OneDrive (drivestore.py), so browsing them doesn't wait for Microsoft. A copy:
+-- it is cleared on disconnect and listed again after a sign-in. drive_sync is the one row saying how far it got: the
+-- next page of a listing under way, or the delta link that asks what has changed since.
+CREATE TABLE IF NOT EXISTS garagebooks.drive_item (
+    id        text PRIMARY KEY,
+    parent_id text,                       -- NULL only for the top of the drive
+    name      text NOT NULL,
+    is_folder boolean NOT NULL,
+    size      bigint NOT NULL DEFAULT 0,
+    web_url   text
+);
+CREATE INDEX IF NOT EXISTS drive_item_parent ON garagebooks.drive_item (parent_id);
+CREATE TABLE IF NOT EXISTS garagebooks.drive_sync (
+    id           boolean PRIMARY KEY DEFAULT true CHECK (id),
+    signed_in_at timestamptz,             -- the sign-in it was listed with
+    cursor       text,
+    complete     boolean NOT NULL DEFAULT false,
+    synced_at    timestamptz,
+    failed_at    timestamptz,
+    lease_token  text,                    -- the run that is syncing, so only one does
+    lease_until  timestamptz
+);

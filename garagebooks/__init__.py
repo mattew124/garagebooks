@@ -28,7 +28,7 @@ from psycopg import errors as pg_errors
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from . import ato, claims as claim_lib, dashboard, db, docinfo, icons, invoices, jobs, jobtext, lease, leaseform, logs, notices, notify, onedrive, outlook, reminders, sources, storage, tax, updates, validation
+from . import ato, claims as claim_lib, dashboard, db, docinfo, drivestore, icons, invoices, jobs, jobtext, lease, leaseform, logs, notices, notify, onedrive, outlook, reminders, sources, storage, tax, updates, validation
 
 log = logging.getLogger("garagebooks.app")
 
@@ -267,6 +267,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         log.warning("ONEDRIVE_TOKEN_KEY was renamed GARAGEBOOKS_ENCRYPTION_KEY; OneDrive stays off until it is set.")
     # The mailbox uses OneDrive's app registration and encryption key, with a sign-in of its own.
     mailbox = outlook.Mailbox(drive) if drive else None
+    # The OneDrive folder listing kept in the database, which browsing reads (access_token is defined below).
+    drive_folders = drivestore.DriveStore(connect, drive, lambda: access_token()) if drive else None  # noqa: PLW0108
     # INVOICES_DIR turns on keeping invoices in a folder on the server: a host folder (a NAS share,
     # say) mounted into the container. The app serves those PDFs itself, at /invoice/<id>.
     local = None
@@ -327,6 +329,17 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
     scheduler.add("ato_rates", timedelta(days=7), lambda conn: tax.refresh(conn, ato_fetch or ato.get, datetime.now(timezone.utc)),
                   "Reads the income tax brackets and the home charging rate for an electric car from the ATO's pages. If a page "
                   "can't be read or has changed, the rates already kept stay as they are.")
+    def sync_drive_listing(conn):
+        if drive_folders is None or not drive_folders.connected(conn):
+            return "no OneDrive connected"
+        try:
+            return drive_folders.sync()
+        except (onedrive.OneDriveError, onedrive.NotConnected) as exc:
+            raise jobs.JobError(exc.user_message) from None
+
+    scheduler.add("onedrive_folders", timedelta(hours=1), sync_drive_listing,
+                  "Keeps the app's listing of your OneDrive folders and PDFs up to date, so browsing them doesn't wait "
+                  "for Microsoft. The first listing of a large drive takes a few minutes.")
     send_notice = notify_send or notify.send
 
     def notifications(conn):
@@ -635,18 +648,10 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
     def store_for(kind):
         """The storage of that kind, or None when this installation doesn't have it."""
         if kind == "onedrive" and drive is not None:
-            return storage.OneDriveStore(drive, access_token, drive_tree, drive_sign_in)
+            return storage.OneDriveStore(drive, access_token, drive_folders)
         if kind == "mail" and mailbox is not None:
             return storage.MailStore(mailbox, lambda: access_token(mail=True))
         return local if kind == "local" else None
-
-    drive_tree = onedrive.TreeCache(drive) if drive is not None else None   # this worker's, for browsing
-
-    def drive_sign_in():
-        """What the drive tree belongs to: a new sign-in or registration starts it again."""
-        with connect() as conn:
-            account = db.onedrive_account(conn)
-        return account["client_id"], account["signed_in_at"]
 
     def car_folder(conn, car_id, kind):
         """The car's folder, if it is in that storage (for "mail", its mailbox folder)."""
@@ -2363,6 +2368,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             return render_storage(errors, 400)
         with connect() as conn:
             # A new registration can't use the old one's sign-in.
+            drivestore.wipe(conn)
             db.save_onedrive_account(conn, client_secret=drive.encrypt(secret), refresh_token=None,
                                      account=None, auth_state=None, auth_expires_at=None,
                                      signin_lost_at=None, signin_checked_at=None, mail_refresh_token=None,
@@ -2444,6 +2450,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                                               f"{p}account": name, f"{p}signin_lost_at": None,
                                               f"{p}signin_checked_at": None,
                                               **({} if mail else {"signed_in_at": datetime.now(timezone.utc)})})
+            if not mail:
+                drivestore.wipe(conn)
         log.info("%s connected", what)
         resp = redirect(url_for("storage_page", msg="mail_connected" if mail else "connected"), 303)
         resp.delete_cookie(STATE_COOKIE, path=request.script_root or "/")
@@ -2454,6 +2462,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         need_drive()
         with connect() as conn:
             db.save_onedrive_account(conn, refresh_token=None, account=None, signin_lost_at=None, signin_checked_at=None)
+            drivestore.wipe(conn)
         log.info("OneDrive disconnected")
         return redirect(url_for("storage_page", msg="disconnected"), 303)
 
@@ -2866,7 +2875,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 said = exc.user_message if isinstance(exc, storage.StorageError) else str(exc)   # or the name's ValueError
                 return render_browse(store, car, parent_id, error=said, status=400)
             if kind == "onedrive":
-                drive_tree.expire()
+                drive_folders.add_folder(created)
             return redirect(url_for(f"{kind}_browse", car_id=car_id, folder=created["id"]), 303)
 
         if kind != "mail":      # the mailbox is only read (Mail.Read can't make a folder)
