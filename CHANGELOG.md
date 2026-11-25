@@ -7,6 +7,9 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+- **Development:** `scripts/dev.sh down` and the test runs now delete the anonymous Docker volumes their
+  containers made, keeping the dev stack's test database.
+
 - **Faster tests.** The suite runs in parallel (`pytest -n auto`, one throwaway Postgres per worker), about three times
   faster on four cores, and the route property tests use 15 examples locally (40 in CI, as before). The `admin`
   fixture makes one round trip instead of a dozen. CI and the TeslaMate compatibility check use `-n auto`, and the check

@@ -102,6 +102,9 @@ def pg():
     name = f"garagebooks-test-{secrets.token_hex(4)}"
     admin_pass = secrets.token_hex(16)
     try:
+        # The postgres image declares its data dir a VOLUME, so Docker makes an anonymous volume on disk
+        # (not tmpfs: that holds the database in RAM). --rm and `rm -v` below delete it with the container;
+        # a plain `docker rm -f` would leave it behind.
         sh("docker", "run", "-d", "--rm", "--name", name, "-p", "127.0.0.1::5432",
            "-e", f"POSTGRES_PASSWORD={admin_pass}", "-e", "POSTGRES_DB=teslamate", IMAGE)
     except subprocess.CalledProcessError as exc:
@@ -136,7 +139,7 @@ def pg():
             pg.psql(OWN_CAR)
         yield pg
     finally:
-        subprocess.run(["docker", "rm", "-f", name], capture_output=True)
+        subprocess.run(["docker", "rm", "-fv", name], capture_output=True)  # -v: and its volume
 
 
 @pytest.fixture()
