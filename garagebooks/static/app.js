@@ -3,6 +3,31 @@ document.addEventListener("DOMContentLoaded", () => {
   document.querySelectorAll("form:not([data-live]) [data-autosubmit]").forEach((el) =>
     el.addEventListener("change", () => el.form.submit()));
 
+  // Header: the menu button (phones) and the Settings dropdown (wide screens). Without this file the
+  // links wrap and the dropdown opens on hover, so nothing is out of reach.
+  const header = document.querySelector("header");
+  const menuButton = header && header.querySelector(".menu-toggle");
+  const dropdown = header && header.querySelector(".dropdown");
+  const dropButton = dropdown && dropdown.querySelector(".drop-toggle");
+  const setMenu = (open) => {
+    header.classList.toggle("menu-open", open);
+    menuButton.setAttribute("aria-expanded", String(open));
+  };
+  const setDrop = (open) => {
+    dropdown.classList.toggle("open", open);
+    dropButton.setAttribute("aria-expanded", String(open));
+  };
+  if (menuButton) menuButton.addEventListener("click", () => setMenu(!header.classList.contains("menu-open")));
+  if (dropButton) {
+    dropButton.addEventListener("click", () => setDrop(!dropdown.classList.contains("open")));
+    document.addEventListener("click", (ev) => { if (!dropdown.contains(ev.target)) setDrop(false); });
+  }
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Escape" || !header) return;
+    if (dropdown && dropdown.classList.contains("open")) { setDrop(false); dropButton.focus(); }
+    else if (header.classList.contains("menu-open")) { setMenu(false); menuButton.focus(); }
+  });
+
   document.querySelectorAll("form[data-confirm]").forEach((form) =>
     form.addEventListener("submit", (ev) => {
       if (!confirm(form.dataset.confirm)) ev.preventDefault();
@@ -29,7 +54,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // The button says what it will do: nothing to import but some to skip is "Skip 3", not "Import ticked".
   const ticked = (prefix) => importForm.querySelectorAll(`input[name^=${prefix}_]:checked`).length;
   const importLabel = () => {
-    const [n, s] = [ticked("include"), ticked("skip")];
+    const [n, s] = [ticked("include") + ticked("lease"), ticked("skip")];
     return n && s ? `Import ${n} and skip ${s}` : s ? `Skip ${s}` : "Import ticked";
   };
   const relabel = () => {
@@ -844,7 +869,18 @@ document.addEventListener("DOMContentLoaded", () => {
   const odo = form.elements.odometer_km;
   const hint = document.getElementById("odometer-hint");
 
+  // Only a car TeslaMate tracks has an odometer to fill from; the button follows the chosen car.
+  const fillButton = document.getElementById("fill-odometer");
+  const tracked = () => {
+    const chosen = form.elements.car_id.selectedOptions[0];
+    return !!chosen && chosen.dataset.teslamate === "1";
+  };
+  const showFill = () => { if (fillButton) fillButton.hidden = !tracked(); };
+  form.elements.car_id.addEventListener("change", showFill);
+  showFill();
+
   async function fill(manual) {
+    if (!tracked()) return;
     const { car_id, date, time } = form.elements;
     if (!car_id.value || !date.value || !time.value) {
       if (manual) hint.textContent = "Pick the car, date and time first.";
@@ -865,7 +901,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  document.getElementById("fill-odometer").addEventListener("click", () => fill(true));
+  if (fillButton) fillButton.addEventListener("click", () => fill(true));
 
   // Choosing the invoice PDF fills in what can be read from it, but never a field the person
   // has already typed in or changed.
@@ -894,6 +930,13 @@ document.addEventListener("DOMContentLoaded", () => {
     const chosen = form.elements.category_id.selectedOptions[0];
     wheelField.hidden = !(chosen && chosen.dataset.wheels === "1");
   });
+  // A notice's payment references belong to registrations only.
+  const payRefs = form.querySelector(".payment-refs");
+  const payRefsShown = () => {
+    const chosen = form.elements.category_id.selectedOptions[0];
+    payRefs.hidden = !(chosen && chosen.dataset.payrefs === "1");
+  };
+  if (payRefs) form.elements.category_id.addEventListener("change", payRefsShown);
   const serviceFields = document.getElementById("service-fields");
   if (serviceFields) form.elements.category_id.addEventListener("change", () => {
     const chosen = form.elements.category_id.selectedOptions[0];
@@ -950,6 +993,7 @@ document.addEventListener("DOMContentLoaded", () => {
       set("period_start", "period start", data.period_start);
       set("period_end", "period end", data.period_end);
       if (periodFields) periodShown();
+      if (payRefs) payRefsShown();
       if (gstField && form.elements.gst_amount.value) gstField.hidden = false;
       if (data.odometer_km && filled.includes("odometer")) hint.textContent = "Read from the invoice.";
       else if (!data.odometer_km && !touched.has("odometer_km")) await fill(false);

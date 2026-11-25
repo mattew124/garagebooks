@@ -55,9 +55,24 @@ a **period**: the start and end dates, read from `Period of insurance: from … 
 a notice offers 6 and 12 months, Settings → When an invoice offers several amounts decides which one is read, as it does for the amount.
 Which categories have a period is the **Has a period** tick on the **Categories** page (Insurance and
 Registration are ticked to begin with), so a category you add, such as roadside assistance, can have one too.
-A period can't end before it starts.
+A period can't end before it starts. Only a category with a period shows the fields: if a PDF in another category
+names one, it stays out of sight and isn't saved, and appears if you change the row to a category that has a period.
+(An expense that already has a period still shows it when you edit it.)
 
 <!-- screenshot: import-row-period - An import row for an insurance policy, with its notes and period -->
+
+## Lease forms and agreements
+
+A PDF that is an associate lease form (it states its lease start and end dates or is titled an associate lease)
+or a lease agreement isn't an invoice, so the import doesn't offer it as an expense. Its row says what it is.
+If the car has a lease starting on the date the form states, the row is ticked to **keep the file with that
+lease** as its lease form (an agreement goes to the car's lease when it has just one); the lease page then links
+to it. If there is no such lease yet, the row offers **Add a lease from this**, which opens the Add a lease page
+where you choose the file to fill in the boxes. A lease that already has that document isn't offered it again.
+Such a file is never renamed or moved: its row has no rename option. For an invoice, the **Rename** box
+starts unticked, so nothing is renamed unless you tick it.
+
+<!-- screenshot: import-lease-row - An import row for an associate lease form, ticked to keep it with the lease it matches -->
 
 ## Several PDFs in one expense
 
@@ -101,7 +116,8 @@ is worked out on. Registration starts as **GST only partly applies** on the Cate
 no GST is counted.
 
 The notice's **card payment reference** (the `Ref:` under `Enter Payment Reference Number`), **BPAY biller code** and **BPAY reference** are kept with the expense, in a
-**Payment references** section of the Edit form that starts closed. They are never shown in the expense list or tiles,
+**Payment references** section of the Edit form that starts closed. Only categories in the **registration** budget pool
+(Registration, as installed) have the section or keep references: changing an expense to another category drops them. They are never shown in the expense list or tiles,
 on the dashboard, or in the change history's displayed values. When you
 [claim the expense](leases.md), the claim page starts with the stored GST in its GST field (empty it to leave the GST
 to the provider).

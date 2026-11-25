@@ -559,6 +559,7 @@ _SELECT = """
            e.gst_amount, e.card_payment_ref, e.bpay_biller_code, e.bpay_ref, e.wheels, cat.has_period, c.make AS car_make, c.model AS car_model, cat.budget_pool,
            cl.provider AS claim_provider, cl.provider_id AS claim_provider_id, cl.reference AS claim_reference,
            cl.status AS claim_status, cl.paid_date AS claim_paid_date, cl.approved_amount AS claim_approved,
+           cl.fields ->> 'method' AS claim_method,
            (EXISTS (SELECT 1 FROM garagebooks.provider_claim pc WHERE pc.expense_id = e.id)
             OR EXISTS (SELECT 1 FROM garagebooks.provider_transaction pt WHERE pt.expense_id = e.id AND pt.kind = 'direct_payment')) AS provider_matched
     FROM garagebooks.expense e
@@ -770,7 +771,12 @@ def known_invoices(conn, refs):
                         # An email whose PDF was copied into the car's storage: its expense links the copy.
                         "UNION SELECT ref FROM garagebooks.mail_import WHERE ref = ANY(%(refs)s) "
                         "UNION SELECT invoice_url FROM garagebooks.expense_document WHERE invoice_url = ANY(%(refs)s) "
-                        "UNION SELECT invoice_path FROM garagebooks.expense_document WHERE invoice_path = ANY(%(refs)s)",
+                        "UNION SELECT invoice_path FROM garagebooks.expense_document WHERE invoice_path = ANY(%(refs)s) "
+                        # A lease form or agreement kept with a lease.
+                        "UNION SELECT form_url FROM garagebooks.lease WHERE form_url = ANY(%(refs)s) "
+                        "UNION SELECT form_path FROM garagebooks.lease WHERE form_path = ANY(%(refs)s) "
+                        "UNION SELECT agreement_url FROM garagebooks.lease WHERE agreement_url = ANY(%(refs)s) "
+                        "UNION SELECT agreement_path FROM garagebooks.lease WHERE agreement_path = ANY(%(refs)s)",
                         {"refs": list(refs)}).fetchall()
     return {r["ref"] for r in rows}
 
@@ -921,6 +927,17 @@ def car_leases(conn, car_id):
     """Every lease of a car, newest first. A row per lease with all its columns."""
     return conn.execute("SELECT * FROM garagebooks.lease WHERE car_id = %s ORDER BY start_date DESC, id DESC",
                         (car_id,)).fetchall()
+
+
+def set_lease_document(conn, car_id, lease_id, doc, ref_field, ref):
+    """Keep a file already in the car's storage as a lease's form or agreement (`doc`). Nothing about the
+    file changes. Replaces a link of the other kind. False when there is no such lease for the car."""
+    if doc not in ("form", "agreement"):
+        raise ValueError(doc)
+    url, path = (ref, None) if ref_field == "invoice_url" else (None, ref)
+    done = conn.execute(f"UPDATE garagebooks.lease SET {doc}_url = %s, {doc}_path = %s WHERE id = %s AND car_id = %s",
+                        (url, path, lease_id, car_id))
+    return done.rowcount == 1
 
 
 def get_lease(conn, lease_id, car_id=None):
@@ -1236,6 +1253,7 @@ def save_claim_lines(conn, provider, rows, since=None):
 # 15% (its amount carries the provider's own fees).
 CLAIM_TIERS = ((0, "0"), (30, "0"))
 DIRECT_TIER = (14, "0.15")
+RENEWAL_TIER = (90, "0.15")
 
 
 def rematch(conn, tz, match_by_figures):
@@ -1263,9 +1281,20 @@ def rematch(conn, tz, match_by_figures):
             "SELECT id, car_id, occurred_on, amount FROM garagebooks.provider_claim WHERE expense_id IS NULL")]
         for lid, eid in match_by_figures(lines, free_expenses(), days, Decimal(tolerance)).items():
             conn.execute("UPDATE garagebooks.provider_claim SET expense_id = %s WHERE id = %s", (eid, lid))
-    payments = [(r["id"], r["car_id"], r["occurred_on"], r["amount"]) for r in conn.execute(
-        "SELECT id, car_id, occurred_on, amount FROM garagebooks.provider_transaction"
-        " WHERE kind = 'direct_payment' AND claim_provider_id IS NULL")]
+    unpaid_payments = ("SELECT id, car_id, occurred_on, amount FROM garagebooks.provider_transaction"
+                       " WHERE kind = 'direct_payment' AND claim_provider_id IS NULL AND expense_id IS NULL")
+
+    def direct():
+        return [(r["id"], r["car_id"], r["occurred_on"], r["amount"]) for r in conn.execute(unpaid_payments)]
+
+    # First the renewals the provider was asked to pay from here: it pays when the registration falls due, which
+    # can be weeks after the notice the expense is dated by.
+    renewals = [(r["id"], r["car_id"], r["day"], r["amount"]) for r in conn.execute(
+        "SELECT e.id, e.car_id, (e.occurred_at AT TIME ZONE %s)::date AS day, e.amount FROM garagebooks.expense e"
+        " JOIN garagebooks.expense_claim cl ON cl.expense_id = e.id WHERE cl.fields ->> 'method' = 'renewal'", (tz,))]
+    for pid, eid in match_by_figures(direct(), renewals, RENEWAL_TIER[0], Decimal(RENEWAL_TIER[1])).items():
+        conn.execute("UPDATE garagebooks.provider_transaction SET expense_id = %s WHERE id = %s", (eid, pid))
+    payments = direct()
     for pid, eid in match_by_figures(payments, free_expenses(), DIRECT_TIER[0], Decimal(DIRECT_TIER[1])).items():
         conn.execute("UPDATE garagebooks.provider_transaction SET expense_id = %s WHERE id = %s", (eid, pid))
     conn.execute(

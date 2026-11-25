@@ -28,6 +28,33 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
   the sale is recorded on the car; only trips are left out. A cost that matches an existing expense (an invoice you imported
   from a PDF, say) can be merged into it: its odometer reading is added and nothing else on it changes. Nothing for
   installers to do: pull the new image.
+- **Ask the provider to pay a registration.** Claiming a Registration expense now offers a **registration renewal
+  request** as well as a claim for one already paid, with the notice's payment references filled in and the
+  provider's declaration to accept. The lease's **The provider renews it** tick picks which the page starts on. It
+  needs a claims connector with the new renewal calls (docs: claims connector). Nothing changes for other installers.
+- **Payment references are for registrations only.** Other categories no longer show the section or keep
+  references.
+- **No period fields on categories without one.** An import row showed **Period from** and **to** whenever the PDF
+  named a period or expiry date, whatever the category. The fields now follow the category's **Has a period** tick,
+  and a period in another category isn't saved. Reading an invoice on the Add form no longer fills one in either.
+  An expense already saved with a period keeps it. Nothing changes for installers.
+- **Claiming an insurance or registration expense fills in its period.** The Claim page starts with the period
+  stored on the expense, so the provider no longer asks for dates you already entered. Reading a registration
+  notice also finds the period when the words "expiry date" or "Amount due" appear earlier without a figure, and
+  no longer drops the 12-month column of a widely spaced notice. Nothing changes for installers.
+- **Browser tests rerun only what failed.** `scripts/dev.sh test-browser --failed` reruns just the steps the last
+  run failed, and `--only TEXT` the steps whose name contains TEXT: seconds instead of the whole suite. The
+  contributing rules now leave the full pytest run to CI. Nothing changes for installers.
+- **The header stays on one line, on a phone too.** A phone shows the title, All, Reminders, + Add and a menu
+  button, which opens the other links. On a wide screen **Settings** is a dropdown holding **Invoice storage**,
+  which no longer has its own link. Without JavaScript the links wrap as before and the dropdown opens on
+  hover or focus. Nothing changes for installers.
+- **Fill from TeslaMate only where it can work.** The Add form's button for the odometer shows only for a car
+  TeslaMate tracks, while TeslaMate is connected and usable; a car added by hand, or an install without TeslaMate,
+  doesn't get it. Nothing changes for installers.
+- **The import recognises lease forms and agreements.** A PDF that is an associate lease form or a lease agreement
+  is offered to keep with the matching lease (or to add a lease from it) instead of as an expense, and is never
+  renamed or moved. A kept file isn't offered for import again. Nothing changes for installers.
 - **Fuel is only for cars with an engine, and Charging only for cars that plug in.** Each category and service item
   on the Categories page has a **For** choice: all cars, cars that plug in (battery electric and plug-in hybrid) or
   cars with an engine (petrol or diesel, plug-in hybrid and hybrid). Fuel, and the service items oil filter, fuel

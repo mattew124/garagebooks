@@ -5,6 +5,7 @@ the Grafana dashboard in grafana/ turns it (plus TeslaMate's own charging costs,
 them) into total cost of ownership. TeslaMate is optional: see sources.py.
 """
 
+import functools
 import io
 import hashlib
 import hmac
@@ -70,6 +71,7 @@ MESSAGES = {
     "reminder_reopened_kept": "Reminder reopened. The next one had been edited or resolved, so it was left as it is.",
     "categories_saved": "Changes saved.",
     "service_added": "Service item added.",
+    "lease_document_kept": "Kept the file with the lease. It stays where it is, with its own name.",
     "service_deleted": "Service item removed. Expenses that had it keep their other items.",
     "settings": "Settings saved.",
     "folders": "Folders saved.",
@@ -80,6 +82,7 @@ MESSAGES = {
     "mail_disconnected": "Mailbox disconnected.",
     "imported": "Invoices imported.",
     "learned_deleted": "Removed.",
+    "renewal_requested": "Renewal request sent to the provider. It pays the registration: check it has before it's due.",
     "claim_forgotten": "Claim record removed. The provider still has the claim, if one was made there.",
     "claims_refreshed": "Claim statuses refreshed.",
     "claims_synced": "Provider history synced.",
@@ -136,6 +139,11 @@ class PrefixMiddleware:
             return self.wsgi(environ, start_response)
         start_response("404 Not Found", [("Content-Type", "text/plain")])
         return [b"Not found\n"]
+
+
+def ref_category_ids(categories):
+    """The categories whose expenses keep a notice's payment references: those paid from the registration pool."""
+    return {c["id"] for c in categories if c["budget_pool"] == claim_lib.RENEWAL_POOL}
 
 
 def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_fetch=None, background_jobs=True,
@@ -536,6 +544,9 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 "car_storage": {car_id: f["backend"] for car_id, f in folders.items() if store_for(f["backend"])},
                 "default_storage": "onedrive" if drive else "local",
                 "cars": sorted(db.cars(conn), key=lambda c: c["sold_at"] is not None),   # sold cars last (the sort is stable)
+                # The cars "Fill from TeslaMate" can answer for: ones TeslaMate tracks, while its figures are usable.
+                "teslamate_cars": {c["id"] for c in db.cars(conn) if c["teslamate_car_id"] is not None}
+                                  if teslamate(conn).usable else set(),
                 "categories": db.categories(conn),
                 "values": values or {},
                 "errors": errors or {},
@@ -577,7 +588,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             cats = {c["id"]: c for c in db.categories(conn)}
             items = db.service_items(conn)
         car_ids, cat_ids = set(cars), set(cats)
-        values, errors = validation.parse_expense_form(form, tz, car_ids, cat_ids)
+        values, errors = validation.parse_expense_form(form, tz, car_ids, cat_ids, ref_category_ids(cats.values()))
         values["wheels"] = category_wheels(cats, values.get("category_id"), form.getlist("wheels"))
         if not errors:
             car_now = values["car_id"]
@@ -861,7 +872,9 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 annotated.append({**e, "state": state, "pay": pay, "direct": direct.get(e["id"]), "reason": reason and reason[0].upper() + reason[1:]})
             wanted = view.get("state")
             rows = [e for e in annotated if wanted is None or e["state"] == wanted
-                    or (wanted == "unpaid" and e["state"] == "claimed" and (e["pay"] is None or e["pay"]["state"] != "paid"))]
+                    or (wanted == "unpaid" and e["state"] == "claimed" and (e["pay"] is None or e["pay"]["state"] != "paid")
+                        # A renewal the provider has paid itself owes the owner nothing.
+                        and not (e["claim_method"] == "renewal" and e["direct"]))]
             claim_open = {e["id"] for e in rows if e["state"] == "ready"}
         if view.get("state"):
             totals = {"n": len(rows), "total": sum((e["amount"] for e in rows), Decimal(0))}
@@ -924,6 +937,9 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             text += f" Renamed {renamed}{'' if request.args.get('store') == 'local' else ' in OneDrive'}."
         if failed:
             text += f" Couldn't rename {failed} (a file with that name may already exist): imported with the old name."
+        kept = request.args.get("leases", 0, type=int)
+        if kept:
+            text += f" Kept {kept} lease document{'' if kept == 1 else 's'} with {'its' if kept == 1 else 'their'} lease."
         copied, not_copied = (request.args.get(k, 0, type=int) for k in ("copied", "copy_failed"))
         if copied:
             text += f" Saved {copied} attached PDF{'' if copied == 1 else 's'} in the car's invoice storage."
@@ -1838,10 +1854,34 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                           "invoice file first (Edit, then choose the PDF), then claim it."), None
         return None, None, "No invoice is attached to this expense. The provider will probably want one."
 
-    def render_claim(row, fields, status=200, **extra):
+    def render_claim(row, fields, method, status=200, **extra):
         context = {"errors": [], "preview": None, "needs": [], "signin": False, "error": None, "blocked": None,
                    "notice": None, **extra}
-        return render_template("claim.html", expense=row, fields=fields, view=list_view(), **context), status
+        return render_template("claim.html", expense=row, fields=fields, method=method, view=list_view(),
+                               renewable=row["budget_pool"] == claim_lib.RENEWAL_POOL,
+                               renewal_labels=claim_lib.RENEWAL_FIELD_LABELS, **context), status
+
+    def claim_method(row, asked):
+        """How this expense goes to the provider. Only a registration has the choice: what was chosen on the page,
+        else what its lease says (the provider renews it, or the owner pays and claims it back)."""
+        if row["budget_pool"] != claim_lib.RENEWAL_POOL:
+            return "reimburse"
+        if asked in claim_lib.METHODS:
+            return asked
+        day = local_day(row)
+        with connect() as conn:
+            renewed = any(x["rego_renewed_by_provider"] and x["start_date"] <= day <= x["end_date"]
+                          for x in db.car_leases(conn, row["car_id"]))
+        return "renewal" if renewed else "reimburse"
+
+    def clean_for(method, form):
+        return claim_lib.clean_renewal_fields(form) if method == "renewal" else claim_lib.clean_fields(form)
+
+    def refusal(method, reply):
+        if method == "renewal" and reply.status == 404:
+            return ("This claims connector can't send a registration renewal request: update it, or choose to claim "
+                    "the registration back instead. Nothing was sent.")
+        return reply.error
 
     def clean_preview(body):
         """What the preview page shows of the connector's answer, as plain, bounded values."""
@@ -1849,7 +1889,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         return {"provider": claim_lib.text(body.get("provider"), 100), "kind": claim_lib.text(body.get("kind"), 100),
                 "car": claim_lib.text(body.get("car"), 200), "amount": claim_lib.number(body.get("amount")),
                 "gst": claim_lib.number(body.get("gst")), "ex_gst": claim_lib.number(body.get("ex_gst")),
-                "summary": as_list("summary"), "warnings": as_list("warnings")}
+                "summary": as_list("summary"), "warnings": as_list("warnings"),
+                "declaration": claim_lib.declaration_text(body.get("declaration"))}
 
     def claim_context(expense_id):
         """The expense, or a page explaining why it can't be claimed: -> (row, None) or (None, response)."""
@@ -1860,42 +1901,49 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             return None, (render_template("error.html", title="Can't claim this expense", text=why), 400)
         return row, None
 
-    def preview_page(expense_id, fields, errors=(), first_visit=False):
+    def preview_page(expense_id, asked, fields=None, errors=(), first_visit=False, status=200):
         row, refused = claim_context(expense_id)
         if refused:
             return refused
-        if first_visit and "gst" not in fields and row["gst_amount"] is not None:
-            # The GST stated on the document goes in the protocol's `gst` field. Only the first time the page
-            # opens: an owner who clears it has said to leave it to the provider.
-            fields = {**fields, "gst": f"{row['gst_amount']:.2f}"}
+        method = claim_method(row, asked)
+        fields = fields or {}
+        if first_visit:
+            # What the expense already holds starts the claim's fields. Only the first time the page opens: after
+            # that the form's own values count (an owner who clears the GST leaves it to the provider).
+            fields = {**claim_lib.stored_fields(row, method), **fields}
         invoice, blocked, notice = claim_invoice(row)
         if blocked:
-            return render_claim(row, fields, blocked=blocked, errors=errors)
+            return render_claim(row, fields, method, blocked=blocked, errors=errors)
+        ask = connector.renewal_preview if method == "renewal" else connector.preview
+        show = functools.partial(render_claim, row, fields, method, status=status, notice=notice, errors=errors)
         try:
-            reply = connector.preview(claim_lib.expense_payload(row, local_day(row), fields), invoice)
+            reply = ask(claim_lib.expense_payload(row, local_day(row), fields), invoice)
         except claim_lib.ConnectorError as exc:
-            return render_claim(row, fields, error=exc.user_message, notice=notice, errors=errors)
+            return show(error=exc.user_message)
         if reply.ok:
-            return render_claim(row, fields, preview=clean_preview(reply.body), notice=notice, errors=errors)
+            return show(preview=clean_preview(reply.body))
         if reply.needs_signin:
-            return render_claim(row, fields, signin=True, notice=notice, errors=errors)
+            return show(signin=True)
         if reply.needs_fields:
-            return render_claim(row, fields, needs=reply.needs_fields, notice=notice, errors=errors)
-        return render_claim(row, fields, error=reply.error, notice=notice, errors=errors)
+            return show(needs=reply.needs_fields)
+        return show(error=refusal(method, reply))
 
     @app.get("/<int:expense_id>/claim")
     def claim_page(expense_id):
         need_connector()
-        return preview_page(expense_id, {}, first_visit=True)
+        return preview_page(expense_id, request.args.get("method"), first_visit=True)
 
     @app.post("/<int:expense_id>/claim")
     def claim_preview(expense_id):
         need_connector()
-        fields, errors = claim_lib.clean_fields(request.form)
+        row, refused = claim_context(expense_id)
+        if refused:
+            return refused
+        method = claim_method(row, request.form.get("method"))
+        fields, errors = clean_for(method, request.form)
         if errors:
-            row, refused = claim_context(expense_id)
-            return refused or render_claim(row, fields, errors=errors, status=400)
-        return preview_page(expense_id, fields)
+            return render_claim(row, fields, method, errors=errors, status=400)
+        return preview_page(expense_id, method, fields)
 
     @app.post("/<int:expense_id>/claim/submit")
     def claim_submit(expense_id):
@@ -1903,26 +1951,33 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         row, refused = claim_context(expense_id)
         if refused:
             return refused
-        fields, errors = claim_lib.clean_fields(request.form)
+        method = claim_method(row, request.form.get("method"))
+        if request.form.get("method", method) != method:      # a renewal asked of an expense that can't have one
+            abort(400)
+        fields, errors = clean_for(method, request.form)
         if errors:
-            return render_claim(row, fields, errors=errors, status=400)
+            return render_claim(row, fields, method, errors=errors, status=400)
+        if method == "renewal" and request.form.get("accept_declaration") != "1":
+            return preview_page(expense_id, method, fields, status=400,
+                                errors=["Nothing was sent: read and accept the declaration first."])
         invoice, blocked, notice = claim_invoice(row)
         if blocked:
-            return render_claim(row, fields, blocked=blocked)
+            return render_claim(row, fields, method, blocked=blocked)
+        send = connector.renewal_submit if method == "renewal" else connector.submit
         try:
-            reply = connector.submit(claim_lib.expense_payload(row, local_day(row), fields), invoice)
+            reply = send(claim_lib.expense_payload(row, local_day(row), fields), invoice)
         except claim_lib.ConnectorError as exc:
-            return render_claim(row, fields, error=exc.user_message, notice=notice)
+            return render_claim(row, fields, method, error=exc.user_message, notice=notice)
         if reply.needs_signin:
-            return render_claim(row, fields, signin=True, notice=notice)
+            return render_claim(row, fields, method, signin=True, notice=notice)
         if reply.needs_fields:
-            return render_claim(row, fields, needs=reply.needs_fields, notice=notice)
+            return render_claim(row, fields, method, needs=reply.needs_fields, notice=notice)
         provider_id = claim_lib.text(reply.body.get("provider_id"), 200)
         if not reply.ok:
-            return render_claim(row, fields, error=reply.error, notice=notice)
+            return render_claim(row, fields, method, error=refusal(method, reply), notice=notice)
         if not provider_id:
             log.error("claims connector accepted expense %s without a provider_id", expense_id)
-            return render_claim(row, fields, error="The connector accepted the claim but didn't say which one it "
+            return render_claim(row, fields, method, error="The connector accepted the claim but didn't say which one it "
                                 "is, so it couldn't be recorded. Check the provider's own site before trying again.",
                                 notice=notice, status=502)
         reference = claim_lib.text(reply.body.get("reference"), 200)
@@ -1932,17 +1987,22 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         except claim_lib.ConnectorError:
             pass
         provider = claim_lib.text(health.get("provider"), 100) or claim_lib.text(reply.body.get("provider"), 100) or "provider"
+        # A renewal's fields (the licence number, the payment references) are sent and never kept: only how it went.
+        kept_fields = {"method": "renewal"} if method == "renewal" else fields
         with connect() as conn:
             stored = db.add_claim(conn, expense_id, {
                 "provider": provider, "provider_id": provider_id, "reference": reference,
-                "status": claim_lib.text(reply.body.get("status"), 200),
+                "status": claim_lib.text(reply.body.get("status"), 200)
+                or ("Renewal requested" if method == "renewal" else None),
                 "amount": claim_lib.number(reply.body.get("amount")) or row["amount"],
-                "gst": claim_lib.number(fields.get("gst")), "fields": json.dumps(fields) if fields else None})
+                "gst": claim_lib.number(kept_fields.get("gst")),
+                "fields": json.dumps(kept_fields) if kept_fields else None})
             db.rematch(conn, tz, claim_lib.match_by_figures)
         log.info("expense %s claimed (provider reference recorded: %s)", expense_id, bool(reference))
         if not stored:
             log.warning("expense %s was claimed twice at once; the first record was kept", expense_id)
-        return redirect(url_for("index", **list_view(), msg="claimed", ref=reference or ""), 303)
+        said = "renewal_requested" if method == "renewal" else "claimed"
+        return redirect(url_for("index", **list_view(), msg=said, ref=reference or ""), 303)
 
     @app.post("/<int:expense_id>/claim/forget")
     def claim_forget(expense_id):
@@ -2593,7 +2653,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 "amount": "", "odometer_km": "", "url": "", "name": "", "folder": "",
                 "note": "", "id": "", "attach": "", "car_fill": False, "car_fields": [], "services": [], "wheels": [], "item_wheels": {}, "notes": "", "gst_amount": "", "card_payment_ref": "",
                 "bpay_biller_code": "", "bpay_ref": "", "car_vin": "", "car_build_year": "", "car_model_year": "",
-                "car_body_type": "", "car_make": "", "car_model": "", "period_start": "", "period_end": "", "guess": {}, "new_name": "", "rename": False, "odo_note": "", "duplicates": [],
+                "car_body_type": "", "car_make": "", "car_model": "", "period_start": "", "period_end": "", "guess": {}, "new_name": "", "rename": False, "odo_note": "", "duplicates": [], "lease": None,
                 "candidates": [], "action": "new", **fields}
 
     def import_page(store, car, **ctx):
@@ -2672,6 +2732,33 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         guess["missing"] = [f for f in ("date", "category", "amount") if guess[f] is None]
         return guess
 
+    def lease_document_row(car, text):
+        """What the import offers for a PDF that is a lease form or agreement, or None for any other PDF:
+        {doc, label, lease_id (the lease it can be kept with, or None), add_url, note}. A lease matches by the
+        start date its form states (an agreement states none: it matches when the car has one lease)."""
+        doc = leaseform.document_kind(text)
+        if doc is None or car["id"] == 0:
+            return None
+        start = leaseform.parse_date(leaseform.read(text).get("start_date"))
+        label = validation.LEASE_DOCUMENTS[doc]
+        with connect() as conn:
+            leases = db.car_leases(conn, car["id"])
+        match = next((x for x in leases if start and x["start_date"] == start), None)
+        if match is None and doc == "agreement" and len(leases) == 1:
+            match = leases[0]
+        found = {"doc": doc, "label": label, "lease_id": None, "add_url": url_for("car_lease_new", car_id=car["id"]),
+                 "kept": False, "lease_start": ""}
+        if match is not None:
+            started = f"{match['start_date']:%d %b %Y}".lstrip("0")
+            kept = bool(match[f"{doc}_url"] or match[f"{doc}_path"])
+            found.update(lease_id=None if kept else match["id"], kept=kept, lease_start=started)
+        found["note"] = (
+            f"This looks like a {label.lower()}, not an invoice, so it isn't offered as an expense. "
+            + (f"The lease from {found['lease_start']} already has one." if found["kept"] else
+               f"Tick it to keep it with the lease from {found['lease_start']}; the file isn't renamed or moved."
+               if found["lease_id"] else "No lease matches it yet: add one from it first."))
+        return found
+
     def read_file(store, car, ctx, n, f):
         """Read one PDF (or email) and propose its expense: an import row. A file that can't be fetched
         becomes a row saying why, never an error for the whole page."""
@@ -2680,6 +2767,12 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         timer = docinfo.Timer()
         try:
             text, pdf, email = read_document(store, f["id"])
+            lease_doc = lease_document_row(car, text) if email is None else None
+            if lease_doc:
+                # A lease form or agreement is kept with its lease, not imported as an expense, and the file is
+                # never renamed or moved: the row has no rename option at all.
+                row.update(lease=lease_doc, note=lease_doc["note"])
+                return row
             guess = invoices.propose(f["folder"], f["name"], text, list(by_name), ctx["learned"],
                                      ctx["settings"]["multi_amount"])
             if email is not None:
@@ -2987,7 +3080,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             with connect() as conn:
                 db_items = db.service_items(conn)
             count = min(request.form.get("count", type=int) or 0, 200)
-            rows, chosen, attaches, errors, skip_urls = [], [], [], {}, []
+            rows, chosen, attaches, errors, skip_urls, lease_picks = [], [], [], {}, [], []
             with connect() as conn:
                 own = {r["id"] for r in conn.execute("SELECT id FROM garagebooks.expense WHERE car_id = %s", (car_id,))}
             for n in range(count):
@@ -3012,6 +3105,9 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 if row["skip"] and row["url"]:
                     skip_urls.append(row["url"])
                     continue
+                if f("lease"):          # a lease form or agreement, kept with its lease: no expense, no rename
+                    lease_picks.append((f("lease_id"), f("lease_doc"), row))
+                    continue
                 if not row["include"]:
                     continue
                 if row["action"] != "new":      # this file goes on an expense that is already saved
@@ -3025,13 +3121,16 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                     except ValueError as exc:
                         errors[n] = str(exc)
                     continue
+                # A hidden period (the category has none) isn't saved, or checked.
+                dated = any(str(c["id"]) == row["category_id"] and c["has_period"] for c in cat_rows)
                 values, row_errors = validation.parse_expense_form({
                     "car_id": car_id, "category_id": row["category_id"], "date": row["date"], "time": "12:00",
                     "amount": row["amount"], "odometer_km": row["odometer_km"], "vendor": row["vendor"],
-                    "notes": row["notes"], "period_start": row["period_start"], "period_end": row["period_end"],
+                    "notes": row["notes"], "period_start": row["period_start"] if dated else "",
+                    "period_end": row["period_end"] if dated else "",
                     "gst_amount": row["gst_amount"], "card_payment_ref": row["card_payment_ref"],
                     "bpay_biller_code": row["bpay_biller_code"], "bpay_ref": row["bpay_ref"],
-                    ref_field: row["url"]}, tz, car_ids, cat_ids)
+                    ref_field: row["url"]}, tz, car_ids, cat_ids, ref_category_ids(cat_rows))
                 values["wheels"] = category_wheels(cats_by_id, values.get("category_id"), row["wheels"])
                 if not row["url"]:
                     row_errors[ref_field] = "Missing link to the PDF."
@@ -3074,8 +3173,21 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             if skip_urls:
                 with connect() as conn:
                     db.skip_imports(conn, car_id, skip_urls)
+            kept = 0
+            for lease_id, doc, row in lease_picks:
+                try:
+                    ref = (validation.parse_invoice_path if ref_field == "invoice_path" else validation.parse_invoice_url)(row["url"])
+                except ValueError:
+                    continue
+                if car_id and ref and lease_id.isdigit() and doc in validation.LEASE_DOCUMENTS:
+                    with connect() as conn:
+                        kept += db.set_lease_document(conn, car_id, int(lease_id), doc, ref_field, ref)
+            if kept:
+                log.info("import kept %d file(s) as lease documents of car %s", kept, car_id)
             if not chosen and not attaches:
-                if skip_urls:
+                if kept and len(lease_picks) == kept and not skip_urls:
+                    return redirect(url_for("car_lease", car_id=car_id, msg="lease_document_kept"), 303)
+                if skip_urls or kept:
                     return redirect(url_for(f"{kind}_import", car_id=car_id), 303)
                 return render_import(store, car, rows, status=400, notice="Tick at least one invoice to import.")
             imported, renamed, rename_failed, attached, copied, copy_failed = [], 0, 0, 0, 0, 0
@@ -3146,6 +3258,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             more = {"store": kind} if kind == "local" else {}
             if copied or copy_failed:
                 more.update(copied=copied, copy_failed=copy_failed)
+            if kept:
+                more.update(leases=kept)
             return redirect(url_for("index", msg="imported", n=len(imported), attached=attached, renamed=renamed,
                                     rename_failed=rename_failed, **more), 303)
 
@@ -3733,6 +3847,11 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         log.debug("prefill file=%s bytes=%d sha256=%s found=%s missing=%s ms=%d", docinfo.quote(filename), len(pdf),
                   docinfo.sha12(pdf), have, missing, timer.ms)
         by_name = {c["name"]: c["id"] for c in categories}
+        # The form shows any period it holds, so it is only given one its category has.
+        if not any(c["name"] == guess["category"] and c["has_period"] for c in categories):
+            guess.update(period_start=None, period_end=None)
+        if not any(c["name"] == guess["category"] and c["budget_pool"] == claim_lib.RENEWAL_POOL for c in categories):
+            guess.update(card_payment_ref=None, bpay_biller_code=None, bpay_ref=None)
         return jsonify(
             date=guess["date"].isoformat() if guess["date"] else None,
             category_id=by_name.get(guess["category"]), vendor=guess["vendor"],

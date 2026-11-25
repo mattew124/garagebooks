@@ -114,6 +114,8 @@
     <h2 class="card-title">Registration</h2>
     {{ field('rego_expiry', 'Registration expires', 'date') }}
     {{ tick('rego_renewed_by_provider', 'The provider renews it') }}
+    <small>When ticked, claiming a registration starts as a renewal request (the provider pays it); otherwise as a claim
+      to be paid back. You can change it each time.</small>
   </section>
 
   <div class="row"><button type="submit" class="button">{{ 'Save lease' if lease_id else 'Add lease' }}</button>

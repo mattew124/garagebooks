@@ -17,18 +17,25 @@
       <a class="brand" href="{{ url_for('index') }}"><img src="{{ url_for('static', filename='icon-64.png') }}" alt="" width="28" height="28">GarageBooks</a>
       {% set endpoint = request.endpoint or '' %}
       {% macro at(section) %}{% if section %} aria-current="page"{% endif %}{% endmacro %}
-      <nav{% if claims_enabled %} class="crowded"{% endif %}>
-        <a href="{{ url_for('index') }}"{{ at(endpoint == 'index') }}>All</a>
+      <nav id="site-menu" aria-label="Main"{% if claims_enabled %} class="crowded"{% endif %}>
+        <a class="keep" href="{{ url_for('index') }}"{{ at(endpoint == 'index') }}>All</a>
         <a href="{{ url_for('categories') }}"{{ at(endpoint == 'categories') }}>Categories</a>
         <a href="{{ url_for('cars_page') }}"{{ at(endpoint.startswith(('car', 'reading'))) }}>Cars</a>
         {% if claims_enabled %}<a href="{{ url_for('claims_page') }}"{{ at(endpoint.startswith('claim')) }}>Claims</a>{% endif %}
-        <a href="{{ url_for('reminders_page') }}"{{ at(endpoint.startswith(('reminder', 'expense_reminder'))) }}>Reminders{% if reminder_attention and reminder_attention.total %} <span class="count">{{ reminder_attention.total }}<span class="visually-hidden"> need attention</span></span>{% endif %}</a>
+        <a class="keep" href="{{ url_for('reminders_page') }}"{{ at(endpoint.startswith(('reminder', 'expense_reminder'))) }}>Reminders{% if reminder_attention and reminder_attention.total %} <span class="count">{{ reminder_attention.total }}<span class="visually-hidden"> need attention</span></span>{% endif %}</a>
         <a href="{{ url_for('history_page') }}"{{ at(endpoint == 'history_page') }}>History</a>
         {% if grafana_url %}<a href="{{ grafana_url }}" target="_blank" rel="noopener noreferrer"><img src="{{ url_for('provider_icon', name='grafana') }}" alt="" class="nav-icon">Dashboards</a>{% endif %}
-        <a href="{{ url_for('storage_page') }}"{{ at(endpoint.startswith(('storage', 'onedrive', 'local', 'learned'))) }}>Invoice storage</a>
-        <a href="{{ url_for('settings') }}"{{ at(endpoint == 'settings') }}>Settings</a>
+        {% set in_settings = endpoint == 'settings' or endpoint.startswith(('storage', 'onedrive', 'local', 'learned')) %}
+        <div class="dropdown">
+          <button type="button" class="drop-toggle" aria-expanded="false" aria-controls="settings-menu"{% if in_settings %} aria-current="true"{% endif %}>Settings</button>
+          <div id="settings-menu" class="drop-panel">
+            <a href="{{ url_for('settings') }}"{{ at(endpoint == 'settings') }}>Settings</a>
+            <a href="{{ url_for('storage_page') }}"{{ at(endpoint.startswith(('storage', 'onedrive', 'local', 'learned'))) }}>Invoice storage</a>
+          </div>
+        </div>
       </nav>
       <a class="button add" href="{{ url_for('new') }}">+ Add</a>
+      <button type="button" class="menu-toggle" aria-expanded="false" aria-controls="site-menu" aria-label="Menu"><span aria-hidden="true"></span></button>
     </div>
   </header>
   <main{% block main_attrs %}{% endblock %}>

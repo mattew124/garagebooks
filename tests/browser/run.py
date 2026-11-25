@@ -22,6 +22,19 @@ INVOICE = "https://example.com/invoice-browser-test.pdf"
 # Writes to a real OneDrive happen only in this folder (scripts/dev.sh onedrive-link points here).
 TEST_FOLDER = "Expenses test"
 REQUIRE_ONEDRIVE = os.environ.get("REQUIRE_ONEDRIVE") == "1"
+# ONLY=header runs just the steps whose name contains it (for working on one thing; the full run is the check).
+ONLY = os.environ.get("ONLY", "")
+# Every run saves the names of the steps that failed in OUT/failed.txt. RERUN_FAILED=1 runs only those (and the
+# clean-up), so a failure is checked again in a minute, not by the whole suite. A step that needs data an earlier
+# step made can fail on its own: then run that step too (ONLY), or the whole suite.
+FAILED_FILE = os.path.join(OUT, "failed.txt")
+RERUN = None
+if os.environ.get("RERUN_FAILED") == "1":
+    try:
+        with open(FAILED_FILE, encoding="utf-8") as f:
+            RERUN = {line.strip() for line in f if line.strip()}
+    except FileNotFoundError:
+        RERUN = set()
 passed, failed, skipped = 0, [], []
 
 
@@ -31,6 +44,10 @@ class Skip(Exception):
 
 def step(name, fn, *args):
     global passed
+    if ONLY and ONLY not in name:
+        return
+    if RERUN is not None and name not in RERUN:
+        return
     try:
         fn(*args)
         passed += 1
@@ -476,6 +493,7 @@ def test_history_page(page):
     page.click("button[type=submit].button")
     page.wait_for_url(re.compile(r"msg=updated"))
     remove_marked(page)
+    page.get_by_role("button", name="Menu").click()   # on a phone History is in the menu
     page.click("header nav a:has-text('History')")
     expect(page.locator("h1")).to_have_text("Change history")
     first = page.locator("li.change").first
@@ -710,22 +728,57 @@ def test_categories_save_together_and_delete_is_a_small_button(page):
                 page.wait_for_load_state()
 
 
-def test_header_stays_tidy_on_a_phone(page):
-    """Every header link is one line, and the links share rows rather than wrapping inside."""
+def header_rows(page):
+    """The distinct rows (by vertical centre) of the header's visible links, button and title."""
+    return page.evaluate("""() => {
+        const rows = new Set();
+        for (const el of document.querySelectorAll('header .brand, header nav a, header .add, header button')) {
+            const r = el.getBoundingClientRect();
+            if (r.width && r.height) rows.add(Math.round((r.top + r.height / 2) / 10));
+        }
+        return rows.size;
+    }""")
+
+
+# Every page the header must reach, as (link text, path the page ends at).
+HEADER_PAGES = [("All", ""), ("Categories", "categories"), ("Cars", "cars"), ("Reminders", "reminders"),
+                ("History", "history"), ("Settings", "settings"), ("Invoice storage", "storage")]
+
+
+def go_via_header(page, name, path, narrow):
     page.goto(UI)
-    boxes = page.evaluate("""() => [...document.querySelectorAll('header nav a, header .add')].map(a => {
-        const r = a.getBoundingClientRect(); return {text: a.textContent.trim(), h: r.height, top: r.top}})""")
-    assert len(boxes) >= 4, boxes                      # All, Categories, Dashboards, Settings, Add
-    line = page.evaluate("parseFloat(getComputedStyle(document.body).lineHeight)")
-    for b in boxes:
-        assert b["h"] < line * 2.6, f"{b['text']} wraps inside its link: {b}"
-    add = next(b for b in boxes if b["text"] == "+ Add")
-    brand_top = page.evaluate("document.querySelector('.brand').getBoundingClientRect().top")
-    assert abs(add["top"] - brand_top) < 20, f"Add should sit beside the title: {add}, brand at {brand_top}"
+    if narrow:
+        page.get_by_role("button", name="Menu").click()
+    elif name in ("Settings", "Invoice storage"):
+        page.locator("header .drop-toggle").click()
+    page.locator("header").get_by_role("link", name=name, exact=True).first.click()
+    page.wait_for_url(re.compile(re.escape(UI + path) + r"(\?.*)?$"))
+
+
+def test_header_stays_tidy_on_a_phone(page):
+    """A phone shows the title, All, Reminders, Add and the menu button on one row; the rest opens from the
+    button, with Settings and Invoice storage in it, and every page can be reached."""
+    page.goto(UI)
+    assert header_rows(page) == 1, "the closed header should be one row"
+    visible = [a.inner_text().split("\n")[0].strip() for a in page.locator("header nav a:visible").all()]
+    assert visible == ["All", "Reminders"], visible
+    button = page.get_by_role("button", name="Menu")
+    assert button.get_attribute("aria-expanded") == "false"
+    assert button.get_attribute("aria-controls") == "site-menu"
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+    shot(page, "header-phone")
+    button.click()
+    assert button.get_attribute("aria-expanded") == "true"
+    for name in ("Categories", "Cars", "History", "Settings", "Invoice storage"):
+        expect(page.locator("header").get_by_role("link", name=name, exact=True)).to_be_visible()
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+    shot(page, "header-phone-open")
+    page.keyboard.press("Escape")
+    assert button.get_attribute("aria-expanded") == "false"
+    for name, path in HEADER_PAGES:
+        go_via_header(page, name, path, narrow=True)
     page.goto(UI + "settings")
     shot(page, "settings-phone")
-    page.goto(UI)
-    shot(page, "header-phone")
 
 
 def test_notifications_settings(page):
@@ -768,12 +821,24 @@ def test_notifications_settings(page):
 
 
 def test_header_on_a_desktop(page):
-    """One row: title then links on the left, Add on the right."""
+    """One row: title then links on the left, Add on the right, Settings a dropdown holding Invoice storage,
+    and every page reachable."""
     page.goto(UI)
-    tops = page.evaluate("""() => [...document.querySelectorAll('header .brand, header nav a, header .add')]
-        .map(a => Math.round(a.getBoundingClientRect().top + a.getBoundingClientRect().height / 2))""")
-    assert max(tops) - min(tops) < 12, tops
+    assert header_rows(page) == 1
+    expect(page.get_by_role("button", name="Menu")).to_be_hidden()
+    expect(page.locator("header").get_by_role("link", name="Invoice storage")).to_be_hidden()
+    toggle = page.locator("header .drop-toggle")
+    assert toggle.get_attribute("aria-expanded") == "false"
+    toggle.click()
+    assert toggle.get_attribute("aria-expanded") == "true"
+    expect(page.locator("header").get_by_role("link", name="Invoice storage")).to_be_visible()
+    shot(page, "header-desktop-settings")
+    page.keyboard.press("Escape")
+    assert toggle.get_attribute("aria-expanded") == "false"
     shot(page, "header-desktop")
+    for name, path in HEADER_PAGES:
+        go_via_header(page, name, path, narrow=False)
+        assert header_rows(page) == 1, name
 
 
 def test_footer_links_to_the_docs_and_names_the_build(page):
@@ -2054,6 +2119,48 @@ def sync_provider_history(page):
     expect(page.locator("#sync-running")).to_have_count(0, timeout=40000)
 
 
+def test_claim_renewal(page):
+    """A registration sent as a renewal request through the stand-in connector: the choice of who pays, the notice's
+    figures in view, the payment references following the category on the form, and the declaration to accept."""
+    from datetime import date
+    fake_connector(page)
+    try:
+        add_claimable_expense(page, date.today())
+        page.goto(UI)
+        page.locator("tbody tr", has_text=MARKER).get_by_role("link", name="Edit").click()
+        refs = page.locator("details.payment-refs")
+        expect(refs).to_be_hidden()                                       # tyres have none
+        page.select_option("select[name=category_id]", label="Registration")
+        expect(refs).to_be_visible()
+        refs.locator("summary").click()
+        page.fill("input[name=card_payment_ref]", "1111 2222 33")
+        page.fill("input[name=bpay_biller_code]", "12345")
+        page.fill("input[name=bpay_ref]", "9876 5432")
+        page.click("button[type=submit].button")
+        page.wait_for_url(re.compile(r"msg=updated"))
+        page.goto(UI)
+        page.locator("tbody tr", has_text=MARKER).locator("a.claim-link").click()
+        expect(page.locator("#claim-method")).to_be_visible()
+        page.get_by_role("link", name="Ask the provider to pay it").click()
+        expect(page.get_by_label("BPAY biller code")).to_have_value("12345")
+        expect(page.locator("#claim-declaration")).to_contain_text("Example declaration")
+        assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "sideways scroll on a phone"
+        shot(page, "claim-renewal")
+        page.get_by_role("button", name="Check again").click()            # without accepting: only checking
+        expect(page.locator("#claim-declaration")).to_be_visible()
+        page.get_by_label("I accept the declaration above").check()
+        page.get_by_role("button", name="Send renewal request").click()
+        page.wait_for_url(re.compile(r"msg=renewal_requested"))
+        expect(page.locator("tbody tr", has_text=MARKER).locator("a.claim-badge")).to_contain_text("Renewal requested")
+        page.locator("tbody tr", has_text=MARKER).get_by_role("link", name="Edit").click()
+        expect(page.locator("#claim-record")).to_contain_text("Renewal requested from")
+        page.once("dialog", lambda d: d.accept())
+        page.get_by_role("button", name="Remove claim record").click()
+        page.wait_for_url(re.compile(r"msg=claim_forgotten"))
+    finally:
+        remove_marked(page)
+
+
 def test_claims(page):
     """Claim an expense through the stand-in connector: preview, a field it asks for, the sign-in with its
     code, submit, the badge and the reference, refusing to delete a claimed expense, refreshing the status,
@@ -2208,9 +2315,12 @@ def main():
         step("FBT year report: taxable value, costs by pool, year links", test_fbt_report, page)
         step("cost after tax: the rate, Paid from, the list and the FBT year report", test_cost_after_tax, page)
         step("header stays tidy on a phone", test_header_stays_tidy_on_a_phone, page)
+        iphone = browser.new_context(**p.devices["iPhone 13"])
+        step("header menu on an iPhone 13", test_header_stays_tidy_on_a_phone, iphone.new_page())
         step("phone list shows amount, invoice and edit", test_list_shows_key_fields_on_a_phone, page)
         step("a Claim link in the list still fits a phone", test_list_with_a_claim_link_fits_a_phone, page)
         step("claims: preview, needed field, sign-in code, submit, status refresh, remove record", test_claims, page)
+        step("claims: a registration renewal request, its references and declaration", test_claim_renewal, page)
         step("settings: notifications address is kept secret, refused when bad, tested", test_notifications_settings, page)
         step("history page lists an add, an edit and a delete", test_history_page, page)
         step("a likely duplicate is asked about, then saved anyway", test_duplicate_is_asked_about_before_saving, page)
@@ -2249,6 +2359,11 @@ def main():
         remove_marked(page)
         browser.close()
     print(f"\n{passed} passed, {len(failed)} failed, {len(skipped)} skipped")
+    if not ONLY:     # a run of one step leaves the list of the last full (or rerun) run as it was
+        with open(FAILED_FILE, "w", encoding="utf-8") as f:
+            f.writelines(f"{name}\n" for name in failed)
+    if failed:
+        print("Run only these again: scripts/dev.sh test-browser --failed")
     sys.exit(1 if failed else 0)
 
 

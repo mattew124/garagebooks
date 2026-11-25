@@ -533,7 +533,7 @@ def test_saving_a_purchase_before_the_first_data_moves_the_dashboard_start(pg, a
 def test_header_marks_the_page_you_are_on(client):
     home = client.get("/").data.decode()
     assert home.count('aria-current="page"') == 1
-    assert re.search(r'<a href="/" aria-current="page">All</a>', home)
+    assert re.search(r'<a class="keep" href="/" aria-current="page">All</a>', home)
     cats = client.get("/categories").data.decode()
     assert re.search(r'<a href="/categories" aria-current="page">Categories</a>', cats)
     assert 'aria-current="page">All<' not in cats

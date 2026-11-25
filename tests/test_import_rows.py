@@ -4,6 +4,9 @@ Uses the invoice folder on the server as the source, as test_local does: the row
 every source, so one is enough. PDF text is canned.
 """
 
+import io
+import re
+
 import pytest
 
 from garagebooks import invoices
@@ -131,3 +134,44 @@ def test_the_notes_and_period_stack_on_a_phone(stocked):
     assert '<td data-label="Notes" class="extras">' in row and '<div class="row-extras">' in row and "</div></td>" in row
     css = (Path(__file__).parent.parent / "garagebooks" / "static" / "style.css").read_text()
     assert ".row-extras" in css and "td.extras" in css
+
+
+def period_fields(row):
+    """The opening tag of a row's period fields."""
+    return re.search(r"<span class=\"period\" data-period-fields[^>]*>", row).group(0)
+
+
+def test_a_row_hides_the_period_of_a_category_that_has_none(stocked, admin, monkeypatch):
+    """A PDF can name a period whatever its category (a quote's "policy period", an "expiry date"). The value is
+    kept in the hidden fields, so it appears if the category is changed to one that has a period."""
+    monkeypatch.setitem(TEXT, b"%PDF-tax", TAX + "Policy period: 24/10/2026 to 24/10/2027\nTotal   $20.00\n")
+    row = read(stocked, "tax.pdf")
+    assert "hidden" in period_fields(row)
+    assert 'name="period_start_0" value="2026-10-24"' in row
+
+
+def test_a_row_shows_the_period_of_a_category_that_has_one(stocked, admin):
+    admin.execute("UPDATE garagebooks.category SET has_period = true WHERE name = 'Tyres'")
+    try:
+        resp = confirm(stocked, admin, category_id_0=str(category_id(admin, "Tyres")), amount_0="")
+        assert resp.status_code == 400 and "hidden" not in period_fields(resp.data.decode())
+    finally:
+        admin.execute("UPDATE garagebooks.category SET has_period = false WHERE name = 'Tyres'")
+
+
+@pytest.mark.parametrize("end", ["2027-10-24", "2026-01-01"])     # the second ends before it starts
+def test_an_import_ignores_the_hidden_period_of_a_category_that_has_none(stocked, admin, end):
+    assert confirm(stocked, admin, category_id_0=str(category_id(admin, "Tyres")), period_end_0=end).status_code == 303
+    row = rows(admin)[0]
+    assert row["period_start"] is None and row["period_end"] is None
+
+
+@pytest.mark.parametrize("category, expected", [("Insurance", "2026-10-24"), ("Tyres", None)])
+def test_the_add_form_is_only_prefilled_with_a_period_the_category_has(client, monkeypatch, category, expected):  # noqa: F811
+    guess = invoices.propose
+    monkeypatch.setattr(invoices, "extract_text", lambda pdf: POLICY)
+    monkeypatch.setattr(invoices, "propose", lambda *a: {**guess(*a), "category": category})
+    data = client.post("/api/prefill", headers=ORIGIN,
+                       data={"invoice_file": (io.BytesIO(b"%PDF-policy"), "policy.pdf")}).get_json()
+    assert data["period_start"] == expected
+    assert (data["period_end"] is None) == (expected is None)

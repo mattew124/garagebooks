@@ -59,7 +59,7 @@ scripts/dev.sh test-browser      # Playwright, real Chromium; screenshots in .de
 
 First-time setup: `python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt`.
 
-Run both test suites before calling a change done, and look at the screenshots
+Test a change as "Tests" below says (CI is the full pytest run), and look at the screenshots
 after any UI or dashboard change.
 
 ## Working in a worktree
@@ -105,9 +105,9 @@ candidate-to-stable steps are in RELEASING.md.
 - When `develop` is ready, a pull request from `develop` into `main` (merge commit); releases are tagged on
   `main` (RELEASING.md). A fix for a release already out: branch from `main`, pull request into `main`, then
   merge `main` into `develop`.
-- A pull request into `develop` is merged once CI is green and both pytest runs pass locally; the browser
-  tests run on the main stack after it merges. Retarget a stacked pull request to `develop` when its base
-  merges.
+- A pull request into `develop` is merged once CI is green and its browser run has passed (see Tests); the
+  full browser suite runs again on the main stack after a batch of merges. Retarget a stacked pull request to
+  `develop` when its base merges.
 
 ## Several branches at once
 
@@ -130,9 +130,18 @@ Parallel work (sub-agents, stacked pull requests) collides in the same few files
 
 - Failing test first means it was run and seen to fail. Say so in the pull request. Writing tests
   and code together doesn't count.
-- A test run is only finished when all three pass: `pytest -q --cov`, `TEST_TESLAMATE=0 pytest -q`
-  (plain PostgreSQL, once the suite supports it), and `scripts/dev.sh test-browser` (after
-  `scripts/dev.sh up`, so the stack runs the latest code).
+- Don't run a whole suite twice for one change. CI runs the full pytest suite on every push, three ways
+  (with TeslaMate and `--cov`, `TEST_TESLAMATE=0`, and on the recorded TeslaMate schema): it is the gate for
+  pytest. Locally, run the test files your change touches (`pytest -q tests/test_x.py`), then `pytest -q --lf`
+  after a failure. Run a whole pytest suite locally only for a change that reaches across the app (schema,
+  `conftest.py`, `create_app`).
+- The browser suite isn't in CI, so each pull request runs it once in full: `scripts/dev.sh up`, then
+  `scripts/dev.sh test-browser` (with `--onedrive` for OneDrive or Outlook changes). When steps fail, fix them
+  and run `scripts/dev.sh test-browser --failed`, which reruns only the steps that failed (`--only TEXT` runs the
+  steps whose name contains TEXT). Never rerun the whole suite for one failure. A step that fails once and
+  passes on `--failed` with no change is load or timing: say so in the pull request and don't chase it.
+- After merging `develop` into a branch, rerun nothing locally if only the CHANGELOG or docs conflicted: CI
+  checks the merge. If code conflicted, run the tests of the files involved.
 - Browser tests: select within one form (`form[action$="/readings"] input[name=date]`), not
   `.car input[name=date]`, because a card holds several forms. Clean up what a test adds in a
   `finally`, and make the clean-up sweep what an aborted earlier run left. Grafana only draws panels in

@@ -15,6 +15,15 @@ already tracks.
 
 New here? Start with [Setup](setup.md).
 
+## Finding your way around
+
+The header holds the links to every page and stays on one line. On a wide screen **Settings** is a small
+dropdown with **Settings** and **Invoice storage** in it. On a phone the header shows **All**, **Reminders** (with
+the number needing attention), **+ Add** and a menu button; the button opens the rest, including **Settings** and
+**Invoice storage**.
+
+<!-- screenshot: header-phone-menu - The header on a phone with the menu button open, and the Settings dropdown on a wide screen -->
+
 ## The dashboard
 
 The **Cost of Ownership** dashboard in Grafana: total cost of ownership, purchase vs running vs
@@ -79,7 +88,8 @@ job. See [Reminders](reminders.md).
 ## Adding an expense
 
 Category, date, time, amount, odometer, vendor, notes and the invoice. The odometer can be filled in
-from TeslaMate's own position data for the chosen date and time. The amount field works out sums
+from TeslaMate's own position data for the chosen date and time: the **Fill from TeslaMate** button
+appears only for a car that TeslaMate tracks, and only while TeslaMate is connected. The amount field works out sums
 (`120.50+89.95`, `400/3`) when you leave it, press Enter or save, and has keys for the operators.
 Editing an expense, then saving or cancelling, returns you to the category and order you were
 looking at.

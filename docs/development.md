@@ -155,6 +155,8 @@ network, so it can't touch live data. It listens on localhost unless `dev.env` s
 ```bash
 scripts/dev.sh up             # http://localhost:8089/garagebooks-dev/ and :8090/garagebooks-dev/grafana/
 scripts/dev.sh test-browser   # Playwright in a container; screenshots in .dev/screenshots
+scripts/dev.sh test-browser --failed      # only the steps the last run failed (seconds, not the whole suite)
+scripts/dev.sh test-browser --only header # only the steps whose name contains "header"
 scripts/dev.sh refresh        # re-copy TeslaMate data, keeping your test expenses
 scripts/dev.sh reset          # wipe the test database
 scripts/dev.sh demo up         # second stack of invented data, for screenshots (see below)

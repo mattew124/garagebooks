@@ -11,7 +11,7 @@
 {% if claim.claim %}
 <section class="card stack" id="claim-record">
   <h2 class="card-title">Claim</h2>
-  <p>Claimed from {{ claim.claim.claim_provider or 'the provider' }}: reference <strong>{{ claim.claim.claim_reference or 'not known' }}</strong>{% if claim.claim.claim_status %}, status <strong>{{ claim.claim.claim_status }}</strong>{% endif %}{% if claim.claim.claim_paid_date %}, paid {{ claim.claim.claim_paid_date.strftime('%d %b %Y') }}{% endif %}{% if claim.claim.claim_approved is not none %}, approved {{ claim.claim.claim_approved|money }}{% endif %}.</p>
+  <p>{{ 'Renewal requested from' if claim.claim.claim_method == 'renewal' else 'Claimed from' }} {{ claim.claim.claim_provider or 'the provider' }}: reference <strong>{{ claim.claim.claim_reference or 'not known' }}</strong>{% if claim.claim.claim_status %}, status <strong>{{ claim.claim.claim_status }}</strong>{% endif %}{% if claim.claim.claim_paid_date %}, paid {{ claim.claim.claim_paid_date.strftime('%d %b %Y') }}{% endif %}{% if claim.claim.claim_approved is not none %}, approved {{ claim.claim.claim_approved|money }}{% endif %}.</p>
   <form method="post" action="{{ url_for('claim_forget', expense_id=expense_id) }}" data-confirm="Remove the claim record? The provider keeps the claim, and this expense could be claimed again.">
     {% for name, value in view.items() %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}
     <button type="submit" class="secondary">Remove claim record</button>
@@ -41,7 +41,7 @@
   <label>Car
     <select name="car_id" required>
       {% if cars|length != 1 %}<option value="">Choose…</option>{% endif %}
-      {% for c in cars %}<option value="{{ c.id }}" data-storage="{{ car_storage.get(c.id, '') }}" data-kind="{{ c.kind }}"{{ ' data-leased="1"' if c.id in leased_cars }} {{ 'selected' if values.car_id|string == c.id|string }}>{{ c.name or ('Car ' ~ c.id) }}{{ ' (sold)' if c.sold_at }}</option>{% endfor %}
+      {% for c in cars %}<option value="{{ c.id }}" data-storage="{{ car_storage.get(c.id, '') }}" data-kind="{{ c.kind }}"{{ ' data-leased="1"' if c.id in leased_cars }}{% if c.id in teslamate_cars %} data-teslamate="1"{% endif %} {{ 'selected' if values.car_id|string == c.id|string }}>{{ c.name or ('Car ' ~ c.id) }}{{ ' (sold)' if c.sold_at }}</option>{% endfor %}
     </select>{{ err('car_id') }}
   </label>
 {% endmacro %}
@@ -185,8 +185,8 @@
     <span class="affix">
       <input name="odometer_km" inputmode="decimal" autocomplete="off" value="{{ values.odometer_km }}">
       <span>km</span></span>{{ err('odometer_km') }}
-    <small><button type="button" id="fill-odometer" class="linklike">Fill from TeslaMate</button>
-      <span id="odometer-hint"></span></small>
+    <small>{% if teslamate_cars %}<button type="button" id="fill-odometer" class="linklike"{{ '' if values.get('car_id', 0)|int(0) in teslamate_cars else ' hidden' }}>Fill from TeslaMate</button>
+      {% endif %}<span id="odometer-hint"></span></small>
   </label>
 
   <label>Vendor / shop <input name="vendor" maxlength="500" value="{{ values.vendor }}">{{ err('vendor') }}</label>
@@ -224,7 +224,8 @@
   <label>Notes <textarea name="notes" rows="3" maxlength="2000">{{ values.notes }}</textarea>{{ err('notes') }}</label>
 
   {# How a notice says to pay it: kept, never listed or charted, and closed until asked for. #}
-  <details class="payment-refs"{{ ' open' if errors.get('card_payment_ref') or errors.get('bpay_biller_code') or errors.get('bpay_ref') }}>
+  {% set refs_on = categories|selectattr('id', 'equalto', values.get('category_id', 0)|int(0))|selectattr('budget_pool', 'equalto', 'registration')|list %}
+  <details class="payment-refs" {{ '' if refs_on else 'hidden' }}{{ ' open' if errors.get('card_payment_ref') or errors.get('bpay_biller_code') or errors.get('bpay_ref') }}>
     <summary>Payment references</summary>
     <label>Card payment reference <input name="card_payment_ref" maxlength="60" autocomplete="off" value="{{ values.card_payment_ref }}">{{ err('card_payment_ref') }}</label>
     <div class="row">

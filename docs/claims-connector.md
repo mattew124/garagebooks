@@ -130,9 +130,10 @@ An **expense**:
   `registration` or `other`.
 - `date` is the day the cost was incurred, in the app's time zone (`APP_TZ`).
 - `amount` includes GST.
-- `fields` holds only what the owner typed, or what the connector asked for in a 422: `gst`,
+- `fields` holds what the expense already stores (`gst`, and `start` and `end` for its period), what the
+  owner typed, and what the connector asked for in a 422: `gst`,
   `description`, `provider`, `policy_number`, `start`, `end` or `invoice_date`. Dates are `YYYY-MM-DD`
-  and money is a decimal string. It is empty when nothing was typed.
+  and money is a decimal string. It is empty when there is none of these.
 
 An **invoice** is `null`, or:
 
@@ -198,6 +199,38 @@ that has a preview warning.
 
 `provider_id` identifies the claim in later status checks, and is required: without it the app can't
 record the claim. Errors are as for preview.
+
+### Registration renewal requests
+
+For an expense in the `registration` pool, the owner can ask the provider to pay the registration instead of
+claiming it back. These are separate calls, so a connector without them answers 404 and the app says it can't send
+the request. It never falls back to a claim. A connector without them needs no change.
+
+`POST /v1/renewal/preview` takes `{"expense": EXPENSE, "invoice": INVOICE}`, where the invoice is the unpaid renewal
+notice. `expense.fields` holds, as far as the expense has them or the owner typed them: `card_payment_ref`,
+`bpay_biller_code`, `bpay_ref`, `ctp_gst` (the GST on the compulsory third party insurance), `customer_number` and
+`licence_number`. It may ask for any of them with a 422 `needs_fields`. 200:
+
+```json
+{"ok": true, "provider": "Example Salary Packaging", "kind": "registration renewal", "car": "Family car",
+ "summary": ["Renewal request for ABC123"], "warnings": [],
+ "declaration": "I acknowledge that:\n- The information provided is correct."}
+```
+
+`declaration` is required: the owner must accept it, and without one the app offers no send button. A renewal
+already under way belongs in `warnings`.
+
+`POST /v1/renewal/submit` takes the same two objects with `"confirm": true` and `"accept_declaration": true`, and a
+connector must refuse it without both. 200:
+
+```json
+{"ok": true, "provider_id": "renewal-1", "reference": null, "status": "Renewal requested"}
+```
+
+`provider_id` is required, as for a claim; if the provider gives no identifier, the connector makes a stable one. It
+may be asked about in `POST /v1/status` (answer `"status": null` when there is nothing to report). The app keeps
+none of the renewal fields. In `/v1/transactions`, report the provider's payment of the renewal as a
+`direct_payment`.
 
 ### `POST /v1/status`
 
