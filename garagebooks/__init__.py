@@ -635,10 +635,18 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
     def store_for(kind):
         """The storage of that kind, or None when this installation doesn't have it."""
         if kind == "onedrive" and drive is not None:
-            return storage.OneDriveStore(drive, access_token)
+            return storage.OneDriveStore(drive, access_token, drive_tree, drive_sign_in)
         if kind == "mail" and mailbox is not None:
             return storage.MailStore(mailbox, lambda: access_token(mail=True))
         return local if kind == "local" else None
+
+    drive_tree = onedrive.TreeCache(drive) if drive is not None else None   # this worker's, for browsing
+
+    def drive_sign_in():
+        """What the drive tree belongs to: a new sign-in or registration starts it again."""
+        with connect() as conn:
+            account = db.onedrive_account(conn)
+        return account["client_id"], account["signed_in_at"]
 
     def car_folder(conn, car_id, kind):
         """The car's folder, if it is in that storage (for "mail", its mailbox folder)."""
@@ -2434,7 +2442,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         with connect() as conn:
             db.save_onedrive_account(conn, **{f"{p}refresh_token": drive.encrypt(tokens["refresh_token"]),
                                               f"{p}account": name, f"{p}signin_lost_at": None,
-                                              f"{p}signin_checked_at": None})
+                                              f"{p}signin_checked_at": None,
+                                              **({} if mail else {"signed_in_at": datetime.now(timezone.utc)})})
         log.info("%s connected", what)
         resp = redirect(url_for("storage_page", msg="mail_connected" if mail else "connected"), 303)
         resp.delete_cookie(STATE_COOKIE, path=request.script_root or "/")
@@ -2583,8 +2592,10 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
     def render_browse(store, car, folder_id, error=None, status=200):
         kind = store.kind
         try:
-            here = store.folder(folder_id)
-            children = store.subfolders(folder_id)
+            if kind == "mail":
+                here, children = store.folder(folder_id), store.subfolders(folder_id)
+            else:       # no ?folder: browsing has just started, so see what has changed
+                here, children, _ = store.browse(folder_id, fresh=folder_id is None)
         except onedrive.NotConnected:
             return redirect(url_for("storage_page"), 303)
         except onedrive.SignInExpired as exc:
@@ -2854,6 +2865,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             except (ValueError, storage.StorageError) as exc:
                 said = exc.user_message if isinstance(exc, storage.StorageError) else str(exc)   # or the name's ValueError
                 return render_browse(store, car, parent_id, error=said, status=400)
+            if kind == "onedrive":
+                drive_tree.expire()
             return redirect(url_for(f"{kind}_browse", car_id=car_id, folder=created["id"]), 303)
 
         if kind != "mail":      # the mailbox is only read (Mail.Read can't make a folder)
@@ -3169,7 +3182,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 return jsonify(error=info["choose_first"], url=url_for(page)), 409
             folder_id = None if wanted == "root" else (wanted or folder["folder_id"])
             try:
-                here, folders, files = store.contents(folder_id)
+                here, folders, files = store.browse(folder_id, fresh=not wanted)
             except onedrive.SignInExpired as exc:
                 return jsonify(error=exc.user_message, url=url_for(page)), 409
             except storage.StorageError as exc:

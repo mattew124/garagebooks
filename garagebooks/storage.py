@@ -3,7 +3,7 @@
 Both are used through the same few calls, so uploading into a category's subfolder, the import
 preview and learning from corrections are written once:
 
-    folder(id) subfolders(id) contents(id) create_folder(parent, name) ensure_subfolder(parent, name)
+    folder(id) subfolders(id) contents(id) browse(id, fresh) create_folder(parent, name) ensure_subfolder(parent, name)
     upload(folder, name, bytes) pdfs(folder) download(id) rename(id, name)
 
 `upload` and `rename` return the file's reference, the thing an expense stores: for OneDrive its
@@ -64,8 +64,15 @@ class OneDriveStore:
     _CALLS = ("folder", "subfolders", "contents", "create_folder", "ensure_subfolder", "upload",
               "pdfs", "download", "rename", "fetch")
 
-    def __init__(self, drive, access_token):
+    def __init__(self, drive, access_token, tree=None, sign_in=None):
         self.drive, self._access_token, self._token = drive, access_token, None
+        self.tree, self._sign_in = tree, sign_in
+
+    def browse(self, folder_id=None, fresh=False):
+        """contents() for someone clicking through folders: answered from the drive tree in memory."""
+        if self._token is None:
+            self._token = self._access_token()     # first: a lost sign-in must not be answered from memory
+        return self.tree.contents(self._sign_in(), self._token, folder_id, fresh)
 
     def __getattr__(self, name):
         if name not in self._CALLS:
@@ -236,6 +243,10 @@ class LocalFolder:
                     files.append(child)
         by_name = lambda p: p.name.lower()   # noqa: E731
         return sorted(folders, key=by_name), sorted(files, key=by_name)
+
+    def browse(self, folder_id=None, fresh=False):
+        """contents(), for someone clicking through folders. A folder on the server is always read afresh."""
+        return self.contents(folder_id)
 
     def _file_entry(self, root, path, **more):
         # Reached through a symlink or not, a file is known by the path it was listed at.

@@ -59,6 +59,15 @@ def with_children(key):
     return {**item(key), "children": [item(k) for k in CHILDREN[key]] + files}
 
 
+def drive_delta(query):
+    """The whole drive as delta gives it; with its delta link, everything again (re-applying changes nothing)."""
+    everything = [{**item(k), "parentReference": {"id": FOLDERS[k]["parent"]}} for k in FOLDERS]
+    everything[0] = {"id": "ROOT", "name": "root", "folder": {}, "root": {}}
+    everything.append({"id": "F1", "name": "receipt.pdf", "file": {}, "size": 10,
+                       "webUrl": "https://onedrive.live.com/?id=F1", "parentReference": {"id": "TESTCAR"}})
+    return {"value": everything, "@odata.deltaLink": f"{onedrive.GRAPH}/me/drive/root/delta?token=since"}
+
+
 class FakeMicrosoft:
     """Just enough of the Microsoft identity platform and Graph for the app."""
 
@@ -97,6 +106,8 @@ class FakeMicrosoft:
         if url == FILE_DOWNLOAD:                      # the CDN address: no bearer token goes with it
             return 200, PDF
         assert headers["Authorization"].startswith("Bearer AT-")
+        if method == "GET" and path.endswith("/me/drive/root/delta"):
+            return 200, drive_delta(urlparse(url).query)
         if method == "GET" and path.endswith("/me/drive"):
             return 200, {"owner": {"user": {"displayName": "Test Owner"}}}
         if method == "GET" and path.endswith("/children"):
@@ -156,6 +167,7 @@ def ms():
 def app_for(pg, admin, monkeypatch):
     monkeypatch.delenv("BASE_PATH", raising=False)
     monkeypatch.setenv("APP_TZ", "Australia/Brisbane")
+    monkeypatch.setattr(onedrive, "in_background", lambda load: load())
 
     def make(transport, key=KEY, icon_fetch=None):
         if key is None:
@@ -832,13 +844,35 @@ def refreshes(ms):
     return [c for c in ms.calls if c[1].endswith("/token") and b"grant_type=refresh_token" in c[2]]
 
 
-def test_a_folder_is_one_graph_call(client, ms):
+def test_clicking_through_folders_asks_graph_nothing_once_browsing_has_started(client, ms):
     sign_in(client, ms)
     choose_folder(client, "TESTCAR")
-    pick(client)                                  # warm up: the token refresh isn't a Graph call
+    assert pick(client).status_code == 200
+    before = len(graph_gets(ms))
+    for folder in ("CARS", "root", "TESTCAR", "INV"):
+        assert pick(client, f"?folder={folder}").status_code == 200
+    assert client.get("/onedrive/browse/1?folder=CARS").status_code == 200
+    assert len(graph_gets(ms)) == before
+
+
+def test_starting_to_browse_again_asks_only_what_changed(client, ms):
+    sign_in(client, ms)
+    choose_folder(client, "TESTCAR")
+    pick(client)
+    before = len(graph_gets(ms))
+    pick(client)
+    assert [c[1] for c in graph_gets(ms)[before:]] == [f"{onedrive.GRAPH}/me/drive/root/delta?token=since"]
+
+
+def test_signing_in_again_lists_the_drive_again(client, ms):
+    sign_in(client, ms)
+    choose_folder(client, "TESTCAR")
+    pick(client)
+    sign_in(client, ms)
+    choose_folder(client, "TESTCAR")
     before = len(graph_gets(ms))
     assert pick(client, "?folder=CARS").status_code == 200
-    assert len(graph_gets(ms)) - before == 1
+    assert "token=since" not in graph_gets(ms)[before][1] and "/delta" in graph_gets(ms)[before][1]
 
 
 def test_the_access_token_is_reused_until_it_nears_expiry(client, ms):

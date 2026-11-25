@@ -22,6 +22,7 @@ import hashlib
 import json
 import logging
 import secrets
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -43,6 +44,9 @@ BUSY_STATUSES = (429, 503)   # Microsoft throttling or a brief outage: worth a s
 RETRY_WAITS = (1, 3)         # seconds between tries; requests are bounded by gunicorn's timeout
 MAX_PAGES = 20   # of 200 children each, when listing a folder
 MAX_DELTA_PAGES = 100   # of 200 items each, when listing a folder tree with delta
+TREE_PAGE = 1000   # items asked for in each page of the whole drive (Graph may give fewer, with a next page)
+TREE_MAX_AGE = 300           # seconds a click is answered from the tree before asking what has changed
+TREE_RETRY_AFTER = 3600      # seconds before trying again to list a drive that could not be listed whole
 MAX_DEPTH = 4    # subfolders below a car's folder that are searched for PDFs
 MAX_PDF_BYTES = 20 * 1024 * 1024
 
@@ -156,6 +160,160 @@ def folder_info(item):
     parent_id = (item.get("parentReference") or {}).get("id")
     return {"id": item["id"], "name": item["name"], "path": display_path(item),
             "parent_id": parent_id, "is_root": "root" in item or parent_id is None}
+
+
+class DriveTree:
+    """The folders and PDFs of the whole drive, held in memory so that browsing it asks Graph nothing.
+
+    One `delta` query from the drive root lists everything, in pages. Its delta link then answers with only what
+    has changed since, so update() is normally one call. Items are kept by id, each with its parent's id, so a
+    rename or a move changes one entry."""
+
+    def __init__(self):
+        self.items, self.kids, self.root_id, self.link = {}, {}, None, None
+
+    @classmethod
+    def load(cls, drive, access_token):
+        tree = cls()
+        started = time.monotonic()
+        pages = tree.update(drive, access_token,
+                            f"{GRAPH}/me/drive/root/delta"
+                            f"?$select=id,name,size,folder,file,webUrl,parentReference,root,deleted&$top={TREE_PAGE}")
+        if tree.root_id not in tree.items:
+            raise OneDriveError("OneDrive didn't list the top of the drive.")
+        log.info("drive tree loaded: %d folders and PDFs, %d pages, %.1fs",
+                 len(tree.items), pages, time.monotonic() - started)
+        return tree
+
+    def update(self, drive, access_token, url=None):
+        """Apply what delta says from `url` (the changes since last time when None). Nothing is applied unless
+        every page arrives: part of a listing would show folders as empty or missing. -> pages read."""
+        url = url or self.link
+        changes, pages = [], 0
+        for _ in range(MAX_DELTA_PAGES):
+            pages += 1
+            body = drive._get(access_token, url)
+            changes += body.get("value", [])
+            url = body.get("@odata.nextLink")
+            if not url:
+                link = str(body.get("@odata.deltaLink", ""))
+                break
+            if not url.startswith(GRAPH + "/"):
+                link = ""
+                break
+        else:
+            raise OneDriveError("The drive is too big to list in one go.")
+        if not link.startswith(GRAPH + "/"):
+            raise OneDriveError("OneDrive didn't finish listing the drive.")
+        for c in changes:
+            self._apply(c)
+        self.link = link
+        return pages
+
+    def _apply(self, c):
+        fid = c.get("id")
+        if not fid:
+            return
+        old = self.items.pop(fid, None)
+        if old:
+            self.kids.get(old["parent"], set()).discard(fid)
+        if "deleted" in c or not ("folder" in c or OneDrive._is_listed_pdf(c)):
+            return
+        if "root" in c:
+            self.root_id = fid
+        parent = None if "root" in c else (c.get("parentReference") or {}).get("id")
+        self.items[fid] = {"name": c.get("name", ""), "parent": parent, "folder": "folder" in c,
+                           "size": c.get("size", 0), "web_url": c.get("webUrl")}
+        self.kids.setdefault(parent, set()).add(fid)
+
+    def contents(self, folder_id=None):
+        """As OneDrive.contents() gives one folder (the drive root when None), from memory."""
+        fid = folder_id or self.root_id
+        item = self.items.get(fid)
+        if not item or not item["folder"]:
+            raise NotFound("That folder isn't in OneDrive (moved or deleted?).")
+        names, here, seen = [], item, set()
+        while here and here["parent"] is not None and id(here) not in seen:
+            seen.add(id(here))
+            names.append(here["name"])
+            here = self.items.get(here["parent"])
+        info = {"id": fid, "name": item["name"], "path": "/" + "/".join(reversed(names)),
+                "parent_id": item["parent"], "is_root": item["parent"] is None}
+        inside = sorted(((k, self.items[k]) for k in self.kids.get(fid, ())), key=lambda x: x[1]["name"].lower())
+        return (info, [{"id": k, "name": v["name"]} for k, v in inside if v["folder"]],
+                [{"id": k, "name": v["name"], "size": v["size"], "web_url": v["web_url"]}
+                 for k, v in inside if not v["folder"]])
+
+
+def in_background(work):
+    threading.Thread(target=work, daemon=True, name="drive-tree").start()
+
+
+class TreeCache:
+    """One worker's DriveTree, for one sign-in (`key`).
+
+    Listing a whole drive takes minutes when it holds thousands of files (the pages come one after another), longer
+    than a request may run. So it is listed in the background (`start(work)`), and until it is ready each folder
+    is asked of Graph by itself."""
+
+    def __init__(self, drive, start=None):
+        self.drive, self.start, self.lock = drive, start or in_background, threading.Lock()
+        self._forget(None)
+
+    def _forget(self, key):
+        # `wanted` names the listing now running or kept: one that finishes under another name is thrown away.
+        self.key, self.tree, self.checked, self.retry_at, self.wanted, self.loading = key, None, 0.0, 0.0, object(), False
+
+    def expire(self):
+        """The app has changed the drive: ask what changed before the next answer."""
+        self.checked = 0.0
+
+    def _load(self, access_token, wanted):
+        tree = None
+        try:
+            tree = DriveTree.load(self.drive, access_token)
+        except OneDriveError as exc:
+            log.warning("drive tree not loaded (%s): asking for one folder at a time", exc)
+        finally:
+            with self.lock:
+                if wanted is self.wanted:
+                    self.tree, self.loading = tree, False
+                    self.checked = time.monotonic()    # what changed while it was listed comes with the next update
+                    if tree is None:
+                        self.retry_at = time.monotonic() + TREE_RETRY_AFTER
+
+    def _from_tree(self, access_token, folder_id, fresh):
+        """The folder from the tree, brought up to date if need be, or None when there is no tree to use."""
+        if self.tree is None:
+            return None
+        now = time.monotonic()
+        known = (folder_id or self.tree.root_id) in self.tree.items
+        if fresh or not known or not self.checked or now - self.checked >= TREE_MAX_AGE:
+            try:
+                pages = self.tree.update(self.drive, access_token)
+                log.info("drive tree updated: %d pages, %.1fs", pages, time.monotonic() - now)
+                self.checked = now
+            except OneDriveError as exc:     # an expired delta link too: list the drive again
+                log.warning("drive tree not updated (%s): listing the drive again", exc)
+                self.tree = None
+                return None
+        return self.tree.contents(folder_id)
+
+    def contents(self, key, access_token, folder_id=None, fresh=False):
+        """A folder as OneDrive.contents() gives it. `fresh` (someone has just started browsing) asks what has
+        changed first; so does a folder the tree doesn't hold, or a tree not checked for TREE_MAX_AGE. With no
+        tree yet, the one folder is asked of Graph and a listing of the drive is started."""
+        load = None
+        with self.lock:
+            if key != self.key:
+                self._forget(key)
+            found = self._from_tree(access_token, folder_id, fresh)
+            if found is None and not self.loading and time.monotonic() >= self.retry_at:
+                self.loading, wanted = True, self.wanted
+                load = lambda: self._load(access_token, wanted)   # noqa: E731
+        if load:
+            self.start(load)
+        return found or self.drive.contents(access_token, folder_id)
 
 
 class OneDrive:
