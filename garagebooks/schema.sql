@@ -1518,3 +1518,7 @@ BEGIN
             WHERE lower(name) IN ('fuel filter', 'oil filter', 'engine oil', 'timing belt', 'air filter', 'engine air filter', 'spark plugs');
     END IF;
 END $$;
+
+--   onedrive_account.signed_in_at  when OneDrive was last signed in. The app keeps a listing of the drive in
+--   memory for browsing, and this is how each web worker knows the listing belongs to an earlier sign-in.
+ALTER TABLE garagebooks.onedrive_account ADD COLUMN IF NOT EXISTS signed_in_at timestamptz;
