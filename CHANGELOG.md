@@ -23,12 +23,6 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
   `onedrive-link` keeps a stack on it. Nothing changes for installers.
 - **Development:** `scripts/dev.sh down` and the test runs now delete the anonymous Docker volumes their
   containers made, keeping the dev stack's test database. The test databases are on disk again, not in RAM.
-
-- **Clicking through OneDrive folders is quicker.** The folder chooser and the file picker now list the whole drive
-  once, with one `delta` query from the top, and keep its folders and PDFs in memory, so opening a folder then asks
-  Microsoft nothing. Starting to browse again asks only what has changed. The listing runs in the background (it can
-  take a few minutes for thousands of files); until it is ready, and if the drive is too big to list whole, each
-  folder is asked for by itself, with one request. Nothing to do on upgrade.
 - **Ask the provider to pay a registration.** Claiming a Registration expense now offers a **registration renewal
   request** as well as a claim for one already paid, with the notice's payment references filled in and the
   provider's declaration to accept. The lease's **The provider renews it** tick picks which the page starts on. It
