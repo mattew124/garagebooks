@@ -99,7 +99,7 @@ def _date(raw, pattern):
     if len(parts) != len(letters) or {"d", "M", "y"} - set(letters):
         raise ValueError(raw)
     found = {}
-    for letter, part in zip(letters, parts):
+    for letter, part in zip(letters, parts, strict=True):
         if letter == "M" and not part.isdigit():
             number = MONTHS.get(part[:3].lower())
             if number is None:

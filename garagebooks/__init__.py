@@ -2836,7 +2836,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 row["candidates"] = [{"id": m["id"], "text": f"{d['date']} · {d['category']}"
                                       + (f" · {d['vendor']}" if d["vendor"] else "") + f" · {d['amount_text']}"
                                       + (f" · {m['odometer_km']:.0f} km" if m["odometer_km"] is not None else " · no odometer")}
-                                     for m, d in zip(same, row["duplicates"]) if m in bare]
+                                     for m, d in zip(same, row["duplicates"], strict=True) if m in bare]
                 if bare and not guess["missing"]:
                     row["action"], row["include"] = str(bare[0]["id"]), True
         if guess["date"] and guess["category"] and store.kind != "mail":    # an email's PDF is copied, not renamed
@@ -3365,7 +3365,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                        + (f" · {d['vendor']}" if d["vendor"] else "") + f" · {d['amount_text']}"
                        + (" · has an invoice" if m["invoice_url"] or m["invoice_path"] else "")
                        + (f" · {m['odometer_km']:.0f} km" if m["odometer_km"] is not None else " · no odometer")}
-                      for m, d in zip(choices, dup_view(choices))]
+                      for m, d in zip(choices, dup_view(choices), strict=True)]
         return found, shown, candidates
 
     def acar_preview_rows(export, car, categories):

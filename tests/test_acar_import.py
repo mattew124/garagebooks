@@ -246,7 +246,7 @@ def test_a_merge_into_another_cars_expense_is_refused(client, admin):
 def test_an_electric_car_is_not_offered_fuel_and_a_forced_fuel_row_is_refused(client, admin):
     admin.execute("UPDATE garagebooks.car SET kind = 'BEV' WHERE id = 1")
     html = upload(client).data.decode()
-    assert "<option value=\"%s\"" % category_id(admin, "Fuel") not in html
+    assert f'<option value="{category_id(admin, "Fuel")}"' not in html
     fill_up = re.search(r'<tr[^>]*>(?:(?!</tr>).)*aCar fill-up(?:(?!</tr>).)*</tr>', html, re.S).group(0)
     assert re.search(r'<option value="new:catchall"[^>]*\sselected', fill_up)       # it still comes in, under the catch-all
     data = tick_all(preview_fields(html))
@@ -292,7 +292,7 @@ def test_a_new_car_preview_shows_the_cars_details_to_check_and_creates_nothing(c
 
 def test_a_new_car_gets_fuel_because_the_guessed_type_has_an_engine(client, admin, made):
     html = upload(client, car_id="new").data.decode()
-    assert '<option value="%s"' % category_id(admin, "Fuel") in html
+    assert f'<option value="{category_id(admin, "Fuel")}"' in html
 
 
 def test_confirming_makes_the_car_and_puts_the_costs_on_it(client, admin, made):
