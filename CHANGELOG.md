@@ -7,6 +7,9 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+- **Development:** `scripts/dev.sh down` and the test runs now delete the anonymous Docker volumes their
+  containers made, keeping the dev stack's test database. The test databases are on disk again, not in RAM.
+
 - **Clicking through OneDrive folders is quicker.** The folder chooser and the file picker now list the whole drive
   once, with one `delta` query from the top, and keep its folders and PDFs in memory, so opening a folder then asks
   Microsoft nothing. Starting to browse again asks only what has changed. The listing runs in the background (it can
