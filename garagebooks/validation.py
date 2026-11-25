@@ -550,6 +550,36 @@ def parse_gst_amount(raw, amount):
     return gst
 
 
+def parse_unit_price(raw):
+    """The pump's price per litre, in dollars ('2.099', '$2.099/L'). Blank -> None."""
+    cleaned = (raw or "").lower().replace("/l", "").replace("$", "").replace(",", "").strip()
+    if not cleaned:
+        return None
+    try:
+        value = Decimal(cleaned)
+    except InvalidOperation:
+        raise ValueError("The price per litre must be a number, e.g. 1.899.") from None
+    if not value.is_finite() or not Decimal("0.001") <= value < 10000:
+        raise ValueError("The price per litre must be more than nothing, e.g. 1.899.")
+    return value.quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
+
+
+def parse_location(raw):
+    """'latitude, longitude' as a map app copies it ('-30.123456, 150.654321'). -> (lat, lon), both None
+    when blank."""
+    cleaned = (raw or "").strip().strip("()")
+    if not cleaned:
+        return None, None
+    message = "Enter the location as latitude, longitude, e.g. -30.123456, 150.654321."
+    try:
+        lat, lon = (Decimal(part) for part in re.split(r"\s*,\s*|\s+", cleaned))
+    except (InvalidOperation, ValueError):
+        raise ValueError(message) from None
+    if not (lat.is_finite() and lon.is_finite() and abs(lat) <= 90 and abs(lon) <= 180):
+        raise ValueError(message)
+    return tuple(v.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP) for v in (lat, lon))
+
+
 def parse_expense_form(form, tz, valid_car_ids, valid_category_ids, ref_category_ids=None):
     """-> (values, errors). `values` is only meaningful when `errors` is empty. Payment references are only kept
     for the categories in `ref_category_ids` (registrations; None: any): for another they are neither checked nor saved."""
@@ -576,6 +606,17 @@ def parse_expense_form(form, tz, valid_car_ids, valid_category_ids, ref_category
     attempt("amount", parse_amount, form.get("amount"))
     attempt("odometer_km", parse_odometer, form.get("odometer_km"))
     attempt("litres", parse_litres, form.get("litres"))
+    attempt("unit_price", parse_unit_price, form.get("unit_price"))
+    # With the price per litre and no litres, the litres are the amount's worth.
+    values["litres_worked_out"] = False
+    price, paid = values.get("unit_price"), values.get("amount")
+    if "litres" in values and values["litres"] is None and price and paid and paid > 0:
+        attempt("litres", parse_litres, str((paid / price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)))
+        values["litres_worked_out"] = values.get("litres") is not None
+    try:
+        values["latitude"], values["longitude"] = parse_location(form.get("location"))
+    except ValueError as exc:
+        errors["location"] = str(exc)
     # Whether a fill-up was partial, or follows one that wasn't recorded, only means something with litres.
     has_litres = values.get("litres") is not None
     values["full_tank"] = not (has_litres and form.get("partial") == "1")

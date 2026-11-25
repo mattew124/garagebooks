@@ -778,7 +778,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         return {"service_item": form.getlist("service_item"), **{k: form.get(k, "") for k in (
             "car_id", "category_id", "date", "time", "amount", "odometer_km",
             "vendor", "notes", "invoice_url", "invoice_path", "packaged", "period_start", "period_end", "gst_amount",
-        "card_payment_ref", "bpay_biller_code", "bpay_ref", "litres", "partial", "missed")}}
+        "card_payment_ref", "bpay_biller_code", "bpay_ref", "litres", "unit_price", "partial", "missed", "location")}}
 
     # ---- routes ---------------------------------------------------------------
 
@@ -978,6 +978,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             "card_payment_ref": row["card_payment_ref"] or "", "bpay_biller_code": row["bpay_biller_code"] or "",
             "bpay_ref": row["bpay_ref"] or "",
             "litres": "" if row["litres"] is None else f"{row['litres']:.2f}",
+            "unit_price": "" if row["unit_price"] is None else f"{row['unit_price']:.3f}",
+            "location": "" if row["latitude"] is None else f"{row['latitude']:.6f}, {row['longitude']:.6f}",
             "partial": "" if row["full_tank"] else "1", "missed": "1" if row["missed_fill"] else "",
         }
         with connect() as conn:
@@ -2201,7 +2203,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                     ("amount", "Amount"), ("odometer_km", "Odometer"), ("vendor", "Vendor"), ("notes", "Notes"),
                     ("invoice_url", "Invoice link"), ("invoice_path", "Invoice file"), ("packaged", "Paid from"),
                     ("period_start", "Period start"), ("period_end", "Period end"), ("gst_amount", "GST"),
-                    ("litres", "Litres"), ("full_tank", "Filled the tank"), ("missed_fill", "Missed a fuel-up")),
+                    ("litres", "Litres"), ("unit_price", "Price per litre"), ("latitude", "Latitude"), ("longitude", "Longitude"), ("full_tank", "Filled the tank"), ("missed_fill", "Missed a fuel-up")),
         "category": (("name", "Name"), ("kind", "Kind"), ("sort_order", "Sort order"),
                      ("upload_folder", "Invoice subfolder"), ("gst_free", "GST only partly applies"), ("has_period", "Has a period"),
                      ("has_litres", "Records litres")),
@@ -3391,8 +3393,10 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             categories = db.categories(conn)
             learned = db.learned(conn, invoices.LEARN_AFTER)
             multi_amount = db.get_settings(conn)["multi_amount"]
-        guess = invoices.propose("", filename, invoices.extract_text(pdf), [c["name"] for c in categories], learned,
-                                 multi_amount)
+        text = invoices.extract_text(pdf)
+        guess = invoices.propose("", filename, text, [c["name"] for c in categories], learned, multi_amount,
+                                 fuel_category=next((c["name"] for c in categories if c["has_litres"]), None),
+                                 fuel_text=invoices.reread_fuel(pdf, text))
         have, missing = docinfo.found(guess)
         log.debug("prefill file=%s bytes=%d sha256=%s found=%s missing=%s ms=%d", docinfo.quote(filename), len(pdf),
                   docinfo.sha12(pdf), have, missing, timer.ms)
@@ -3406,7 +3410,9 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             date=guess["date"].isoformat() if guess["date"] else None,
             category_id=by_name.get(guess["category"]), vendor=guess["vendor"],
             amount=f"{guess['amount']:.2f}" if guess["amount"] is not None else None,
-            odometer_km=guess["odometer_km"], notes=guess["notes"] or None,
+            odometer_km=guess["odometer_km"], notes=guess["notes"] or None, time=guess["time"],
+            litres=None if guess["litres"] is None else f"{guess['litres']:.2f}",
+            unit_price=None if guess["unit_price"] is None else f"{guess['unit_price']:.3f}",
             gst_amount=f"{guess['gst_amount']:.2f}" if guess["gst_amount"] is not None else None,
             card_payment_ref=guess["card_payment_ref"], bpay_biller_code=guess["bpay_biller_code"],
             bpay_ref=guess["bpay_ref"],
@@ -3435,7 +3441,13 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         with connect() as conn:
             car_ids = {c["id"] for c in db.cars(conn)}
             cat_ids = {c["id"] for c in db.categories(conn)}
-        values, errors = validation.parse_expense_form({"amount": "0", **request.args.to_dict()}, tz, car_ids, cat_ids)
+        args = request.args.to_dict()
+        args["amount"] = args.get("amount") or "0"
+        try:
+            validation.parse_amount(args["amount"])
+        except ValueError:
+            args["amount"] = "0"       # still being typed: the distance can be shown without it
+        values, errors = validation.parse_expense_form(args, tz, car_ids, cat_ids)
         if errors:
             return jsonify(error=" ".join(errors.values())), 400
         expense_id = request.args.get("expense_id", type=int)
@@ -3448,7 +3460,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         return jsonify(
             distance_km=None if row["distance_km"] is None else float(row["distance_km"]),
             l_per_100km=None if figure is None else float(figure),
-            lines=fuel.describe(row))
+            lines=([f"{values['litres']:,.2f} L, worked out from the amount and the price per litre. After a "
+                    "discount, enter the litres instead."] if values["litres_worked_out"] else []) + fuel.describe(row))
 
     @app.get("/api/odometer")
     def api_odometer():

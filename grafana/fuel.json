@@ -1283,6 +1283,121 @@
           "refId": "A"
         }
       ]
+    },
+    {
+      "id": 18,
+      "type": "geomap",
+      "title": "Where fuel was bought",
+      "description": "A heat map of the fill-ups that have a location, weighted by litres. Point at a dot for the fill-up.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "TeslaMate"
+      },
+      "gridPos": {
+        "h": 14,
+        "w": 24,
+        "x": 0,
+        "y": 51
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "TeslaMate"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT e.latitude, e.longitude, e.litres, e.vendor AS \"Vendor\", e.occurred_at AS \"Date\" FROM garagebooks.expense e WHERE e.car_id = $car_id AND e.latitude IS NOT NULL AND e.litres IS NOT NULL AND $__timeFilter(e.occurred_at) ORDER BY e.occurred_at",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "basemap": {
+          "type": "default",
+          "name": "Basemap",
+          "config": {}
+        },
+        "controls": {
+          "mouseWheelZoom": false,
+          "showAttribution": true,
+          "showZoom": true
+        },
+        "tooltip": {
+          "mode": "details"
+        },
+        "view": {
+          "id": "fit",
+          "allLayers": true,
+          "lat": 0,
+          "lon": 0,
+          "zoom": 12,
+          "padding": 20
+        },
+        "layers": [
+          {
+            "type": "heatmap",
+            "name": "Litres",
+            "location": {
+              "mode": "coords",
+              "latitude": "latitude",
+              "longitude": "longitude"
+            },
+            "tooltip": false,
+            "config": {
+              "blur": 20,
+              "radius": 20,
+              "weight": {
+                "field": "litres",
+                "min": 0.4,
+                "max": 1,
+                "fixed": 1
+              }
+            }
+          },
+          {
+            "type": "markers",
+            "name": "Fill-ups",
+            "location": {
+              "mode": "coords",
+              "latitude": "latitude",
+              "longitude": "longitude"
+            },
+            "tooltip": true,
+            "config": {
+              "showLegend": false,
+              "style": {
+                "color": {
+                  "fixed": "blue"
+                },
+                "opacity": 0.8,
+                "size": {
+                  "fixed": 3,
+                  "min": 2,
+                  "max": 10
+                }
+              }
+            }
+          }
+        ]
+      }
     }
   ]
 }

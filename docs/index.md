@@ -101,7 +101,7 @@ looking at.
 ### Fuel
 
 An expense in a category that **Records litres** (**Fuel** to begin with; change it with the tick on the
-**Categories** page) also asks for the litres, whether it was a **partial fill**, and whether you **missed
+**Categories** page) also asks, before the odometer, for the litres and an optional **$/L** (price per litre), whether it was a **partial fill**, and whether you **missed
 recording a fuel-up** since the last one. As soon as the car, date and odometer are in, the form shows the
 distance travelled since the last fuel-up, whatever kind of fill either was. Once the litres are in, it
 shows L/100 km of the tank. The expense list shows the same under the amount and the odometer.
@@ -113,6 +113,23 @@ shows L/100 km of the tank. The expense list shows the same under the amount and
   known). The next tank is measured as usual.
 - The first full fill-up has nothing to measure from, so L/100 km starts at the second.
 - The odometer is needed for any of it: add it to each fill-up.
+
+**From the receipt.** Choose a scan or PDF of a service station's receipt on the Add page and it fills in the
+date and time, the fuel category, the station's brand, the amount you paid, the litres and the pump's price per
+litre. A scan is read with OCR, which makes mistakes: the litres and price are only filled in when they multiply
+out to an amount printed on the receipt, otherwise they're left blank for you to type. Check everything before
+saving. The receipt has no odometer, so enter that yourself. A PDF is needed, so save a photo as a PDF first (a
+phone's document scanner does this). Importing receipts from storage doesn't record litres: add them by editing.
+
+**$/L** is optional. Enter the pump's price, before any discount: it's the price the list's
+figures and the Fuel dashboard's price chart then show for that fill-up (without it, they show amount ÷ litres).
+Leave the litres blank and they're worked out from the amount and the price. After a discount that gives too few
+litres, so enter the litres from the receipt instead.
+
+**Location** is optional too, and draws the heat map on the Fuel dashboard. At the pump, press **Use my
+location** and allow it (browsers only offer this over HTTPS). It records where you are *now*, so if you're
+adding the receipt later, paste the station's `latitude, longitude` from a map app instead. The app doesn't
+look up the address on the receipt, so nothing about where you were is sent to a geocoding service.
 
 Fuel entered before litres existed keeps counting in the totals; add the litres by editing it. The
 [Fuel dashboard](dashboard.md#fuel-dashboard) charts all of this.

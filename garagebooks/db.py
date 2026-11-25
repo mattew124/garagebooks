@@ -527,7 +527,7 @@ _SELECT = """
            cat.kind, e.occurred_at, e.amount, e.odometer_km, e.vendor, e.notes,
            e.invoice_url, e.invoice_path, e.packaged, e.period_start, e.period_end,
            e.gst_amount, e.card_payment_ref, e.bpay_biller_code, e.bpay_ref, cat.has_period, cat.has_litres,
-           e.litres, e.full_tank, e.missed_fill, ff.distance_km AS fuel_distance_km, ff.tank_km AS fuel_tank_km,
+           e.litres, e.full_tank, e.missed_fill, e.unit_price, e.latitude, e.longitude, ff.distance_km AS fuel_distance_km, ff.tank_km AS fuel_tank_km,
            ff.tank_litres AS fuel_tank_litres, ff.l_per_100km AS fuel_l_per_100km, ff.price_per_litre,
            c.make AS car_make, c.model AS car_model, cat.budget_pool,
            cl.provider AS claim_provider, cl.provider_id AS claim_provider_id, cl.reference AS claim_reference,
@@ -623,9 +623,10 @@ def get_expense(conn, expense_id):
 
 _FIELDS = ("car_id", "category_id", "occurred_at", "amount", "odometer_km",
            "vendor", "notes", "invoice_url", "invoice_path", "packaged", "period_start", "period_end",
-           "gst_amount", "card_payment_ref", "bpay_biller_code", "bpay_ref", "litres", "full_tank", "missed_fill")
+           "gst_amount", "card_payment_ref", "bpay_biller_code", "bpay_ref", "litres", "full_tank", "missed_fill",
+           "unit_price", "latitude", "longitude")
 
-_DEFAULTS = {"litres": None, "full_tank": True, "missed_fill": False, "invoice_path": None, "packaged": None, "period_start": None, "period_end": None, "gst_amount": None,
+_DEFAULTS = {"unit_price": None, "latitude": None, "longitude": None, "litres": None, "full_tank": True, "missed_fill": False, "invoice_path": None, "packaged": None, "period_start": None, "period_end": None, "gst_amount": None,
              "card_payment_ref": None, "bpay_biller_code": None, "bpay_ref": None}
 
 

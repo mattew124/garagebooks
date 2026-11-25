@@ -1530,11 +1530,22 @@ ALTER TABLE garagebooks.onedrive_account ADD COLUMN IF NOT EXISTS signed_in_at t
 --                       tank it is part of, and L/100 km is worked out when the tank is next filled
 --   expense.missed_fill a fuel-up since the one before was not recorded, so the litres for this tank are not all
 --                       known: the distance is still shown, L/100 km is not
+--   expense.unit_price  the pump's price per litre in dollars, when entered (before any discount)
+--   expense.latitude, longitude
+--                       where the fuel was bought, when recorded (both or neither): the Fuel dashboard's heat map
 --   category.has_litres the category's expenses record litres (Fuel by default; the owner's later edits are
 --                       never overwritten)
 ALTER TABLE garagebooks.expense ADD COLUMN IF NOT EXISTS litres numeric(7, 2);
 ALTER TABLE garagebooks.expense ADD COLUMN IF NOT EXISTS full_tank boolean NOT NULL DEFAULT true;
 ALTER TABLE garagebooks.expense ADD COLUMN IF NOT EXISTS missed_fill boolean NOT NULL DEFAULT false;
+ALTER TABLE garagebooks.expense ADD COLUMN IF NOT EXISTS unit_price numeric(8, 3);
+ALTER TABLE garagebooks.expense ADD COLUMN IF NOT EXISTS latitude numeric(8, 6);
+ALTER TABLE garagebooks.expense ADD COLUMN IF NOT EXISTS longitude numeric(9, 6);
+ALTER TABLE garagebooks.expense DROP CONSTRAINT IF EXISTS expense_unit_price_positive;
+ALTER TABLE garagebooks.expense ADD CONSTRAINT expense_unit_price_positive CHECK (unit_price IS NULL OR unit_price > 0);
+ALTER TABLE garagebooks.expense DROP CONSTRAINT IF EXISTS expense_location_valid;
+ALTER TABLE garagebooks.expense ADD CONSTRAINT expense_location_valid CHECK (
+    (latitude IS NULL) = (longitude IS NULL) AND abs(latitude) <= 90 AND abs(longitude) <= 180);
 ALTER TABLE garagebooks.expense DROP CONSTRAINT IF EXISTS expense_litres_positive;
 ALTER TABLE garagebooks.expense ADD CONSTRAINT expense_litres_positive CHECK (litres IS NULL OR litres > 0);
 DO $$
@@ -1557,10 +1568,10 @@ END $$;
 --                 in since then (partial fills included) over the distance since then. NULL for the first full
 --                 fill-up (nothing to measure from) and for a tank in which a fuel-up was missed
 --                 (tank_cost, the money spent on the tank, is left out there too).
---   price_per_litre  what was paid per litre
+--   price_per_litre  the pump's price where it was entered, else what was paid per litre
 CREATE OR REPLACE VIEW garagebooks.fuel_fill AS
 WITH numbered AS (
-    SELECT e.id, e.car_id, e.occurred_at, e.amount, e.litres, e.odometer_km, e.full_tank, e.missed_fill,
+    SELECT e.id, e.car_id, e.occurred_at, e.amount, e.litres, e.odometer_km, e.full_tank, e.missed_fill, e.unit_price,
            -- how many tanks were filled before this one: fill-ups with the same number are one tank
            count(*) FILTER (WHERE e.full_tank) OVER (
                PARTITION BY e.car_id ORDER BY e.occurred_at, e.id ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS tank_no
@@ -1580,7 +1591,7 @@ SELECT n.id, n.car_id, n.occurred_at, n.amount, n.litres, n.odometer_km, n.full_
        CASE WHEN n.full_tank AND n.odometer_km > t.start_km AND NOT t.tank_missed THEN t.tank_cost END AS tank_cost,
        CASE WHEN n.full_tank AND n.odometer_km > t.start_km AND NOT t.tank_missed
             THEN (t.tank_litres / (n.odometer_km - t.start_km) * 100)::numeric(7, 2) END AS l_per_100km,
-       (n.amount / n.litres)::numeric(9, 4) AS price_per_litre
+       COALESCE(n.unit_price, n.amount / n.litres)::numeric(9, 4) AS price_per_litre
 FROM numbered n
 JOIN tanks t ON t.car_id = n.car_id AND t.tank_no = n.tank_no
 LEFT JOIN LATERAL (

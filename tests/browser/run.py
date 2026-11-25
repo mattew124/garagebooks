@@ -1848,6 +1848,60 @@ def test_add_form_runs_without_the_teslamate_button(page):
         other.close()
 
 
+def test_fuel_receipt(page):
+    """A service station receipt fills the Add form, litres and price sit before the odometer, Use my location fills
+    the location (the browser's position is faked: this stack is plain HTTP), and all of it is kept."""
+    receipt = readable_pdf("SHELL PUMP #1 PREMIUM 95) Tj 0 -30 Td (40.00L @ $2.000/L 80.00) Tj 0 -30 Td (TOTAL $77.00) "
+                           "Tj 0 -30 Td (05/03/26 07:45")
+    pdf = [{"name": "receipt.pdf", "mimeType": "application/pdf", "buffer": receipt}]
+    page.goto(UI + "cars")
+    page.fill("#add-car input[name=name]", MARKER)
+    page.select_option("#add-car select[name=kind]", "ICE")
+    page.click("#add-car button[type=submit]")
+    page.wait_for_url(re.compile(r"msg=car_added"))
+    other = page.context.new_page()
+    other.add_init_script(
+        "Object.defineProperty(window, 'isSecureContext', {get: () => true});"
+        "Object.defineProperty(navigator, 'geolocation', {value: {getCurrentPosition: (ok) =>"
+        " ok({coords: {latitude: -30.123456, longitude: 150.654321, accuracy: 8}})}});")
+    try:
+        other.goto(UI + "new")
+        electric = other.locator("select[name=car_id] option[data-kind=BEV]")
+        if electric.count():                      # an electric car doesn't take fuel: the category stays unchosen
+            other.select_option("select[name=car_id]", electric.first.get_attribute("value"))
+            other.set_input_files("#invoice-file", files=pdf)
+            expect(other.locator("#prefill-hint")).to_contain_text("doesn't take fuel")
+            expect(other.locator("select[name=category_id]")).to_have_value("")
+            other.goto(UI + "new")
+        other.select_option("select[name=car_id]", label=MARKER)
+        other.set_input_files("#invoice-file", files=pdf)
+        expect(other.locator("input[name=litres]")).to_have_value("40.00")
+        expect(other.locator("input[name=unit_price]")).to_have_value("2.000")
+        expect(other.locator("input[name=amount]")).to_have_value("77.00")
+        expect(other.locator("input[name=date]")).to_have_value("2026-03-05")
+        expect(other.locator("input[name=time]")).to_have_value("07:45")
+        expect(other.locator("select[name=category_id] option:checked")).to_have_text("Fuel")
+        top = lambda name: other.locator(f"input[name={name}]").bounding_box()["y"]  # noqa: E731 - used twice, right here
+        assert top("litres") < top("odometer_km") < top("location")
+        other.click("#use-location")
+        expect(other.locator("input[name=location]")).to_have_value("-30.123456, 150.654321")
+        other.fill("input[name=odometer_km]", "61000")
+        expect(other.locator("#fuel-summary")).not_to_be_empty()
+        shot(other, "fuel-receipt-form")
+        other.fill("input[name=vendor]", MARKER)
+        other.fill("input[name=invoice_url]", INVOICE)
+        other.locator("input[name=invoice_file]").set_input_files([])
+        other.click("button[type=submit].button")
+        other.wait_for_url(re.compile(r"msg=saved"))
+        other.goto(UI)
+        other.locator(f"tr:has-text('{MARKER}') a:has-text('Edit')").first.click()
+        expect(other.locator("input[name=location]")).to_have_value("-30.123456, 150.654321")
+        expect(other.locator("input[name=unit_price]")).to_have_value("2.000")
+    finally:
+        other.close()
+        remove_marked(page)                       # the expense, then the car added for it
+
+
 def test_dashboard(page):
     add_expense(page, "62000", "Initial purchase")
     add_expense(page, "1500", "Tyres")
@@ -2211,6 +2265,7 @@ def main():
         step("form renders on a phone", test_form, page)
         step("odometer fills itself in", test_odometer_autofills, page)
         step("the Add form works without the Fill from TeslaMate button", test_add_form_runs_without_the_teslamate_button, page)
+        step("fuel: a receipt fills the form, and the location is kept", test_fuel_receipt, page)
         step("odometer button uses the chosen date", test_odometer_button_for_past_date, page)
         step("a bad invoice link is explained, input kept", test_bad_link_is_explained, page)
         step("add, list, invoice link, edit, delete", test_add_list_edit_delete, page)

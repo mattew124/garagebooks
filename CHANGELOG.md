@@ -7,6 +7,11 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+- **A fuel receipt fills in the expense.** Choosing a scan or PDF of a service station receipt on the Add page
+  fills in the date, time, fuel category, brand, amount, litres and price per litre (a scan's litres and price
+  only when they multiply out). Litres now come before the odometer, with an optional **$/L** that can
+  also work the litres out. A fill-up can record **where** it was bought (**Use my location**, or pasted
+  coordinates), and the Fuel dashboard has a heat map of those places. Nothing to do on upgrade.
 - **Fuel records litres, shows the distance since the last fuel-up, and has a dashboard of its own.** A category that
   **Records litres** (Fuel to begin with, a tick on the Categories page) asks for the litres on the expense form, with
   **Partial fill** and **I missed recording a fuel-up** ticks. The form shows the distance since the last fuel-up as
