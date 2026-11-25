@@ -2020,6 +2020,48 @@ def sync_provider_history(page):
     expect(page.locator("#sync-running")).to_have_count(0, timeout=40000)
 
 
+def test_claim_renewal(page):
+    """A registration sent as a renewal request through the stand-in connector: the choice of who pays, the notice's
+    figures in view, the payment references following the category on the form, and the declaration to accept."""
+    from datetime import date
+    fake_connector(page)
+    try:
+        add_claimable_expense(page, date.today())
+        page.goto(UI)
+        page.locator("tbody tr", has_text=MARKER).get_by_role("link", name="Edit").click()
+        refs = page.locator("details.payment-refs")
+        expect(refs).to_be_hidden()                                       # tyres have none
+        page.select_option("select[name=category_id]", label="Registration")
+        expect(refs).to_be_visible()
+        refs.locator("summary").click()
+        page.fill("input[name=card_payment_ref]", "1111 2222 33")
+        page.fill("input[name=bpay_biller_code]", "12345")
+        page.fill("input[name=bpay_ref]", "9876 5432")
+        page.click("button[type=submit].button")
+        page.wait_for_url(re.compile(r"msg=updated"))
+        page.goto(UI)
+        page.locator("tbody tr", has_text=MARKER).locator("a.claim-link").click()
+        expect(page.locator("#claim-method")).to_be_visible()
+        page.get_by_role("link", name="Ask the provider to pay it").click()
+        expect(page.get_by_label("BPAY biller code")).to_have_value("12345")
+        expect(page.locator("#claim-declaration")).to_contain_text("Example declaration")
+        assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "sideways scroll on a phone"
+        shot(page, "claim-renewal")
+        page.get_by_role("button", name="Check again").click()            # without accepting: only checking
+        expect(page.locator("#claim-declaration")).to_be_visible()
+        page.get_by_label("I accept the declaration above").check()
+        page.get_by_role("button", name="Send renewal request").click()
+        page.wait_for_url(re.compile(r"msg=renewal_requested"))
+        expect(page.locator("tbody tr", has_text=MARKER).locator("a.claim-badge")).to_contain_text("Renewal requested")
+        page.locator("tbody tr", has_text=MARKER).get_by_role("link", name="Edit").click()
+        expect(page.locator("#claim-record")).to_contain_text("Renewal requested from")
+        page.once("dialog", lambda d: d.accept())
+        page.get_by_role("button", name="Remove claim record").click()
+        page.wait_for_url(re.compile(r"msg=claim_forgotten"))
+    finally:
+        remove_marked(page)
+
+
 def test_claims(page):
     """Claim an expense through the stand-in connector: preview, a field it asks for, the sign-in with its
     code, submit, the badge and the reference, refusing to delete a claimed expense, refreshing the status,
@@ -2177,6 +2219,7 @@ def main():
         step("phone list shows amount, invoice and edit", test_list_shows_key_fields_on_a_phone, page)
         step("a Claim link in the list still fits a phone", test_list_with_a_claim_link_fits_a_phone, page)
         step("claims: preview, needed field, sign-in code, submit, status refresh, remove record", test_claims, page)
+        step("claims: a registration renewal request, its references and declaration", test_claim_renewal, page)
         step("settings: notifications address is kept secret, refused when bad, tested", test_notifications_settings, page)
         step("history page lists an add, an edit and a delete", test_history_page, page)
         step("a likely duplicate is asked about, then saved anyway", test_duplicate_is_asked_about_before_saving, page)

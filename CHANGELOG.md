@@ -7,6 +7,12 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+- **Ask the provider to pay a registration.** Claiming a Registration expense now offers a **registration renewal
+  request** as well as a claim for one already paid, with the notice's payment references filled in and the
+  provider's declaration to accept. The lease's **The provider renews it** tick picks which the page starts on. It
+  needs a claims connector with the new renewal calls (docs: claims connector). Nothing changes for other installers.
+- **Payment references are for registrations only.** Other categories no longer show the section or keep
+  references.
 - **No period fields on categories without one.** An import row showed **Period from** and **to** whenever the PDF
   named a period or expiry date, whatever the category. The fields now follow the category's **Has a period** tick,
   and a period in another category isn't saved. Reading an invoice on the Add form no longer fills one in either.

@@ -266,6 +266,26 @@ expense). **Refresh claim statuses** asks the provider about each claim that
 isn't yet marked paid. A claimed expense can't be deleted by mistake: remove its claim record first (Edit, then
 **Remove claim record**), which doesn't cancel the claim at the provider.
 
+### Asking the provider to pay a registration
+
+Some providers will pay a registration for you instead of paying you back. Claiming a **Registration** expense asks
+**Who pays this registration?**:
+
+- **Ask the provider to pay it** sends a renewal request: the unpaid renewal notice, its card payment reference,
+  BPAY biller code and BPAY reference, the GST on the CTP insurance, and anything else the provider asks for, such
+  as a driver licence number. The references and GST start filled in from the expense; check them against the
+  notice. Read the provider's declaration, tick **I accept the declaration above**, then choose **Send renewal
+  request**. The licence number is sent each time and never saved.
+- **Claim it back (I have paid it)** is the ordinary claim, for a registration you have already paid.
+
+The lease's **The provider renews it** tick (Registration, on the lease's form) chooses which one the page starts on.
+After a request the expense shows **Renewal requested**. When the provider's history shows its payment (about the
+same amount, within 90 days of the expense's date), a sync matches it to the expense. Whether the registration gets
+paid is up to the provider: check before it is due. This needs a connector that has the
+[renewal calls](claims-connector.md#registration-renewal-requests).
+
+<!-- screenshot: claim-renewal - The Claim page for a registration: who pays it, the notice's figures, the declaration and the Send renewal request button -->
+
 ## Reminders for registration and the end of the lease
 
 The registration date and the lease's end date become [reminders](reminders.md#registration-and-lease-end)
