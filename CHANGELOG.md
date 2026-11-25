@@ -7,6 +7,10 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+- **No period fields on categories without one.** An import row showed **Period from** and **to** whenever the PDF
+  named a period or expiry date, whatever the category. The fields now follow the category's **Has a period** tick,
+  and a period in another category isn't saved. Reading an invoice on the Add form no longer fills one in either.
+  An expense already saved with a period keeps it. Nothing changes for installers.
 - **Browser tests rerun only what failed.** `scripts/dev.sh test-browser --failed` reruns just the steps the last
   run failed, and `--only TEXT` the steps whose name contains TEXT: seconds instead of the whole suite. The
   contributing rules now leave the full pytest run to CI. Nothing changes for installers.

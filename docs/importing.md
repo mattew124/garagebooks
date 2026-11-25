@@ -55,7 +55,9 @@ a **period**: the start and end dates, read from `Period of insurance: from … 
 a notice offers 6 and 12 months, Settings → When an invoice offers several amounts decides which one is read, as it does for the amount.
 Which categories have a period is the **Has a period** tick on the **Categories** page (Insurance and
 Registration are ticked to begin with), so a category you add, such as roadside assistance, can have one too.
-A period can't end before it starts.
+A period can't end before it starts. Only a category with a period shows the fields: if a PDF in another category
+names one, it stays out of sight and isn't saved, and appears if you change the row to a category that has a period.
+(An expense that already has a period still shows it when you edit it.)
 
 <!-- screenshot: import-row-period - An import row for an insurance policy, with its notes and period -->
 
