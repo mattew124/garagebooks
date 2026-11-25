@@ -7,6 +7,10 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+- **Development: the browser tests can't reach a real claims connector.** `scripts/dev.sh onedrive-link` could
+  restart a stack started with `STAND_IN=1` on the connector `dev.env` names, and `test-browser`, which submits
+  claims, only checked its own settings. It now refuses unless the running app is on the stand-in, and
+  `onedrive-link` keeps a stack on it. Nothing changes for installers.
 - **Development:** `scripts/dev.sh down` and the test runs now delete the anonymous Docker volumes their
   containers made, keeping the dev stack's test database. The test databases are on disk again, not in RAM.
 

@@ -229,6 +229,8 @@ from the stack's containers. `up` says which connector it uses and refuses a rea
 user running it can't read. The app runs as you and joins the key file's group, so a key readable only through a
 group you are in (`0640`, say) works too. The browser tests submit claims, so they refuse to run while a real
 connector is set: use `STAND_IN=1 scripts/dev.sh up` and `STAND_IN=1 scripts/dev.sh test-browser` for them.
+`test-browser` also checks the connector the running app is using, and `onedrive-link` keeps a stack on the stand-in
+when it restarts the app.
 
 The seed only reads from TeslaMate. It copies all of `cars` and `charging_processes`, and one
 `positions` row per hour with latitude, longitude and elevation blanked. `up` warns if
