@@ -130,9 +130,10 @@ An **expense**:
   `registration` or `other`.
 - `date` is the day the cost was incurred, in the app's time zone (`APP_TZ`).
 - `amount` includes GST.
-- `fields` holds only what the owner typed, or what the connector asked for in a 422: `gst`,
+- `fields` holds what the expense already stores (`gst`, and `start` and `end` for its period), what the
+  owner typed, and what the connector asked for in a 422: `gst`,
   `description`, `provider`, `policy_number`, `start`, `end` or `invoice_date`. Dates are `YYYY-MM-DD`
-  and money is a decimal string. It is empty when nothing was typed.
+  and money is a decimal string. It is empty when there is none of these.
 
 An **invoice** is `null`, or:
 

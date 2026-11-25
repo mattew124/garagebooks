@@ -268,6 +268,18 @@ def expense_payload(row, local_day, fields=None):
             "fields": {k: v for k, v in (fields or {}).items() if v}}
 
 
+def stored_fields(row):
+    """The protocol fields an expense already holds: the GST stated on its document, and the period an
+    insurance policy or a registration covers."""
+    out = {}
+    if row.get("gst_amount") is not None:
+        out["gst"] = f"{row['gst_amount']:.2f}"
+    for key, column in (("start", "period_start"), ("end", "period_end")):
+        if row.get(column):
+            out[key] = row[column].isoformat()
+    return out
+
+
 def invoice_payload(name, content, content_type="application/pdf"):
     return {"name": name, "content_type": content_type, "data_base64": base64.b64encode(content).decode("ascii")}
 
