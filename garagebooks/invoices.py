@@ -671,16 +671,80 @@ def _is_fuel_receipt(text):
     return bool((pump and (grade or brand)) or (grade and brand))
 
 
+# A station's street, suburb, state and postcode, as a till's heading or its card slip prints them.
+_STATES = "QLD|OLD|NSW|VIC|SA|WA|TAS|NT|ACT"              # OCR reads QLD as OLD
+_STREET = re.compile(r"(?<![\w/.-])(\d{1,5}[A-Za-z]?(?:[-/]\d{1,5})?[ \t]+(?:[A-Z][A-Za-z'\-]{1,20}[ \t]+){1,4}?"
+                     r"(?:Road|Rd|Street|St|Avenue|Ave|Highway|Hwy|Drive|Dr|Parade|Pde|Terrace|Tce|Boulevard|Blvd|Way|Lane|Court|Ct"
+                     r"|Place|Pl|Crescent|Cres|Esplanade|Circuit|Motorway)\b)", re.I)
+_SUBURB = r"([A-Za-z][A-Za-z']+(?:[ \t][A-Za-z][A-Za-z']+){0,3}?)"
+_SUBURB_STATE = re.compile(rf"^\W*{_SUBURB},?[ \t]+({_STATES})(?:[ \t]+(\d{{4}}))?\W*$", re.M | re.I)
+_SAME_LINE = re.compile(rf"^[ \t]*,[ \t]*{_SUBURB},?[ \t]+({_STATES})\b(?:[ \t]+(\d{{4}}))?", re.I)
+# "10000 Exampleton  PH: 07 0000 0000": a store number, the suburb, then the phone.
+_BEFORE_PHONE = re.compile(rf"^\W*(?:\d{{3,6}}[ \t|]+)?{_SUBURB}[ \t]+(?:PH|Phone|Tel)\b", re.M | re.I)
+_HEADING_LINES = 10
+_NEW_READING = "\x1e"                                     # between one reading of a scan and the next
+_ADDRESS_SIGN = re.compile(r"\bP[Hhi]:")
+
+
+def station_queries(text):
+    """The fuel station's address as lookups to try, best first ("12 Example Road, Suburb, QLD 4000"), from
+    one or more readings of its receipt. Only for a fuel receipt, only a street from its heading, and only with
+    a suburb: a street's name alone could be anywhere. [] otherwise."""
+    if not _is_fuel_receipt(text):
+        return []
+    streets, places = {}, {}                  # value -> [how often read, how it was read: lower is surer]
+
+    def note(found, value, rank):
+        seen = found.setdefault(value.lower(), [0, rank, value])
+        seen[0] += 1
+        seen[1] = min(seen[1], rank)
+
+    # Each reading has its own heading: its first few lines.
+    for line in (line for reading in text.split(_NEW_READING)
+                 for line in [x for x in reading.splitlines() if x.strip()][:_HEADING_LINES]):
+        m = _STREET.search(line)
+        if m:
+            same = _SAME_LINE.match(line[m.end():])
+            street = " ".join(m.group(1).split())
+            note(streets, street, 0)
+            if same:
+                note(places, _place(*same.groups()), 0)
+    for m in _SUBURB_STATE.finditer(text):
+        note(places, _place(*m.groups()), 1)
+    states = [_place("", s, None).strip(", ") for _, s, _ in (m.groups() for m in _SUBURB_STATE.finditer(text))]
+    for m in _BEFORE_PHONE.finditer(text):
+        note(places, ", ".join([_title(m.group(1)), *states[:1]]), 2)
+    best = lambda found: [v[2] for v in sorted(found.values(), key=lambda v: (-v[0], v[1]))]  # noqa: E731 - used twice, right here
+    pairs = sorted(((i + j, i, f"{street}, {place}") for i, street in enumerate(best(streets))
+                    for j, place in enumerate(best(places))))
+    return [query for _, _, query in pairs]
+
+
+def _title(suburb):
+    return " ".join(w.capitalize() for w in suburb.split())
+
+
+def _place(suburb, state, postcode):
+    state = "QLD" if state.upper() == "OLD" else state.upper()
+    return f"{_title(suburb)}, {state}" + (f" {postcode}" if postcode else "")
+
+
 def reread_fuel(pdf, text):
-    """More OCR text for a fuel receipt whose pump line couldn't be made out of `text`: other readings of the
-    scan, until the litres and price add up. '' for any other document, and when there is nothing to add. Only
-    fuel_figures reads it: the amount, date and the rest stay as the first reading had them."""
-    if not _is_fuel_receipt(text) or fuel_figures(text):
+    """More OCR text for a fuel receipt whose pump line or station address couldn't be made out of `text`:
+    other readings of the scan, until the litres and price add up and there is an address. '' for any other
+    document, and when there is nothing to add. Only fuel_figures and station_queries read it: the amount, date
+    and the rest stay as the first reading had them."""
+    def done(read):
+        # An address is only worth reading again for when the receipt shows signs of having one.
+        sought = _ADDRESS_SIGN.search(read) or _STREET.search(read) or _SUBURB_STATE.search(read)
+        return fuel_figures(read) and (station_queries(read) or not sought)
+
+    if not _is_fuel_receipt(text) or done(text):
         return ""
     extra = ""
     for dpi, psm in _REREADS:
-        extra += "\n" + _ocr(pdf, dpi, psm)
-        if fuel_figures(text + extra):
+        extra += _NEW_READING + _ocr(pdf, dpi, psm)
+        if done(text + extra):
             break
     return extra
 

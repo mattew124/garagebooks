@@ -36,6 +36,16 @@ trademark of Microsoft Corporation; Grafana is a trademark of Grafana Labs.
 An installation on a release candidate (`0.3.0-rc1`) is told about newer candidates and the stable
 release that replaces them. One on a stable release is only told about stable releases.
 
+## Address lookup
+
+When a fuel receipt is chosen on the Add page, the app asks OpenStreetMap's public search
+(`nominatim.openstreetmap.org`) where the station is. It sends only the station's street, suburb, state and
+postcode as read from the receipt's heading: at most four tries, no faster than one a second. OpenStreetMap sees
+those, your server's address and a `User-Agent` of `garagebooks/<version>`. Nothing is sent for other documents.
+An answer is only used when it is on the street asked for, and the form shows the address it came from. Set
+`ADDRESS_LOOKUP=0` in `.env` and restart to never ask. Use of the service is subject to its
+[usage policy](https://operations.osmfoundation.org/policies/nominatim/).
+
 ## Database connection
 
 The app connects as `DATABASE_USER` with `DATABASE_PASS` to `DATABASE_NAME` on `DATABASE_HOST` (default `database`, the TeslaMate service name) and `DATABASE_PORT` (default `5432`). Set the last two in `.env` only if TeslaMate's database runs under another name or port. `DATABASE_URL` (a full `postgresql://` address) replaces all of these when set.

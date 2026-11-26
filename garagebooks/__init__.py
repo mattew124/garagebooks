@@ -28,7 +28,7 @@ from psycopg import errors as pg_errors
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from . import ato, claims as claim_lib, dashboard, db, docinfo, drivestore, fuel, icons, invoices, jobs, jobtext, lease, leaseform, logs, notices, notify, onedrive, outlook, reminders, sources, storage, tax, updates, validation
+from . import ato, claims as claim_lib, dashboard, db, docinfo, drivestore, fuel, geocode, icons, invoices, jobs, jobtext, lease, leaseform, logs, notices, notify, onedrive, outlook, reminders, sources, storage, tax, updates, validation
 
 log = logging.getLogger("garagebooks.app")
 
@@ -309,6 +309,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
     update_check = updates.UpdateCheck(version, fetch=release_fetch,
                                        enabled=os.environ.get("UPDATE_CHECK", "1").strip() != "0")
     app.extensions["update_check"] = update_check
+    stations = geocode.Lookup(version, enabled=os.environ.get("ADDRESS_LOOKUP", "1").strip() != "0")
     # CLAIMS_CONNECTOR_URL turns on claiming an expense from the salary packaging provider, through a
     # separate service that knows how to talk to it (docs/claims-connector.md). Unset, nothing shows.
     connector = claim_lib.from_env()
@@ -3403,9 +3404,22 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             learned = db.learned(conn, invoices.LEARN_AFTER)
             multi_amount = db.get_settings(conn)["multi_amount"]
         text = invoices.extract_text(pdf)
+        again = invoices.reread_fuel(pdf, text)
         guess = invoices.propose("", filename, text, [c["name"] for c in categories], learned, multi_amount,
                                  fuel_category=next((c["name"] for c in categories if c["has_litres"]), None),
-                                 fuel_text=invoices.reread_fuel(pdf, text))
+                                 fuel_text=again)
+        # A fuel receipt says where it was bought: its station's address, looked up for the heat map.
+        location, location_note = None, None
+        if guess["time"] or guess["litres"] is not None:
+            place = stations.find(invoices.station_queries(text + again))
+            if place:
+                location = place["location"]
+                location_note = (f"Looked up from the receipt's address, {place['query']}"
+                                 f"{'' if place['exact'] else ' (the street, not the exact spot)'}. "
+                                 "Map data © OpenStreetMap contributors.")
+            else:
+                location_note = ("The receipt's address wasn't looked up or found. At the pump, press Use my location; "
+                                 "otherwise paste the coordinates.")
         have, missing = docinfo.found(guess)
         log.debug("prefill file=%s bytes=%d sha256=%s found=%s missing=%s ms=%d", docinfo.quote(filename), len(pdf),
                   docinfo.sha12(pdf), have, missing, timer.ms)
@@ -3420,6 +3434,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             category_id=by_name.get(guess["category"]), vendor=guess["vendor"],
             amount=f"{guess['amount']:.2f}" if guess["amount"] is not None else None,
             odometer_km=guess["odometer_km"], notes=guess["notes"] or None, time=guess["time"],
+            location=location, location_note=location_note,
             litres=None if guess["litres"] is None else f"{guess['litres']:.2f}",
             unit_price=None if guess["unit_price"] is None else f"{guess['unit_price']:.3f}",
             gst_amount=f"{guess['gst_amount']:.2f}" if guess["gst_amount"] is not None else None,

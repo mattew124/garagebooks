@@ -1895,6 +1895,8 @@ def test_fuel_receipt(page):
         expect(other.locator("input[name=date]")).to_have_value("2026-03-05")
         expect(other.locator("input[name=time]")).to_have_value("07:45")
         expect(other.locator("select[name=category_id] option:checked")).to_have_text("Fuel")
+        # This receipt has no address, so nothing is looked up and the current location is offered instead.
+        expect(other.locator("#location-hint")).to_contain_text("Use my location")
         top = lambda name: other.locator(f"input[name={name}]").bounding_box()["y"]  # noqa: E731 - used twice, right here
         assert top("litres") < top("odometer_km") < top("location")
         other.click("#use-location")

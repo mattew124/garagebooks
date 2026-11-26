@@ -126,10 +126,12 @@ figures and the Fuel dashboard's price chart then show for that fill-up (without
 Leave the litres blank and they're worked out from the amount and the price. After a discount that gives too few
 litres, so enter the litres from the receipt instead.
 
-**Location** is optional too, and draws the heat map on the Fuel dashboard. At the pump, press **Use my
-location** and allow it (browsers only offer this over HTTPS). It records where you are *now*, so if you're
-adding the receipt later, paste the station's `latitude, longitude` from a map app instead. The app doesn't
-look up the address on the receipt, so nothing about where you were is sent to a geocoding service.
+**Location** is optional too, and draws the heat map on the Fuel dashboard. When you choose a fuel receipt, the
+station's address on it is looked up on [OpenStreetMap](https://www.openstreetmap.org/copyright) and the
+location is filled in, with a note of the address used (see [Address lookup](reference.md#address-lookup)). If
+the receipt has no address that can be read and found, press **Use my location** while you're at the pump and
+allow it (browsers only offer this over HTTPS). It records where you are *now*, so if you're adding the receipt
+later, paste the station's `latitude, longitude` from a map app instead.
 
 Fuel entered before litres existed keeps counting in the totals; add the litres by editing it. The
 [Fuel dashboard](dashboard.md#fuel-dashboard) charts all of this.

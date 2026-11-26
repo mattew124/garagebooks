@@ -1075,6 +1075,9 @@ document.addEventListener("DOMContentLoaded", () => {
       set("litres", "litres", data.litres);
       set("unit_price", "price per litre", data.unit_price);
       set("odometer_km", "odometer", data.odometer_km);
+      set("location", "location", data.location);
+      const placeHint = document.getElementById("location-hint");
+      if (placeHint && data.location_note && (!data.location || filled.includes("location"))) placeHint.textContent = data.location_note;
       set("notes", "notes", data.notes);
       set("gst_amount", "GST", data.gst_amount);
       set("card_payment_ref", "payment reference", data.card_payment_ref);
