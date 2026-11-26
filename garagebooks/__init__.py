@@ -3758,8 +3758,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         raw = body.get("name") if isinstance(body, dict) else None
         try:
             name = validation.parse_category_name(raw if isinstance(raw, str) else "")
-        except ValueError as exc:
-            return jsonify(error=str(exc)), 400
+        except ValueError:      # a fixed message: nothing from an exception goes into the response
+            return jsonify(error=f"Enter a category name of up to {validation.MAX_CATEGORY_LEN} characters."), 400
         with connect() as conn:
             made = db.add_category(conn, name)
             wanted = made if made is not None else db.category_id_named(conn, name)

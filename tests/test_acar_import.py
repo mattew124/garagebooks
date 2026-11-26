@@ -690,3 +690,10 @@ def test_importing_fill_ups_again_leaves_them_all_unticked(client, admin):
 def test_a_category_added_or_listed_says_whether_it_records_litres(client, admin):
     listed = {c["name"]: c["litres"] for c in client.get("/api/import-lists").get_json()["categories"]}
     assert listed["Fuel"] is True and listed["Tyres"] is False
+
+
+@pytest.mark.parametrize("name", ["  ", "x" * 500])
+def test_a_refused_category_name_gets_a_fixed_message(client, name):
+    resp = client.post("/api/categories", json={"name": name}, headers=ORIGIN)
+    assert resp.status_code == 400
+    assert resp.get_json()["error"] == "Enter a category name of up to 60 characters."
