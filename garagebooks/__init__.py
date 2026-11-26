@@ -3381,7 +3381,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         offered = [c for c in categories if db.applies(c["applies_to"], car_kind)]
         if with_catchall:
             offered.append({"id": ACAR_CATCHALL, "name": f"{ACAR_CATCHALL_NAME} (new category)", "kind": "running",
-                            "applies_to": "all", "has_period": False, "gst_free": False, "per_wheel": False})
+                            "applies_to": "all", "has_period": False, "gst_free": False, "per_wheel": False,
+                            "has_litres": False})
         with connect() as conn:
             items = list(db.service_items(conn))
         items += [{"id": f"new:{name}", "name": f"{name} (new)", "applies_to": "all",
@@ -3402,9 +3403,47 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         candidates = [{"id": m["id"], "text": f"{d['date']} · {d['category']}"
                        + (f" · {d['vendor']}" if d["vendor"] else "") + f" · {d['amount_text']}"
                        + (" · has an invoice" if m["invoice_url"] or m["invoice_path"] else "")
-                       + (f" · {m['odometer_km']:.0f} km" if m["odometer_km"] is not None else " · no odometer")}
+                       + (f" · {m['odometer_km']:.0f} km" if m["odometer_km"] is not None else " · no odometer")
+                       + ("" if not m["has_litres"] else f" · {m['litres']:.2f} L" if m["litres"] is not None else " · no litres")}
                       for m, d in zip(choices, dup_view(choices), strict=True)]
         return found, shown, candidates
+
+    # How far apart two figures can be and still be one fill-up: a receipt's and what was typed into aCar.
+    SAME_LITRES = Decimal("0.05")
+    SAME_FILL_KM = 5
+
+    def acar_other_fill(rec, m):
+        """Whether saved expense `m` is a different fill-up from `rec`, though the amounts match: round
+        amounts repeat. The litres settle it where both have them, else the odometer."""
+        if rec.litres is None:
+            return False
+        if m["litres"] is not None:
+            return abs(m["litres"] - rec.litres) > SAME_LITRES
+        return (m["odometer_km"] is not None and rec.odometer_km is not None
+                and abs(float(m["odometer_km"]) - float(rec.odometer_km)) > SAME_FILL_KM)
+
+    def acar_gains(rec, m):
+        """Whether merging `rec` into `m` would add a figure it lacks (see db.merge_into_expense)."""
+        return bool((rec.odometer_km is not None and m["odometer_km"] is None)
+                    or (rec.litres is not None and m["has_litres"] and m["litres"] is None))
+
+    def acar_default_merges(pending):
+        """Which rows merge, and into what: `pending` is (row, record, when, matches). Each saved expense goes
+        to one row only, the closest in time first. A row is left unticked when an expense it matches could be
+        it; one whose matches are all other fill-ups, or are taken by other rows, is a new cost."""
+        pairs = sorted((abs((m["occurred_at"] - when).total_seconds()), row["n"], m["id"])
+                       for row, rec, when, found in pending if rec.amount
+                       for m in found if acar_gains(rec, m) and not acar_other_fill(rec, m))
+        chosen, taken = {}, set()
+        for _, n, expense_id in pairs:
+            if n not in chosen and expense_id not in taken:
+                chosen[n] = expense_id
+                taken.add(expense_id)
+        for row, rec, _, found in pending:
+            if row["n"] in chosen:
+                row["action"], row["include"] = str(chosen[row["n"]]), True
+            else:
+                row["include"] = all(m["id"] in taken or acar_other_fill(rec, m) for m in found)
 
     def acar_preview_rows(export, car, categories):
         """One row per record, oldest first, every one with a category (what fits none goes to the catch-all)
@@ -3415,7 +3454,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         names = {c["name"]: c["id"] for c in offered}
         own = acar.catch_all([c["name"] for c in offered if c["kind"] == "running"])
         catch_value = str(names[own]) if own else ACAR_CATCHALL
-        out, new_items = [], {}
+        fuel_category = next((c["name"] for c in offered if c["has_litres"]), None)
+        out, new_items, pending = [], {}, []
         with connect() as conn:
             items = {i["name"]: i for i in db.service_items(conn)}
             for n, rec in enumerate(sorted(export.records, key=lambda r: (r.date, r.time))):
@@ -3424,14 +3464,24 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                        "date": rec.date.isoformat(), "time": rec.time.strftime("%H:%M"), "category_id": "", "vendor": rec.vendor,
                        "amount": f"{rec.amount:.2f}", "odometer_km": "" if rec.odometer_km is None else f"{rec.odometer_km:.1f}",
                        "notes": rec.notes, "label": rec.label, "duplicates": [], "candidates": [], "services": [], "note": "",
-                       "wheels": [], "item_wheels": {}}
+                       "wheels": [], "item_wheels": {}, "litres": "", "unit_price": "", "partial": False, "missed": False}
                 if rec.kind == "sale":
                     row["include"] = car["sold_at"] is None
                     row["note"] = "" if row["include"] else "This car already has a sale recorded; importing this replaces it."
                     out.append(row)
                     continue
                 match = acar.match_category(rec, list(names))
+                if match is None and rec.kind == "fillup":
+                    match = fuel_category       # under whatever name the person gave it
                 row["category_id"] = str(names[match]) if match else catch_value
+                # Litres only where the category records them: a car that takes no fuel keeps them in the notes.
+                if match and next(c for c in offered if c["name"] == match)["has_litres"]:
+                    row["litres"] = "" if rec.litres is None else f"{rec.litres:.2f}"
+                    row["unit_price"] = "" if rec.unit_price is None else f"{rec.unit_price:.3f}"
+                    row["partial"], row["missed"] = not rec.full_tank, rec.missed_fill
+                    if rec.volume_unit_unknown:
+                        row["note"] = (f"aCar has this volume in {rec.volume_unit_unknown!r}, which could be more than one "
+                                       "size: enter the litres yourself.")
                 if match and next(c for c in offered if c["name"] == match)["per_wheel"]:
                     row["wheels"] = acar.wheels_in(rec.subtypes) or []
                 if match == db.SERVICE_CATEGORY:
@@ -3452,12 +3502,9 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                             both = set(row["item_wheels"].get(value, [])) | set(sides)
                             row["item_wheels"][value] = validation.parse_wheels(both)
                 found, row["duplicates"], row["candidates"] = acar_matches(conn, car["id"], when, rec.amount)
-                row["include"] = not found
-                if rec.amount and rec.odometer_km is not None:
-                    fill = next((m for m in found if m["odometer_km"] is None), None)
-                    if fill is not None:
-                        row["action"], row["include"] = str(fill["id"]), True
+                pending.append((row, rec, when, found))
                 out.append(row)
+        acar_default_merges(pending)
         return out, list(new_items.values()), any(r["category_id"] == ACAR_CATCHALL for r in out)
 
     def acar_error_list(rows, errors, car_errors):
@@ -3555,7 +3602,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                    "time": f("time"), "category_id": f("category_id"), "vendor": f("vendor"), "amount": f("amount"),
                    "odometer_km": f("odometer_km"), "notes": f("notes"), "label": f("label"), "action": f("action") or "new",
                    "services": request.form.getlist(f"service_item_{n}"), "duplicates": [], "candidates": [], "note": "",
-                   "wheels": request.form.getlist(f"wheels_{n}")}
+                   "wheels": request.form.getlist(f"wheels_{n}"), "litres": f("litres"), "unit_price": f("unit_price"),
+                   "partial": bool(f("partial")), "missed": bool(f("missed"))}
             row["item_wheels"] = wheels_from(request.form.getlist, f"service_item_{n}", row["services"])
             rows.append(row)
             if not row["include"]:
@@ -3571,17 +3619,29 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             elif row["action"] != "new":
                 try:
                     target = int(row["action"])
-                    km = validation.parse_odometer(row["odometer_km"])
+                except ValueError:
+                    errors[n] = "Choose which expense to merge into."
+                    continue
+                try:
+                    adds = {"odometer_km": validation.parse_odometer(row["odometer_km"]),
+                            "litres": validation.parse_litres(row["litres"]),
+                            "unit_price": validation.parse_unit_price(row["unit_price"])}
                     if target not in own:
                         raise ValueError("That expense is not this car's.")
-                    if km is None:
-                        raise ValueError("There is no odometer reading to add.")
+                    if any(target == other[0] for other in merges):
+                        raise ValueError("Another row already merges into that expense. Choose a different one, "
+                                         "or add this as a new expense.")
+                    if all(value is None for value in adds.values()):
+                        raise ValueError("There is no odometer reading or litres to add.")
                 except ValueError as exc:
-                    errors[n] = str(exc) if "odometer" in str(exc) or "expense" in str(exc) else "Choose which expense to merge into."
+                    errors[n] = str(exc)
                 else:
-                    merges.append((target, km, row["vendor"].strip()[:validation.MAX_TEXT_LEN], row))
+                    adds.update(full_tank=not row["partial"], missed_fill=row["missed"])
+                    merges.append((target, adds, row["vendor"].strip()[:validation.MAX_TEXT_LEN], row))
             else:
-                posted = {k: row[k] for k in ("category_id", "date", "time", "amount", "odometer_km", "vendor", "notes")}
+                posted = {k: row[k] for k in ("category_id", "date", "time", "amount", "odometer_km", "vendor", "notes",
+                                              "litres", "unit_price")}
+                posted.update({k: "1" for k in ("partial", "missed") if row[k]})
                 if posted["category_id"] == ACAR_CATCHALL:
                     posted["category_id"] = str(ACAR_CATCHALL_ID)
                 values, row_errors = validation.parse_expense_form({"car_id": car_id, **posted}, tz, car_ids, cat_ids)
@@ -3658,8 +3718,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 if values["category_id"] == db.service_category_id(conn):
                     save_services(conn, expense_id, values["category_id"], *items_of(row))
                 saved += 1
-            for target, km, vendor, row in merges:
-                changed = db.merge_into_expense(conn, car_id, target, km, vendor)
+            for target, adds, vendor, row in merges:
+                changed = db.merge_into_expense(conn, car_id, target, vendor=vendor, **adds)
                 wheels = validation.parse_wheels(row["wheels"])
                 if wheels and db.fill_wheels(conn, car_id, target, wheels):
                     changed = 1
@@ -3713,7 +3773,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
     def category_json(c):
         """A category with what an import row's choice needs to know about it (see _category_choice.html)."""
         return {"id": c["id"], "name": c["name"], "applies": c["applies_to"], "period": bool(c["has_period"]),
-                "service": c["name"] == db.SERVICE_CATEGORY, "wheels": bool(c["per_wheel"]), "gstfree": bool(c["gst_free"]), "purchase": c["kind"] == "purchase"}
+                "service": c["name"] == db.SERVICE_CATEGORY, "wheels": bool(c["per_wheel"]), "litres": bool(c["has_litres"]),
+                "gstfree": bool(c["gst_free"]), "purchase": c["kind"] == "purchase"}
 
     def name_example(values):
         """What an uploaded file would be called under the saved (or just-typed, if valid) settings."""

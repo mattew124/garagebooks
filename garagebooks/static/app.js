@@ -138,6 +138,10 @@ document.addEventListener("DOMContentLoaded", () => {
       if (services) services.hidden = !(chosen && chosen.dataset.service === "1");
       const wheels = row.querySelector("[data-wheels-field]");
       if (wheels) wheels.hidden = !(chosen && chosen.dataset.wheels === "1");
+      // Litres and $/L stay while they hold a figure, so switching category never hides what will be saved.
+      const fuel = row.querySelector("[data-fuel-fields]");
+      if (fuel) fuel.hidden = !(chosen && chosen.dataset.litres === "1")
+        && ![...fuel.querySelectorAll("input[inputmode]")].some((i) => i.value);
     });
   }
 
@@ -1291,7 +1295,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (carKind && suits[c.applies] && !suits[c.applies].includes(carKind)) return;
     const option = new Option(c.name, String(c.id));
     Object.assign(option.dataset, { period: c.period ? "1" : "0", service: c.service ? "1" : "0",
-      gstfree: c.gstfree ? "1" : "0", purchase: c.purchase ? "1" : "0", wheels: c.wheels ? "1" : "0", applies: c.applies });
+      gstfree: c.gstfree ? "1" : "0", purchase: c.purchase ? "1" : "0", wheels: c.wheels ? "1" : "0", litres: c.litres ? "1" : "0", applies: c.applies });
     select.add(option, select.querySelector(`option[value="${NEW}"]`));
   };
   // Rows are also added while a folder is being read, so each list gets its "New category…" as it appears.

@@ -530,7 +530,9 @@ def test_form(page):
 
 ACAR_CSV = (
     '\ufeffMetadata\n"Date Format","Time Format"\n"d/M/yyyy","HH:mm"\n\n\nVehicles\n"Name","Make","Model","Year"\n'
-    '"Example","Example","Hatch","2020"\n\n\nFill-Up Records\n"Vehicle","Date","Time"\n\n\nEvent Records\n'
+    '"Example","Example","Hatch","2020"\n\n\nFill-Up Records\n'
+    '"Vehicle","Date","Time","Odometer Reading","Distance Unit","Volume","Volume Unit","Price per Unit","Total Cost",'
+    '"Partial Fill-Up?"\n"Example","1/3/2026","08:00","19,400","km","40.000","L","$2.000","$80.00","Yes"\n\n\nEvent Records\n'
     '"Vehicle","Date","Time","Odometer Reading","Distance Unit","Type","Sub Types","Total Cost","Payment","Place Name","Notes"\n'
     '"Example","19/2/2026","14:10","19,281","km","Service","Engine Oil, Inspection","$429.30","","Example Garage",""\n'
     '"Example","1/6/2026","23:59","20,500","km","Sold","","$2,500.00","","",""\n')
@@ -580,6 +582,20 @@ def test_acar_import_layout(page):
         page.set_viewport_size({"width": 360, "height": 780})
         preview(page)
         shot(page, "acar-import-phone")
+        # The fill-up's litres, price and partial tick came across, and fit the card.
+        expect(tab_fuel := page.locator("tr#row-1 [data-fuel-fields]")).to_be_visible()
+        assert (page.input_value("input[name=litres_1]"), page.input_value("input[name=unit_price_1]")) == ("40.00", "2.000")
+        expect(page.locator("input[name=partial_1]")).to_be_checked()
+        assert tab_fuel.bounding_box()["width"] <= 360
+        # Another cost shows them only while its category records litres; a figure keeps them in view.
+        other = page.locator("tr#row-0 [data-fuel-fields]")
+        expect(other).to_be_hidden()
+        page.select_option("select[name=category_id_0]", label="Fuel")
+        expect(other).to_be_visible()
+        page.select_option("select[name=category_id_0]", label="Service")
+        expect(other).to_be_hidden()
+        page.select_option("select[name=category_id_1]", label="Tyres")
+        expect(tab_fuel).to_be_visible()
         table = width(page, "table.import-table")
         assert table <= 360, f"on a phone the table is {table}px wide"
         for field in ("select[name=category_id_0]", "input[name=vendor_0]", "input[name=amount_0]", "tr#row-0 .file"):
@@ -614,7 +630,7 @@ def test_acar_import_preview(page):
     assert page.evaluate("document.querySelector('input[name=file]').files[0].name") == "aCar-records.csv"
     shot(page, "acar-upload")
     page.click("button[type=submit]")
-    expect(page.locator("table.import-table tbody tr")).to_have_count(2)
+    expect(page.locator("table.import-table tbody tr")).to_have_count(3)
     assert "Sale of the car" in page.inner_text("table.import-table")
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
     shot(page, "acar-import")

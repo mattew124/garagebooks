@@ -205,7 +205,7 @@ The next page lists every cost to check, correct and untick, the same way the in
 
 - **Services, expenses and purchases** (aCar's *Event Records*), with the vendor from *Place Name*. A refund
   stays negative. A *Purchased* record becomes the car's **Initial purchase**.
-- **Fill-ups**, as **Fuel**, with the litres and price per litre in the notes. Untick **Include fill-ups** on the first
+- **Fill-ups**, as **Fuel**, with their litres and price per litre (see below). Untick **Include fill-ups** on the first
   page to leave them out.
 
 - **Records with no cost** (a note, a free fill-up) come across at $0.00, so the odometer reading and the note aren't lost.
@@ -215,11 +215,26 @@ The next page lists every cost to check, correct and untick, the same way the in
 Only **trips** are left out (the preview counts them). Odometer readings in miles are converted to kilometres,
 and an odometer of 0 (aCar's "none entered") is left blank.
 
+**Litres and price per litre.** A fill-up brings its litres, **$/L**, **Partial fill** and aCar's note of a missed
+fuel-up, shown on its row to check and correct. They are saved as if typed on the Add page, so the expense list and the
+[Fuel dashboard](dashboard.md) work out L/100 km for your history. A volume in US or UK gallons is converted to litres,
+and its price to a price per litre. For any other unit (a gallon that doesn't say which, say) the row asks you to enter
+the litres. aCar's own figures also stay in the notes.
+
+Litres go on whichever category **Records litres** (*Fuel* to begin with, even if you've renamed it). A car that takes
+no fuel gets the cost without litres: the figures are still in the notes.
+
 **Merging into expenses you already have.** When a cost has the same car and amount as an expense within 14 days, the row
-offers **Add the odometer reading to** that expense, and does so by default where the expense has no odometer
-(typically one imported from an invoice PDF). A merge fills in the odometer, the vendor if it's blank and, for a service with no items ticked, its items, and
-changes nothing else: the category, amount, date, invoice link and any reading already there stay as they are.
-Choose **Add as a new expense** to keep both instead.
+offers **Add the odometer reading to** that expense (**Add the odometer reading and litres to** for a fill-up), and
+does so by default where the expense has no odometer (typically one imported from an invoice PDF) or, for a fill-up, no
+litres (one entered before litres were recorded). A merge fills in the odometer, the vendor, and the litres and price
+per litre, each only if blank, and a service's items if none are ticked. It changes nothing else: the category, amount,
+date, invoice link and any figure already there stay as they are. Litres go only on a category that records them, and
+**Partial fill** and the missed fuel-up come only with the litres. Choose **Add as a new expense** to keep both instead.
+
+Round amounts repeat, so a saved expense is merged into by one row at most, the closest in time. A fill-up is taken to
+be a different one, and left ticked, if the saved expense's litres differ, or, where it has none, its odometer is more
+than 5 km away.
 
 **Every cost gets a category,** so all of them can be imported without sorting any out by hand:
 

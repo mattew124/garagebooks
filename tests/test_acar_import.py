@@ -381,6 +381,8 @@ def as_previewed(client, **over):
     for box in re.finditer(r'<input type="checkbox" name="(service_item_\d+)" value="([^"]*)"\s*checked', html):
         data.setdefault(box.group(1), [])
         data[box.group(1)].append(box.group(2))
+    for box in re.finditer(r'<input type="checkbox" name="((?:partial|missed)_\d+)" value="1"\s*checked', html):
+        data[box.group(1)] = "1"
     return html, client.post("/import/acar/confirm", data=data, headers=ORIGIN)
 
 
@@ -507,3 +509,184 @@ def test_the_lists_can_be_read_again_for_categories_made_in_another_tab(client, 
 def test_both_dialogs_are_on_the_acar_preview(client):
     html = upload(client).data.decode()
     assert 'id="category-dialog"' in html and 'id="service-dialog"' in html and "data-lists-url" in html
+
+
+# ---- litres and the price per litre ----------------------------------------------------
+
+def csv_with_fills(*fills):
+    """An export holding just these fill-ups: (date, odometer, litres, price, total, partial, missed)."""
+    text = (FIXTURES / "acar-records.csv").read_text(encoding="utf-8-sig")
+    head = text[:text.index('"Example","15/4/2026"')]
+    lines = [f'"Example","{d}","14:07","{km}","km","{litres}","L","{price}","{total}","","{partial}","{missed}","","L/100",'
+             '"","","No","","Example Fuel Stop"' + ',""' * 15 for d, km, litres, price, total, partial, missed in fills]
+    return (head + "\n".join(lines) + "\n").encode()
+
+
+def upload_fills(client, *fills):
+    data = {"car_id": "1", "fill_ups": "1", "file": (io.BytesIO(csv_with_fills(*fills)), "fills.csv")}
+    return client.post("/import/acar", data=data, headers=ORIGIN, content_type="multipart/form-data")
+
+
+def import_fills(client, *fills, **over):
+    html = upload_fills(client, *fills).data.decode()
+    data = preview_fields(html)
+    for n in ticked(html):
+        data[f"include_{n}"] = "on"
+    for box in re.finditer(r'<input type="checkbox" name="((?:partial|missed)_\d+)" value="1"\s*checked', html):
+        data[box.group(1)] = "1"
+    data.update(over)
+    return html, client.post("/import/acar/confirm", data=data, headers=ORIGIN)
+
+
+def fuel_rows(admin):
+    return admin.execute("SELECT * FROM garagebooks.expense ORDER BY occurred_at").fetchall()
+
+
+FIRST = ("1/4/2026", "10,000", "40.000", "$2.000", "$80.00", "No", "No")
+PART = ("8/4/2026", "10,200", "10.000", "$2.100", "$21.00", "Yes", "No")
+FULL = ("15/4/2026", "10,500", "30.000", "$1.900", "$57.00", "No", "No")
+
+
+def test_the_preview_shows_each_fill_ups_litres_and_price_to_check(client):
+    html = upload_fills(client, FIRST, PART).data.decode()
+    data = preview_fields(html)
+    assert (data["litres_0"], data["unit_price_0"]) == ("40.00", "2.000")
+    assert re.search(r'name="partial_1" value="1"\s*checked', html) and not re.search(r'name="partial_0" value="1"\s*checked', html)
+    assert not re.search(r'data-fuel-fields[^>]*hidden', html)
+
+
+def test_a_cost_that_is_not_fuel_keeps_its_fuel_fields_hidden(client):
+    html = upload(client, fill_ups="").data.decode()
+    blocks = re.findall(r'<div class="fuel-fields" data-fuel-fields[^>]*>', html)
+    assert blocks and all("hidden" in b for b in blocks)
+
+
+def test_litres_price_and_partial_fills_are_saved_and_give_l_per_100km(client, admin):
+    _, resp = import_fills(client, FIRST, PART, FULL)
+    assert resp.status_code == 303, resp.data.decode()[:3000]
+    saved = fuel_rows(admin)
+    assert [str(r["litres"]) for r in saved] == ["40.00", "10.00", "30.00"]
+    assert [str(r["unit_price"]) for r in saved] == ["2.000", "2.100", "1.900"]
+    assert [r["full_tank"] for r in saved] == [True, False, True] and not any(r["missed_fill"] for r in saved)
+    last = admin.execute("SELECT l_per_100km FROM garagebooks.fuel_fill ORDER BY occurred_at DESC LIMIT 1").fetchone()
+    assert str(last["l_per_100km"]) == "8.00"                    # (10 + 30) L over 500 km
+
+
+def test_a_missed_fill_up_is_saved_as_one(client, admin):
+    import_fills(client, FIRST, (*FULL[:6], "Yes"))
+    assert [r["missed_fill"] for r in fuel_rows(admin)] == [False, True]
+
+
+def test_litres_corrected_in_the_preview_are_what_is_saved(client, admin):
+    import_fills(client, FIRST, litres_0="41.5", unit_price_0="1.95")
+    (saved,) = fuel_rows(admin)
+    assert (str(saved["litres"]), str(saved["unit_price"])) == ("41.50", "1.950")
+
+
+def test_bad_litres_are_refused_and_the_preview_keeps_the_fuel_ticks(client, admin):
+    _, resp = import_fills(client, FIRST, PART, litres_0="lots")
+    html = resp.data.decode()
+    assert resp.status_code == 400 and "Litres must be a number" in html and 'value="lots"' in html
+    assert re.search(r'name="partial_1" value="1"\s*checked', html)
+    assert rows(admin) == []
+
+
+def test_a_fill_up_goes_to_whichever_category_records_litres(client, admin):
+    admin.execute("UPDATE garagebooks.category SET name = 'Petrol' WHERE name = 'Fuel'")
+    try:
+        import_fills(client, FIRST)
+        (saved,) = fuel_rows(admin)
+        assert saved["category_id"] == category_id(admin, "Petrol") and str(saved["litres"]) == "40.00"
+    finally:
+        admin.execute("UPDATE garagebooks.category SET name = 'Fuel' WHERE name = 'Petrol'")
+
+
+def test_a_car_that_takes_no_fuel_gets_the_cost_without_litres(client, admin):
+    admin.execute("UPDATE garagebooks.car SET kind = 'BEV' WHERE id = 1")
+    _, resp = import_fills(client, FIRST)
+    assert resp.status_code == 303
+    (saved,) = fuel_rows(admin)
+    assert saved["litres"] is None and saved["unit_price"] is None and "40 L" in saved["notes"]
+
+
+def test_a_volume_in_an_unknown_unit_says_to_enter_the_litres(client):
+    text = csv_with_fills(FIRST).replace(b'"40.000","L"', b'"40.000","gal"')
+    html = client.post("/import/acar", data={"car_id": "1", "fill_ups": "1", "file": (io.BytesIO(text), "x.csv")},
+                       headers=ORIGIN, content_type="multipart/form-data").data.decode()
+    assert preview_fields(html)["litres_0"] == "" and "enter the litres" in htmllib.unescape(html).lower()
+
+
+def seed_fuel(admin, when="2026-04-01 04:07+00", amount="80.00", odometer=None, litres=None, category="Fuel"):
+    return admin.execute(
+        "INSERT INTO garagebooks.expense (car_id, category_id, occurred_at, amount, odometer_km, litres, vendor) "
+        "VALUES (1, %s, %s, %s, %s, %s, 'Example Fuel Stop') RETURNING id",
+        (category_id(admin, category), when, amount, odometer, litres)).fetchone()["id"]
+
+
+def test_a_merge_adds_litres_to_fuel_entered_without_them(client, admin):
+    existing = seed_fuel(admin, odometer=10000)                  # entered before litres were recorded
+    html, resp = import_fills(client, (*FIRST[:5], "Yes", "No"))
+    assert f'<option value="{existing}" selected>' in html and resp.status_code == 303, resp.data.decode()[:3000]
+    (saved,) = fuel_rows(admin)
+    assert (str(saved["litres"]), str(saved["unit_price"]), saved["full_tank"]) == ("40.00", "2.000", False)
+
+
+def test_a_merge_needs_no_odometer_when_it_adds_litres(client, admin):
+    existing = seed_fuel(admin)
+    _, resp = import_fills(client, FIRST, odometer_km_0="")
+    assert resp.status_code == 303, resp.data.decode()[:3000]
+    (saved,) = fuel_rows(admin)
+    assert saved["id"] == existing and str(saved["litres"]) == "40.00"
+
+
+def test_a_merge_never_changes_litres_or_the_ticks_already_there(client, admin):
+    existing = seed_fuel(admin, litres="39.99")
+    import_fills(client, (*FIRST[:5], "Yes", "Yes"), include_0="on", action_0=str(existing))
+    (saved,) = fuel_rows(admin)
+    assert (str(saved["litres"]), saved["full_tank"], saved["missed_fill"]) == ("39.99", True, False)
+    assert saved["odometer_km"] == 10000
+
+
+def test_a_merge_puts_no_litres_on_a_category_that_records_none(client, admin):
+    existing = seed_fuel(admin, category="Tyres")
+    import_fills(client, FIRST, include_0="on", action_0=str(existing))
+    (saved,) = fuel_rows(admin)
+    assert saved["litres"] is None and saved["unit_price"] is None and saved["odometer_km"] == 10000
+
+
+def test_two_fill_ups_of_the_same_amount_never_both_merge_into_one_expense(client, admin):
+    """Round amounts repeat: only the nearer one is the expense already saved, and the other still comes in."""
+    existing = seed_fuel(admin, when="2026-04-08 04:07+00", amount="50.00")
+    a = ("1/4/2026", "10,000", "25.000", "$2.000", "$50.00", "No", "No")
+    b = ("8/4/2026", "10,300", "24.000", "$2.083", "$50.00", "No", "No")
+    html, resp = import_fills(client, a, b)
+    assert resp.status_code == 303, resp.data.decode()[:3000]
+    saved = fuel_rows(admin)
+    assert [str(r["litres"]) for r in saved] == ["25.00", "24.00"] and saved[1]["id"] == existing
+
+
+def test_two_rows_chosen_to_merge_into_one_expense_are_refused(client, admin):
+    existing = seed_fuel(admin, amount="50.00")
+    a = ("1/4/2026", "10,000", "25.000", "$2.000", "$50.00", "No", "No")
+    b = ("8/4/2026", "10,300", "24.000", "$2.083", "$50.00", "No", "No")
+    _, resp = import_fills(client, a, b, include_0="on", include_1="on", action_0=str(existing), action_1=str(existing))
+    assert resp.status_code == 400 and "Another row already merges into that expense" in resp.data.decode()
+    assert len(rows(admin)) == 1 and rows(admin)[0]["litres"] is None
+
+
+@pytest.mark.parametrize("saved_litres, saved_km", [("31.00", None), (None, 9000)])
+def test_a_saved_fill_up_with_other_litres_or_odometer_is_not_taken_for_this_one(client, admin, saved_litres, saved_km):
+    seed_fuel(admin, when="2026-03-28 04:07+00", litres=saved_litres, odometer=saved_km)   # same amount, another fill
+    html, resp = import_fills(client, FIRST)
+    assert ticked(html) == {"0"} and resp.status_code == 303
+    assert len(rows(admin)) == 2
+
+
+def test_importing_fill_ups_again_leaves_them_all_unticked(client, admin):
+    import_fills(client, FIRST, PART, FULL)
+    assert ticked(upload_fills(client, FIRST, PART, FULL).data.decode()) == set()
+
+
+def test_a_category_added_or_listed_says_whether_it_records_litres(client, admin):
+    listed = {c["name"]: c["litres"] for c in client.get("/api/import-lists").get_json()["categories"]}
+    assert listed["Fuel"] is True and listed["Tyres"] is False

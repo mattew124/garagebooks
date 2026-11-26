@@ -16,11 +16,18 @@ import re
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date, time
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 MAX_VENDOR = 500
 MAX_NOTES = 2000
 KM_PER_MILE = Decimal("1.609344")
+# Litres in one of each volume unit, by the words in aCar's name for it. A gallon that doesn't say whose is not here.
+LITRES_PER_US_GALLON = Decimal("3.785411784")
+LITRES_PER_UK_GALLON = Decimal("4.54609")
+LITRE_UNITS = {"l", "litre", "litres", "liter", "liters"}
+US_GALLON = {"us"}
+UK_GALLON = {"uk", "imp", "imperial"}
+GALLON_WORDS = {"gal", "gals", "gallon", "gallons"}
 SECTIONS = ("Metadata", "Vehicles", "Fill-Up Records", "Event Records", "Trip Records")
 DEFAULT_DATE_FORMAT = "d/M/yyyy"
 
@@ -53,6 +60,11 @@ class Record:
     vendor: str = ""
     notes: str = ""
     category_hint: str | None = None
+    litres: Decimal | None = None       # a fill-up's, to 2 places; converted from gallons
+    unit_price: Decimal | None = None   # the pump's price per litre, to 3 places
+    full_tank: bool = True
+    missed_fill: bool = False           # a fill-up before this one wasn't recorded
+    volume_unit_unknown: str = ""       # the export's unit, when the volume was left out for not knowing it
 
     @property
     def service_subtypes(self):
@@ -137,6 +149,32 @@ def _odometer(raw, unit):
     if (unit or "").strip().lower().startswith("mi"):
         value = value * KM_PER_MILE
     return value.quantize(Decimal("0.1"))
+
+
+def litres_per(unit):
+    """How many litres one `unit` is, or None when it isn't surely litres or a gallon ('gal' alone is either)."""
+    words = set(re.findall(r"[a-z]+", (unit or "").lower()))
+    if len(words) == 1 and words <= LITRE_UNITS:
+        return Decimal(1)
+    if words & GALLON_WORDS:
+        if words & US_GALLON:
+            return LITRES_PER_US_GALLON
+        if words & UK_GALLON:
+            return LITRES_PER_UK_GALLON
+    return None
+
+
+def _fuel(volume, price, unit):
+    """(litres, price per litre, the unit if it is one this can't convert). aCar writes 0 where nothing was
+    entered, which is no figure."""
+    volume = volume if volume is not None and volume > 0 else None
+    price = price if price is not None and price > 0 else None
+    size = litres_per(unit)
+    if size is None:
+        return None, None, unit if volume or price else ""
+    litres = (volume * size).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if volume else None
+    per_litre = (price / size).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP) if price else None
+    return litres or None, per_litre or None, ""
 
 
 def guess_kind(engine):
@@ -312,9 +350,12 @@ def parse(data, vehicle=None, fill_ups=True):
             notes.append(f"Paid with {get(row, 'Payment')}")
         if get(row, "Notes"):
             notes.append(get(row, "Notes"))
+        litres, unit_price, unknown = _fuel(volume, price, unit)
         add(Record("fillup", name, when, _time(get(row, "Time")), amount, odometer_km=_odometer(
             get(row, "Odometer Reading"), get(row, "Distance Unit")), vendor=_clip(get(row, "Fuel Brand"), MAX_VENDOR),
-            notes=_clip(". ".join(notes), MAX_NOTES), category_hint="Fuel"), name)
+            notes=_clip(". ".join(notes), MAX_NOTES), category_hint="Fuel", litres=litres, unit_price=unit_price,
+            full_tank=get(row, "Partial Fill-Up?").lower() != "yes",
+            missed_fill=get(row, "Previously Missed Fill-Ups?").lower() == "yes", volume_unit_unknown=unknown), name)
 
     header, rows = tables.get("Event Records", ([], []))
     get = _reader(header)

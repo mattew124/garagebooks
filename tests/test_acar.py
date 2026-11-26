@@ -187,3 +187,47 @@ def test_the_vehicles_details_are_read_for_making_a_car():
                                           ("Electric Motor", "BEV"), ("1.8 HYBRID", "HEV"), ("1.6 PLUG-IN HYBRID", "PHEV")])
 def test_the_kind_of_car_is_guessed_from_the_engine(engine, kind):
     assert acar.guess_kind(engine) == kind
+
+
+# ---- litres and the price per litre --------------------------------------------------
+
+def one_fill(volume="55.500", unit="L", price="$1.274", partial="No", missed="No"):
+    """The fixture with its first fill-up's fuel columns replaced."""
+    text = (FIXTURES / "acar-records.csv").read_text(encoding="utf-8").replace(
+        '"55.500","L","$1.274","$70.71","","No","No"', f'"{volume}","{unit}","{price}","$70.71","","{partial}","{missed}"')
+    return next(r for r in acar.parse(text.encode()).records if r.kind == "fillup" and r.date == date(2026, 4, 15))
+
+
+def test_a_fill_up_has_its_litres_and_price_per_litre():
+    fill = one_fill()
+    assert (fill.litres, fill.unit_price) == (Decimal("55.50"), Decimal("1.274"))
+    assert fill.full_tank is True and fill.missed_fill is False and fill.volume_unit_unknown == ""
+
+
+def test_a_partial_fill_and_a_missed_one_are_read():
+    fill = one_fill(partial="Yes", missed="Yes")
+    assert fill.full_tank is False and fill.missed_fill is True
+
+
+def test_no_volume_or_price_is_none_not_zero():
+    free = next(r for r in load().records if r.kind == "fillup" and r.date == date(2026, 5, 3))
+    assert (free.litres, free.unit_price) == (None, None)
+
+
+@pytest.mark.parametrize("unit, litres, price", [("gal (US)", "37.85", "1.000"), ("US gal", "37.85", "1.000"),
+                                                 ("gal (UK)", "45.46", "0.833"), ("Imp gal", "45.46", "0.833")])
+def test_gallons_become_litres_and_a_price_per_litre(unit, litres, price):
+    fill = one_fill(volume="10.000", unit=unit, price="$3.785")
+    assert (fill.litres, fill.unit_price) == (Decimal(litres), Decimal(price))
+    assert f"10 {unit}" in fill.notes                      # as aCar had it
+
+
+@pytest.mark.parametrize("unit", ["kWh", "kg", "gal"])
+def test_a_volume_that_is_not_surely_litres_is_not_guessed(unit):
+    fill = one_fill(unit=unit)
+    assert (fill.litres, fill.unit_price) == (None, None) and fill.volume_unit_unknown == unit
+    assert f"55.5 {unit}" in fill.notes
+
+
+def test_only_a_fill_up_has_litres():
+    assert all(r.litres is None and r.unit_price is None for r in load().records if r.kind != "fillup")

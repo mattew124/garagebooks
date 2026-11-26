@@ -7,6 +7,11 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+- **aCar fill-ups import their litres and price per litre.** Each fill-up's litres, **$/L**, partial fill and missed
+  fuel-up come across, so the list and the **Fuel** dashboard show L/100 km for your history. The preview shows them
+  to check. US and UK gallons are converted to litres. Merging into a fuel expense you already have fills in the litres
+  and price where blank. Where amounts repeat (two $50 fill-ups), the litres and odometer tell them apart, and two
+  rows can't merge into one expense. Nothing to do on upgrade.
 - **The import previews fit a phone.** On a phone both import pages are always cards, even if you chose **Rows**
   for the expense list, with each field labelled above and as wide as the card. In rows, a service's item ticks now
   wrap instead of stretching the table far past the screen. Nothing changes for installers.

@@ -766,15 +766,29 @@ def fill_wheels(conn, car_id, expense_id, wheels):
         {"wheels": wheels, "id": expense_id, "car": car_id}).rowcount
 
 
-def merge_into_expense(conn, car_id, expense_id, odometer_km, vendor=""):
-    """Add what an import knows to an expense that is already saved, without changing anything it has:
-    the odometer reading and the vendor, each only where it is blank. Its category, amount, date and
-    invoice stay as they are. Returns how many expenses changed (0 or 1)."""
+def merge_into_expense(conn, car_id, expense_id, odometer_km, vendor="", litres=None, unit_price=None,
+                       full_tank=True, missed_fill=False):
+    """Add what an import knows to an expense that is already saved, without changing anything it has: the
+    odometer reading, the vendor, the litres and the price per litre, each only where it is blank. The fuel
+    figures go only on a category that records litres, and "partial" and "missed" only come with the litres
+    (they say nothing without them). Its category, amount, date and invoice stay as they are. Returns how many
+    expenses changed (0 or 1)."""
     return conn.execute(
-        "UPDATE garagebooks.expense SET odometer_km = COALESCE(odometer_km, %(km)s), "
-        "vendor = COALESCE(NULLIF(btrim(vendor), ''), NULLIF(%(vendor)s, '')), updated_at = now() "
-        "WHERE id = %(id)s AND car_id = %(car)s AND (odometer_km IS NULL OR vendor IS NULL OR btrim(vendor) = '')",
-        {"km": odometer_km, "vendor": vendor, "id": expense_id, "car": car_id}).rowcount
+        "UPDATE garagebooks.expense e SET odometer_km = COALESCE(e.odometer_km, %(km)s::numeric), "
+        "vendor = COALESCE(NULLIF(btrim(e.vendor), ''), NULLIF(%(vendor)s, '')), "
+        "litres = COALESCE(e.litres, CASE WHEN k.has_litres THEN %(litres)s::numeric END), "
+        "unit_price = COALESCE(e.unit_price, CASE WHEN k.has_litres THEN %(price)s::numeric END), "
+        "full_tank = CASE WHEN k.has_litres AND e.litres IS NULL AND %(litres)s::numeric IS NOT NULL "
+        "THEN %(full)s ELSE e.full_tank END, "
+        "missed_fill = CASE WHEN k.has_litres AND e.litres IS NULL AND %(litres)s::numeric IS NOT NULL "
+        "THEN %(missed)s ELSE e.missed_fill END, updated_at = now() "
+        "FROM garagebooks.category k WHERE k.id = e.category_id AND e.id = %(id)s AND e.car_id = %(car)s "
+        "AND ((e.odometer_km IS NULL AND %(km)s::numeric IS NOT NULL) "
+        "OR (COALESCE(btrim(e.vendor), '') = '' AND %(vendor)s <> '') "
+        "OR (k.has_litres AND ((e.litres IS NULL AND %(litres)s::numeric IS NOT NULL) "
+        "OR (e.unit_price IS NULL AND %(price)s::numeric IS NOT NULL))))",
+        {"km": odometer_km, "vendor": vendor, "litres": litres, "price": unit_price, "full": full_tank,
+         "missed": missed_fill, "id": expense_id, "car": car_id}).rowcount
 
 
 def attach_invoice(conn, car_id, expense_id, ref_field, ref, odometer_km=None, vendor=""):

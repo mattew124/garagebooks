@@ -519,6 +519,10 @@ small.after-tax { display: block; font-weight: 400; color: var(--muted); font-si
 .import-table td.extras { white-space: normal; min-width: 14rem; }
 [data-view=rows] .import-table .file { min-width: 9rem; }
 .import-table fieldset { min-width: 0; }
+/* A fill-up's litres and price share a line; its two ticks take one each. */
+.import-table .fuel-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: .4rem; }
+.import-table .fuel-fields label.inline { grid-column: 1 / -1; }
+.import-table .fuel-fields input[inputmode] { text-align: right; }
 /* In tiles, each field has its label above it and the card's full width; only the amount and odometer share a
    line. A tick stays beside its label. */
 [data-view=tiles] .import-table tr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
