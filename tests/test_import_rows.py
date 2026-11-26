@@ -170,7 +170,7 @@ def test_an_import_ignores_the_hidden_period_of_a_category_that_has_none(stocked
 def test_the_add_form_is_only_prefilled_with_a_period_the_category_has(client, monkeypatch, category, expected):  # noqa: F811
     guess = invoices.propose
     monkeypatch.setattr(invoices, "extract_text", lambda pdf: POLICY)
-    monkeypatch.setattr(invoices, "propose", lambda *a: {**guess(*a), "category": category})
+    monkeypatch.setattr(invoices, "propose", lambda *a, **k: {**guess(*a, **k), "category": category})
     data = client.post("/api/prefill", headers=ORIGIN,
                        data={"invoice_file": (io.BytesIO(b"%PDF-policy"), "policy.pdf")}).get_json()
     assert data["period_start"] == expected

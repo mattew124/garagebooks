@@ -981,6 +981,73 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   };
   if (carSelect && carSelect.tagName === "SELECT") carSelect.addEventListener("change", showForCar);
+  // Fuel: the litres follow the category, and the distance since the last fuel-up and L/100 km of the tank are
+  // asked of the app as the fill-up is filled in (the same figures the list shows once it is saved).
+  const litresFields = document.getElementById("litres-fields");
+  if (litresFields) {
+    const summary = document.getElementById("fuel-summary");
+    const fuelAfter = document.getElementById("fuel-after");
+    // Where the fuel was bought: the browser's position, only when asked for (it needs HTTPS and a yes).
+    const useLocation = document.getElementById("use-location");
+    const locationHint = document.getElementById("location-hint");
+    if (navigator.geolocation && window.isSecureContext) {
+      useLocation.hidden = false;
+      useLocation.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        locationHint.textContent = "Finding where you are…";
+        navigator.geolocation.getCurrentPosition((at) => {
+          form.elements.location.value = at.coords.latitude.toFixed(6) + ", " + at.coords.longitude.toFixed(6);
+          locationHint.textContent = `Filled in, to within about ${Math.round(at.coords.accuracy)} m.`;
+        }, () => {
+          locationHint.textContent = "Your location couldn't be read. Allow it for this site, or paste the coordinates.";
+        }, { enableHighAccuracy: true, timeout: 15000 });
+      });
+    }
+    const editing = /\/(\d+)\/edit\/?$/.exec(window.location.pathname);
+    let pending = 0;
+    const show = (lines) => {
+      summary.replaceChildren(...lines.map((line) => Object.assign(document.createElement("span"), { textContent: line })));
+    };
+    const refresh = async () => {
+      if (litresFields.hidden) return;
+      const { car_id, category_id, date, time, amount, odometer_km, litres, unit_price, partial, missed } = form.elements;
+      if (!car_id.value || !category_id.value || !date.value || !time.value) {
+        show(["Pick the car, category, date and time to see the distance since the last fuel-up."]);
+        return;
+      }
+      const q = new URLSearchParams({
+        car_id: car_id.value, category_id: category_id.value, date: date.value, time: time.value,
+        odometer_km: odometer_km.value, litres: litres.value, unit_price: unit_price.value, amount: amount.value,
+      });
+      if (partial.checked) q.set("partial", "1");
+      if (missed.checked) q.set("missed", "1");
+      if (editing) q.set("expense_id", editing[1]);
+      const mine = ++pending;
+      try {
+        const res = await fetch(litresFields.dataset.fuelUrl + "?" + q);
+        const data = await res.json();
+        if (mine !== pending) return;                  // a newer answer is on its way
+        show(res.ok ? data.lines : [data.error || "Couldn't work out the figures."]);
+      } catch (e) {
+        if (mine === pending) show([]);
+      }
+    };
+    let timer = null;
+    const soon = () => { clearTimeout(timer); timer = setTimeout(refresh, 250); };
+    ["car_id", "category_id", "date", "time", "amount", "odometer_km", "litres", "unit_price", "partial", "missed"].forEach((name) => {
+      const el = form.elements[name];
+      if (el) ["input", "change"].forEach((ev) => el.addEventListener(ev, soon));
+    });
+    form.elements.category_id.addEventListener("change", () => {
+      const chosen = form.elements.category_id.selectedOptions[0];
+      const kept = ["litres", "unit_price", "location"].some((name) => form.elements[name].value);
+      litresFields.hidden = fuelAfter.hidden = !((chosen && chosen.dataset.litres === "1") || kept);
+      soon();
+    });
+    // The button is only there for a car TeslaMate tracks.
+    if (fillButton) fillButton.addEventListener("click", () => setTimeout(soon, 1500));
+    refresh();
+  }
   // Fill the form from what /api/prefill read in a PDF; `body` is the form data to send it.
   async function prefillFrom(body) {
     prefillHint.textContent = "Reading the invoice…";
@@ -997,10 +1064,16 @@ document.addEventListener("DOMContentLoaded", () => {
         form.elements[name].value = value;
         filled.push(label);
       };
-      set("category_id", "category", data.category_id);
+      // A category the chosen car doesn't offer (fuel for an electric car) would leave Save silently blocked.
+      const offered = [...form.elements.category_id.options].find((o) => o.value === String(data.category_id));
+      const unfit = Boolean(offered && offered.disabled);
+      if (!unfit) set("category_id", "category", data.category_id);
       set("date", "date", data.date);
+      set("time", "time", data.time);
       set("amount", "amount", data.amount);
       set("vendor", "vendor", data.vendor);
+      set("litres", "litres", data.litres);
+      set("unit_price", "price per litre", data.unit_price);
       set("odometer_km", "odometer", data.odometer_km);
       set("notes", "notes", data.notes);
       set("gst_amount", "GST", data.gst_amount);
@@ -1010,6 +1083,8 @@ document.addEventListener("DOMContentLoaded", () => {
       set("period_start", "period start", data.period_start);
       set("period_end", "period end", data.period_end);
       if (periodFields) periodShown();
+      // Show the fuel fields for the category read from the receipt, and work its figures out.
+      if (filled.includes("category") || filled.includes("litres")) form.elements.category_id.dispatchEvent(new Event("change"));
       if (payRefs) payRefsShown();
       if (gstField && form.elements.gst_amount.value) gstField.hidden = false;
       if (data.odometer_km && filled.includes("odometer")) hint.textContent = "Read from the invoice.";
@@ -1017,6 +1092,7 @@ document.addEventListener("DOMContentLoaded", () => {
       prefillHint.textContent = filled.length
         ? "Filled from the invoice: " + filled.join(", ") + ". Check them before saving."
         : "Couldn't read anything from that PDF; fill the fields in.";
+      if (unfit && data.litres) prefillHint.textContent += " This car doesn't take fuel: pick the right car, then the category.";
     } catch (e) {
       prefillHint.textContent = "Couldn't read the invoice.";
     }

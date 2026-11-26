@@ -7,7 +7,7 @@ GRANT USAGE ON SCHEMA garagebooks TO :"app_role";
 GRANT SELECT, INSERT, UPDATE, DELETE ON garagebooks.expense TO :"app_role";
 GRANT SELECT, UPDATE ON garagebooks.setting TO :"app_role";
 GRANT SELECT, INSERT ON garagebooks.category TO :"app_role";
-GRANT UPDATE (upload_folder, budget_pool, gst_free, has_period, applies_to) ON garagebooks.category TO :"app_role";
+GRANT UPDATE (upload_folder, budget_pool, gst_free, has_period, applies_to, has_litres) ON garagebooks.category TO :"app_role";
 -- Lease details and budgets per car.
 GRANT SELECT, INSERT, UPDATE, DELETE ON garagebooks.lease, garagebooks.lease_budget TO :"app_role";
 GRANT EXECUTE ON FUNCTION garagebooks.fbt_year(date) TO :"app_role";
@@ -73,3 +73,5 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON garagebooks.provider_claim TO :"app_role
 GRANT SELECT, INSERT, UPDATE ON garagebooks.provider_sync TO :"app_role";
 -- Invoices by email: each car's mailbox folder, and which emails became which expense.
 GRANT SELECT, INSERT, UPDATE, DELETE ON garagebooks.car_mail_folder, garagebooks.mail_import TO :"app_role";
+-- Fuel: the view that works out each fill-up's distance and L/100 km.
+GRANT SELECT ON garagebooks.fuel_fill TO :"app_role";

@@ -6,6 +6,9 @@ Two values are filled in from this installation's settings: the timezone box def
 APP_TZ, the "Add / edit expenses" link falls back to the app's own BASE_PATH, and the time range starts
 at your earliest data (Grafana has no "all time", so the app works it out each time it starts).
 
+A second dashboard, Fuel (fuel.json), is written once a car runs on fuel or has a fill-up recorded: the main one links
+to it from then on. It reads only GarageBooks' own tables.
+
 It also follows TeslaMate (sources.py). The file as shipped reads TeslaMate's charging costs;
 when TeslaMate is absent, or its figures are held back, those parts of the queries are left
 out, so no panel fails on a table that isn't there. Absent ("not configured") is nothing to
@@ -19,8 +22,13 @@ import tempfile
 from pathlib import Path
 
 FILENAME = "cost-of-ownership.json"
+FUEL_FILENAME = "fuel.json"
 # /srv/garagebooks/ beside /srv/grafana/ in the image; the repository layout is the same.
-SOURCE = Path(__file__).resolve().parent.parent / "grafana" / FILENAME
+ROOT = Path(__file__).resolve().parent.parent
+SOURCE = ROOT / "grafana" / FILENAME
+FUEL_SOURCE = ROOT / "grafana" / FUEL_FILENAME
+# The tag the dashboards share, which the link between them lists by.
+SHARED_TAG = "garagebooks"
 _FALLBACK = "'/garagebooks/'"     # the dashboard's own placeholder for the app's address
 
 
@@ -34,7 +42,7 @@ def _without_teslamate(dash, teslamate):
     for panel in dash["panels"]:
         for target in panel.get("targets", []):
             target["rawSql"] = _TESLAMATE_SQL.sub("", target["rawSql"])
-    dash["links"] = [link for link in dash.get("links", []) if link.get("type") != "dashboards"]
+    dash["links"] = [link for link in dash.get("links", []) if not (link.get("type") == "dashboards" and "tesla" in link.get("tags", []))]
     if not teslamate.installed:
         return
     for panel in dash["panels"]:
@@ -92,24 +100,8 @@ def _without_pace(dash):
             panel["gridPos"]["y"] -= pace["gridPos"]["h"]
 
 
-def render(tz, base_path, source=SOURCE, start=None, teslamate=None, sold=True, pace=True, after_tax=True):
-    """`teslamate` is a sources.TeslaMate; None means it is there and usable (the file as shipped).
-    `sold` is whether any car has been sold: with none, the Sold panel is left out (it would only ever
-    say "not sold"), and it comes back when a sale is recorded. `pace` is whether any lease has an estimated
-    km per year: with none, the Kilometre pace panel is left out, and it comes back when one is entered.
-    `after_tax` is whether the cost-after-tax panels have anything to show (a tax bracket is chosen and
-    some car has a lease)."""
-    dash = json.loads(Path(source).read_text())
-    if not sold:
-        _without_sold(dash)
-    if not after_tax:
-        _without_after_tax(dash)
-    if not pace:
-        _without_pace(dash)
-    if teslamate is not None and not teslamate.usable:
-        _without_teslamate(dash, teslamate)
-    if start is not None:
-        dash["time"] = {"from": start.strftime("%Y-%m-01T00:00:00.000Z"), "to": "now"}
+def _settings(dash, tz, base_path):
+    """The timezone box defaults to APP_TZ, and the "Add / edit expenses" link falls back to the app's own address."""
     variables = {v["name"]: v for v in dash["templating"]["list"]}
     tzvar = variables["tz"]
     tzvar["query"] = tz
@@ -121,13 +113,48 @@ def render(tz, base_path, source=SOURCE, start=None, teslamate=None, sold=True, 
         if _FALLBACK not in link[key]:
             raise ValueError("The dashboard's app-link placeholder moved: update dashboard.py.")
         link[key] = link[key].replace(_FALLBACK, here)
+
+
+def _starts_at(dash, start):
+    if start is not None:
+        dash["time"] = {"from": start.strftime("%Y-%m-01T00:00:00.000Z"), "to": "now"}
+
+
+def render(tz, base_path, source=SOURCE, start=None, teslamate=None, sold=True, pace=True, after_tax=True, fuel=True):
+    """`teslamate` is a sources.TeslaMate; None means it is there and usable (the file as shipped).
+    `sold` is whether any car has been sold: with none, the Sold panel is left out (it would only ever
+    say "not sold"), and it comes back when a sale is recorded. `pace` is whether any lease has an estimated
+    km per year: with none, the Kilometre pace panel is left out, and it comes back when one is entered.
+    `after_tax` is whether the cost-after-tax panels have anything to show (a tax bracket is chosen and
+    some car has a lease). `fuel` is whether the Fuel dashboard is written: without it the link to it is left out."""
+    dash = json.loads(Path(source).read_text())
+    if not sold:
+        _without_sold(dash)
+    if not after_tax:
+        _without_after_tax(dash)
+    if not pace:
+        _without_pace(dash)
+    if not fuel:
+        dash["links"] = [link for link in dash.get("links", []) if SHARED_TAG not in link.get("tags", [])]
+    if teslamate is not None and not teslamate.usable:
+        _without_teslamate(dash, teslamate)
+    _starts_at(dash, start)
+    _settings(dash, tz, base_path)
     return dash
 
 
-def export(directory, tz, base_path, source=SOURCE, start=None, teslamate=None, sold=True, pace=True, after_tax=True):
+def render_fuel(tz, base_path, source=FUEL_SOURCE, start=None):
+    """The Fuel dashboard: the same timezone, app link and time range as the main one."""
+    dash = json.loads(Path(source).read_text())
+    _starts_at(dash, start)
+    _settings(dash, tz, base_path)
+    return dash
+
+
+def _write(directory, filename, dash):
     """Write the dashboard if it differs from what's there. True if it wrote."""
-    text = json.dumps(render(tz, base_path, source, start, teslamate, sold, pace, after_tax), indent=2) + "\n"
-    target = Path(directory) / FILENAME
+    text = json.dumps(dash, indent=2) + "\n"
+    target = Path(directory) / filename
     if target.exists() and target.read_text() == text:
         return False
     # Write beside the target and rename, so Grafana never reads half a file.
@@ -141,3 +168,13 @@ def export(directory, tz, base_path, source=SOURCE, start=None, teslamate=None, 
         Path(tmp).unlink(missing_ok=True)
         raise
     return True
+
+
+def export(directory, tz, base_path, source=SOURCE, start=None, teslamate=None, sold=True, pace=True, after_tax=True, fuel=False):
+    """Write the dashboards that differ from what's there: the main one, and the Fuel one when `fuel` (a car runs on
+    fuel or has a fill-up). A Fuel file already there is left alone when `fuel` goes false: Grafana keeps what it has
+    provisioned anyway. True if anything was written."""
+    wrote = _write(directory, FILENAME, render(tz, base_path, source, start, teslamate, sold, pace, after_tax, fuel))
+    if fuel:
+        wrote = _write(directory, FUEL_FILENAME, render_fuel(tz, base_path, start=start)) or wrote
+    return wrote

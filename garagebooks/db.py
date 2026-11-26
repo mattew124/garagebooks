@@ -6,6 +6,7 @@ import os
 import re
 import time
 from datetime import timedelta
+from decimal import Decimal
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
@@ -411,12 +412,12 @@ def set_ev_charging_rate(conn, year, cents_per_km, source_url=None, checked_at=N
 
 def categories(conn):
     return conn.execute(
-        "SELECT id, name, kind, upload_folder, budget_pool, gst_free, has_period, applies_to FROM garagebooks.category "
+        "SELECT id, name, kind, upload_folder, budget_pool, gst_free, has_period, applies_to, has_litres FROM garagebooks.category "
         "ORDER BY sort_order, name"
     ).fetchall()
 
 
-CATEGORY_FIELDS = ("upload_folder", "gst_free", "has_period", "budget_pool", "applies_to")
+CATEGORY_FIELDS = ("upload_folder", "gst_free", "has_period", "budget_pool", "applies_to", "has_litres")
 
 
 def update_category(conn, category_id, **fields):
@@ -426,6 +427,13 @@ def update_category(conn, category_id, **fields):
     sets = ", ".join(f"{name} = %({name})s" for name in fields)
     return conn.execute(f"UPDATE garagebooks.category SET {sets} WHERE id = %(id)s",  # noqa: S608 - names checked above
                         {**fields, "id": category_id}).rowcount == 1
+
+
+def any_fuel(conn):
+    """Does any car run on fuel (anything but a battery electric one), or have a fill-up recorded? Then the Fuel
+    dashboard is written."""
+    return conn.execute("SELECT EXISTS (SELECT 1 FROM garagebooks.car WHERE kind <> 'BEV') "
+                        "OR EXISTS (SELECT 1 FROM garagebooks.fuel_fill) AS used").fetchone()["used"]
 
 
 SERVICE_CATEGORY = "Service"
@@ -518,7 +526,10 @@ _SELECT = """
     SELECT e.id, e.car_id, c.name AS car_name, e.category_id, cat.name AS category,
            cat.kind, e.occurred_at, e.amount, e.odometer_km, e.vendor, e.notes,
            e.invoice_url, e.invoice_path, e.packaged, e.period_start, e.period_end,
-           e.gst_amount, e.card_payment_ref, e.bpay_biller_code, e.bpay_ref, cat.has_period, c.make AS car_make, c.model AS car_model, cat.budget_pool,
+           e.gst_amount, e.card_payment_ref, e.bpay_biller_code, e.bpay_ref, cat.has_period, cat.has_litres,
+           e.litres, e.full_tank, e.missed_fill, e.unit_price, e.latitude, e.longitude, ff.distance_km AS fuel_distance_km, ff.tank_km AS fuel_tank_km,
+           ff.tank_litres AS fuel_tank_litres, ff.l_per_100km AS fuel_l_per_100km, ff.price_per_litre,
+           c.make AS car_make, c.model AS car_model, cat.budget_pool,
            cl.provider AS claim_provider, cl.provider_id AS claim_provider_id, cl.reference AS claim_reference,
            cl.status AS claim_status, cl.paid_date AS claim_paid_date, cl.approved_amount AS claim_approved,
            cl.fields ->> 'method' AS claim_method,
@@ -528,6 +539,7 @@ _SELECT = """
     JOIN garagebooks.car c ON c.id = e.car_id
     JOIN garagebooks.category cat ON cat.id = e.category_id
     LEFT JOIN garagebooks.expense_claim cl ON cl.expense_id = e.id
+    LEFT JOIN garagebooks.fuel_fill ff ON ff.id = e.id
 """
 
 # What the cost after tax needs of an expense (lease.effective_cost works it out): its own choice, its
@@ -611,9 +623,10 @@ def get_expense(conn, expense_id):
 
 _FIELDS = ("car_id", "category_id", "occurred_at", "amount", "odometer_km",
            "vendor", "notes", "invoice_url", "invoice_path", "packaged", "period_start", "period_end",
-           "gst_amount", "card_payment_ref", "bpay_biller_code", "bpay_ref")
+           "gst_amount", "card_payment_ref", "bpay_biller_code", "bpay_ref", "litres", "full_tank", "missed_fill",
+           "unit_price", "latitude", "longitude")
 
-_DEFAULTS = {"invoice_path": None, "packaged": None, "period_start": None, "period_end": None, "gst_amount": None,
+_DEFAULTS = {"unit_price": None, "latitude": None, "longitude": None, "litres": None, "full_tank": True, "missed_fill": False, "invoice_path": None, "packaged": None, "period_start": None, "period_end": None, "gst_amount": None,
              "card_payment_ref": None, "bpay_biller_code": None, "bpay_ref": None}
 
 
@@ -623,6 +636,22 @@ def insert_expense(conn, v):
         f"VALUES ({', '.join('%(' + f + ')s' for f in _FIELDS)}) RETURNING id",
         {**_DEFAULTS, **v},
     ).fetchone()["id"]
+
+
+def fuel_preview(conn, v, expense_id=None):
+    """What a fill-up would show once saved: its row of garagebooks.fuel_fill (distance since the last fuel-up,
+    L/100 km of the tank), worked out by saving it and undoing that. `v` is a parsed expense form; an
+    `expense_id` previews an edit of that expense. Litres not yet typed count as 1 so the distance can be shown
+    before them (the caller leaves out the figure that needs them). -> the row, or None."""
+    with conn.transaction(force_rollback=True):
+        args = {**_DEFAULTS, **v, "litres": v.get("litres") or Decimal(1), "id": expense_id}
+        if expense_id is None:
+            expense_id = conn.execute(
+                f"INSERT INTO garagebooks.expense ({', '.join(_FIELDS)}) "
+                f"VALUES ({', '.join('%(' + f + ')s' for f in _FIELDS)}) RETURNING id", args).fetchone()["id"]
+        elif not update_expense(conn, expense_id, args):
+            return None
+        return conn.execute("SELECT * FROM garagebooks.fuel_fill WHERE id = %s", (expense_id,)).fetchone()
 
 
 def learned(conn, after):

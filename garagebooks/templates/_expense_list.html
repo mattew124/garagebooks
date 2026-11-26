@@ -66,10 +66,16 @@
     <td class="vendor" data-label="Vendor" title="{{ e.vendor or '' }}">{{ e.vendor or '–' }}{% if e.period_start or e.period_end %}
       <small class="period-note">{{ (e.period_start|day) if e.period_start else '…' }} to {{ (e.period_end|day) if e.period_end else '…' }}</small>{% endif %}{% if services and services.get(e.id) %}
       <small class="service-note">{{ services[e.id]|join(', ') }}</small>{% endif %}</td>
-    <td class="num amount{{ ' credit' if e.amount < 0 }}" data-label="Amount">{{ e.amount|money }}{% set cost = after.costs.get(e.id) %}{% if cost is not none %}
+    <td class="num amount{{ ' credit' if e.amount < 0 }}" data-label="Amount">{{ e.amount|money }}{% if e.litres is not none %}
+      <small class="fuel-note">{{ '{:.2f}'.format(e.litres) }} L</small>{% if e.price_per_litre is not none %}
+      <small class="fuel-note">${{ '{:.3f}'.format(e.price_per_litre) }}/L</small>{% endif %}{% endif %}{% set cost = after.costs.get(e.id) %}{% if cost is not none %}
       <small class="after-tax" title="After tax: {{ cost|money }}. Paid from the package, so the GST is claimed back and the rest comes from pre-tax salary (at the marginal rate for its income year, from Settings). Not tax advice.">{{ cost|money }} after tax</small>{% if e.id in after.needs_gst %}
       <small class="gst-hint" title="This category's GST only partly applies, so none is counted until the GST is entered on the expense.">enter its GST</small>{% endif %}{% endif %}</td>
-    <td class="num odo" data-label="Odometer">{{ e.odometer_km|km }}</td>
+    <td class="num odo" data-label="Odometer">{{ e.odometer_km|km }}{% if e.litres is not none %}{% if e.fuel_distance_km is not none %}
+      <small class="fuel-note" title="Distance since the last fuel-up">{{ '{:,.0f}'.format(e.fuel_distance_km) }} km since the last fuel-up</small>{% endif %}{% if e.fuel_l_per_100km is not none %}
+      <small class="fuel-note economy" title="Over the tank, from when it was last full">{{ '{:.1f}'.format(e.fuel_l_per_100km) }} L/100 km</small>{% endif %}{% if not e.full_tank %}
+      <small class="fuel-note">Partial fill</small>{% endif %}{% if e.missed_fill %}
+      <small class="fuel-note">After a fuel-up missed</small>{% endif %}{% endif %}</td>
     {# A stored invoice is served by the app; anything else is the link that was pasted or uploaded. #}
     {% set inv = url_for('invoice', expense_id=e.id) if e.invoice_path else e.invoice_url %}
     <td class="inv{{ '' if inv else ' none' }}" data-label="Invoice">{% if inv %}<a href="{{ inv }}" target="_blank" rel="noopener noreferrer">PDF ↗</a>{% else %}–{% endif %}</td>
