@@ -1519,6 +1519,110 @@ BEGIN
     END IF;
 END $$;
 
+--   onedrive_account.signed_in_at  when OneDrive was last signed in. The app keeps a listing of the drive in
+--   memory for browsing, and this is how each web worker knows the listing belongs to an earlier sign-in.
+ALTER TABLE garagebooks.onedrive_account ADD COLUMN IF NOT EXISTS signed_in_at timestamptz;
+
+-- The folders and PDFs of the signed-in OneDrive (drivestore.py), so browsing them doesn't wait for Microsoft. A copy:
+-- it is cleared on disconnect and listed again after a sign-in. drive_sync is the one row saying how far it got: the
+-- next page of a listing under way, or the delta link that asks what has changed since.
+CREATE TABLE IF NOT EXISTS garagebooks.drive_item (
+    id        text PRIMARY KEY,
+    parent_id text,                       -- NULL only for the top of the drive
+    name      text NOT NULL,
+    is_folder boolean NOT NULL,
+    size      bigint NOT NULL DEFAULT 0,
+    web_url   text
+);
+CREATE INDEX IF NOT EXISTS drive_item_parent ON garagebooks.drive_item (parent_id);
+CREATE TABLE IF NOT EXISTS garagebooks.drive_sync (
+    id           boolean PRIMARY KEY DEFAULT true CHECK (id),
+    signed_in_at timestamptz,             -- the sign-in it was listed with
+    cursor       text,
+    complete     boolean NOT NULL DEFAULT false,
+    synced_at    timestamptz,
+    failed_at    timestamptz,
+    lease_token  text,                    -- the run that is syncing, so only one does
+    lease_until  timestamptz
+);
+
+-- Fuel: litres on a fill-up, and what they say about the car. Added to databases made before them; safe to
+-- run again.
+--   expense.litres      litres put in (a fuel expense; NULL for any other, and for fuel entered before this)
+--   expense.full_tank   the fill-up filled the tank. Not ticked = a partial fill: its litres count towards the
+--                       tank it is part of, and L/100 km is worked out when the tank is next filled
+--   expense.missed_fill a fuel-up since the one before was not recorded, so the litres for this tank are not all
+--                       known: the distance is still shown, L/100 km is not
+--   expense.unit_price  the pump's price per litre in dollars, when entered (before any discount)
+--   expense.latitude, longitude
+--                       where the fuel was bought, when recorded (both or neither): the Fuel dashboard's heat map
+--   category.has_litres the category's expenses record litres (Fuel by default; the owner's later edits are
+--                       never overwritten)
+ALTER TABLE garagebooks.expense ADD COLUMN IF NOT EXISTS litres numeric(7, 2);
+ALTER TABLE garagebooks.expense ADD COLUMN IF NOT EXISTS full_tank boolean NOT NULL DEFAULT true;
+ALTER TABLE garagebooks.expense ADD COLUMN IF NOT EXISTS missed_fill boolean NOT NULL DEFAULT false;
+ALTER TABLE garagebooks.expense ADD COLUMN IF NOT EXISTS unit_price numeric(8, 3);
+ALTER TABLE garagebooks.expense ADD COLUMN IF NOT EXISTS latitude numeric(8, 6);
+ALTER TABLE garagebooks.expense ADD COLUMN IF NOT EXISTS longitude numeric(9, 6);
+ALTER TABLE garagebooks.expense DROP CONSTRAINT IF EXISTS expense_unit_price_positive;
+ALTER TABLE garagebooks.expense ADD CONSTRAINT expense_unit_price_positive CHECK (unit_price IS NULL OR unit_price > 0);
+ALTER TABLE garagebooks.expense DROP CONSTRAINT IF EXISTS expense_location_valid;
+ALTER TABLE garagebooks.expense ADD CONSTRAINT expense_location_valid CHECK (
+    (latitude IS NULL) = (longitude IS NULL) AND abs(latitude) <= 90 AND abs(longitude) <= 180);
+ALTER TABLE garagebooks.expense DROP CONSTRAINT IF EXISTS expense_litres_positive;
+ALTER TABLE garagebooks.expense ADD CONSTRAINT expense_litres_positive CHECK (litres IS NULL OR litres > 0);
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_schema = 'garagebooks' AND table_name = 'category' AND column_name = 'has_litres') THEN
+        ALTER TABLE garagebooks.category ADD COLUMN has_litres boolean NOT NULL DEFAULT false;
+        ALTER TABLE garagebooks.category DISABLE TRIGGER log_change;
+        UPDATE garagebooks.category SET has_litres = true WHERE name = 'Fuel';
+        ALTER TABLE garagebooks.category ENABLE TRIGGER log_change;
+    END IF;
+END $$;
+
+-- One row per fill-up (an expense with litres), in the order they were made for each car. The one definition of
+-- the fuel figures: the app's list and form and the Fuel dashboard all read it.
+--   distance_km   since the car's previous fill-up, whatever kind either was (NULL for the first, or where an
+--                 odometer is missing)
+--   tank_km, tank_litres, tank_cost, l_per_100km
+--                 only on a fill-up that fills the tank, measured from the last time it was full: the litres put
+--                 in since then (partial fills included) over the distance since then. NULL for the first full
+--                 fill-up (nothing to measure from) and for a tank in which a fuel-up was missed
+--                 (tank_cost, the money spent on the tank, is left out there too).
+--   price_per_litre  the pump's price where it was entered, else what was paid per litre
+CREATE OR REPLACE VIEW garagebooks.fuel_fill AS
+WITH numbered AS (
+    SELECT e.id, e.car_id, e.occurred_at, e.amount, e.litres, e.odometer_km, e.full_tank, e.missed_fill, e.unit_price,
+           -- how many tanks were filled before this one: fill-ups with the same number are one tank
+           count(*) FILTER (WHERE e.full_tank) OVER (
+               PARTITION BY e.car_id ORDER BY e.occurred_at, e.id ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS tank_no
+    FROM garagebooks.expense e
+    WHERE e.litres IS NOT NULL
+), tanks AS (
+    SELECT car_id, tank_no, sum(litres) AS tank_litres, sum(amount) AS tank_cost, bool_or(missed_fill) AS tank_missed,
+           max(odometer_km) FILTER (WHERE full_tank) AS full_km,
+           lag(max(odometer_km) FILTER (WHERE full_tank)) OVER (PARTITION BY car_id ORDER BY tank_no) AS start_km
+    FROM numbered
+    GROUP BY car_id, tank_no
+)
+SELECT n.id, n.car_id, n.occurred_at, n.amount, n.litres, n.odometer_km, n.full_tank, n.missed_fill,
+       CASE WHEN n.odometer_km > prev.odometer_km THEN n.odometer_km - prev.odometer_km END AS distance_km,
+       CASE WHEN n.full_tank AND n.odometer_km > t.start_km THEN n.odometer_km - t.start_km END AS tank_km,
+       CASE WHEN n.full_tank AND n.odometer_km > t.start_km THEN t.tank_litres END AS tank_litres,
+       CASE WHEN n.full_tank AND n.odometer_km > t.start_km AND NOT t.tank_missed THEN t.tank_cost END AS tank_cost,
+       CASE WHEN n.full_tank AND n.odometer_km > t.start_km AND NOT t.tank_missed
+            THEN (t.tank_litres / (n.odometer_km - t.start_km) * 100)::numeric(7, 2) END AS l_per_100km,
+       COALESCE(n.unit_price, n.amount / n.litres)::numeric(9, 4) AS price_per_litre
+FROM numbered n
+JOIN tanks t ON t.car_id = n.car_id AND t.tank_no = n.tank_no
+LEFT JOIN LATERAL (
+    SELECT p.odometer_km FROM numbered p
+    WHERE p.car_id = n.car_id AND p.odometer_km IS NOT NULL AND (p.occurred_at, p.id) < (n.occurred_at, n.id)
+    ORDER BY p.occurred_at DESC, p.id DESC LIMIT 1
+) prev ON true;
+
 -- Which wheels a cost was for (FL, FR, RL, RR): on a per-wheel service item an expense had (brakes), and on the
 -- expense itself for a per-wheel category (Tyres). per_wheel says which items and categories ask. It is set once,
 -- when the column is added, and not as anyone's edit; the owner's later choices are never overwritten.

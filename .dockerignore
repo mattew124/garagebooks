@@ -5,6 +5,7 @@ __pycache__
 tests
 grafana/*
 !grafana/cost-of-ownership.json
+!grafana/fuel.json
 db
 scripts
 *.md

@@ -25,6 +25,7 @@ import secrets
 import time
 import urllib.error
 import urllib.request
+from http.client import HTTPSConnection
 from urllib.parse import parse_qs, quote, urlencode, urlparse
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -43,6 +44,7 @@ BUSY_STATUSES = (429, 503)   # Microsoft throttling or a brief outage: worth a s
 RETRY_WAITS = (1, 3)         # seconds between tries; requests are bounded by gunicorn's timeout
 MAX_PAGES = 20   # of 200 children each, when listing a folder
 MAX_DELTA_PAGES = 100   # of 200 items each, when listing a folder tree with delta
+CONNECT_TIMEOUT = 5          # seconds to reach one of Microsoft's addresses before trying the next
 MAX_DEPTH = 4    # subfolders below a car's folder that are searched for PDFs
 MAX_PDF_BYTES = 20 * 1024 * 1024
 
@@ -53,6 +55,10 @@ class OneDriveError(StorageError):
 
 class SignInExpired(OneDriveError):
     pass
+
+
+class ResyncNeeded(OneDriveError):
+    """Graph can't say what changed since a delta link: the listing has to start again."""
 
 
 class NotFound(OneDriveError):
@@ -72,10 +78,32 @@ class NotConnected(OneDriveError):
         return cls("Connect the mailbox first (Invoice storage page), then try again.")
 
 
+class QuickConnection(HTTPSConnection):
+    """Gives up on an address that doesn't answer after CONNECT_TIMEOUT, so the next one is tried. Microsoft's names
+    have several, and now and then one is silent: with the whole request's timeout for connecting too, a click waited
+    a minute on it. Once connected, the request keeps its own timeout."""
+
+    def connect(self):
+        timeout, self.timeout = self.timeout, CONNECT_TIMEOUT
+        try:
+            super().connect()
+        finally:
+            self.timeout = timeout
+        self.sock.settimeout(timeout)
+
+
+class _QuickHandler(urllib.request.HTTPSHandler):
+    def https_open(self, req):
+        return self.do_open(QuickConnection, req)
+
+
+_opener = urllib.request.build_opener(_QuickHandler())
+
+
 def http(method, url, data=None, headers=None, timeout=60, raw=False):
     req = urllib.request.Request(url, data=data, method=method, headers=headers or {})
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _opener.open(req, timeout=timeout) as resp:
             status, body = resp.status, resp.read()
     except urllib.error.HTTPError as exc:
         status, body = exc.code, exc.read()
@@ -232,6 +260,8 @@ class OneDrive:
             time.sleep(wait)
         if status in BUSY_STATUSES:
             raise OneDriveError(f"{service} is busy right now: try again in a few minutes.")
+        if status == 410:      # a delta link too old to answer from
+            raise ResyncNeeded(f"{service} said no: " + graph_error(status, body))
         if status != 200:
             raise (NotFound if status == 404 else OneDriveError)(f"{service} said no: " + graph_error(status, body))
         return body

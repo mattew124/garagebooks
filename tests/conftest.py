@@ -113,10 +113,10 @@ def pg():
     name = f"garagebooks-test-{secrets.token_hex(4)}"
     admin_pass = secrets.token_hex(16)
     try:
-        # --tmpfs on the data dir: the postgres image declares it a VOLUME, so without this Docker
-        # makes an anonymous volume that a plain `docker rm -f` leaves behind (~115 MB per run).
+        # The postgres image declares its data dir a VOLUME, so Docker makes an anonymous volume on disk
+        # (not tmpfs: that holds the database in RAM). --rm and `rm -v` below delete it with the container;
+        # a plain `docker rm -f` would leave it behind.
         sh("docker", "run", "-d", "--rm", "--name", name, "-p", "127.0.0.1::5432",
-           "--tmpfs", "/var/lib/postgresql",
            "-e", f"POSTGRES_PASSWORD={admin_pass}", "-e", "POSTGRES_DB=teslamate", IMAGE)
     except subprocess.CalledProcessError as exc:
         pytest.skip(f"cannot start {IMAGE}: {exc.stderr.strip()}")
@@ -150,7 +150,7 @@ def pg():
             pg.psql(OWN_CAR)
         yield pg
     finally:
-        subprocess.run(["docker", "rm", "-fv", name], capture_output=True)  # -v: belt and braces
+        subprocess.run(["docker", "rm", "-fv", name], capture_output=True)  # -v: and its volume
 
 
 @pytest.fixture()
@@ -161,7 +161,7 @@ def admin(pg):
         script = [
             "TRUNCATE garagebooks.expense, garagebooks.car_folder, garagebooks.car_mail_folder, garagebooks.onedrive_account,"
             " garagebooks.learned_label, garagebooks.learned_vendor, garagebooks.import_skip,"
-            " garagebooks.odometer_reading, garagebooks.reminder RESTART IDENTITY CASCADE",
+            " garagebooks.odometer_reading, garagebooks.reminder, garagebooks.drive_item, garagebooks.drive_sync RESTART IDENTITY CASCADE",
         ]
         if TESLAMATE:
             # CASCADE: real TeslaMate tables (drives...) reference them

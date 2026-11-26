@@ -3,6 +3,8 @@
 {% block title %}Choose folder{% endblock %}
 {% block main_attrs %} class="narrow"{% endblock %}
 {% block content %}
+{# app.js opens another folder in place: it swaps in this element from the folder's page. Without script, links work. #}
+<div data-folder-browser>
 <h1>{% if kind == 'onedrive' %}{{ mark() }} {% elif kind == 'mail' %}{{ brand('outlook') }} {% endif %}{% if kind == 'mail' %}Mailbox folder{% else %}Folder{% endif %} for {{ 'a new car' if car.id == 0 else (car.name or ('Car ' ~ car.id)) }}</h1>
 {% if car.id == 0 %}<p>Choose the folder that holds the car's invoices. The import of that folder then builds the car from its purchase invoice.</p>{% endif %}
 <p class="here"><code>{{ here.path }}</code></p>
@@ -35,4 +37,5 @@
   <button type="submit" class="secondary">Create folder</button>
 </form>
 {% endif %}
+</div>
 {% endblock %}

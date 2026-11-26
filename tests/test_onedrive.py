@@ -21,7 +21,7 @@ import pytest
 from cryptography.fernet import Fernet
 from psycopg.rows import dict_row
 
-from garagebooks import create_app, onedrive
+from garagebooks import create_app, drivestore, onedrive
 from tests.test_app import ORIGIN, form, rows
 from tests.test_validation import PDF
 
@@ -57,6 +57,15 @@ def with_children(key):
     files = [{"id": "F1", "name": "receipt.pdf", "file": {}, "size": 10, "webUrl": "https://onedrive.live.com/?id=F1"},
              {"id": "F2", "name": "notes.txt", "file": {}, "size": 1, "webUrl": "https://onedrive.live.com/?id=F2"}]
     return {**item(key), "children": [item(k) for k in CHILDREN[key]] + files}
+
+
+def drive_delta(query):
+    """The whole drive as delta gives it; with its delta link, everything again (re-applying changes nothing)."""
+    everything = [{**item(k), "parentReference": {"id": FOLDERS[k]["parent"]}} for k in FOLDERS]
+    everything[0] = {"id": "ROOT", "name": "root", "folder": {}, "root": {}}
+    everything.append({"id": "F1", "name": "receipt.pdf", "file": {}, "size": 10,
+                       "webUrl": "https://onedrive.live.com/?id=F1", "parentReference": {"id": "TESTCAR"}})
+    return {"value": everything, "@odata.deltaLink": f"{onedrive.GRAPH}/me/drive/root/delta?token=since"}
 
 
 class FakeMicrosoft:
@@ -97,6 +106,8 @@ class FakeMicrosoft:
         if url == FILE_DOWNLOAD:                      # the CDN address: no bearer token goes with it
             return 200, PDF
         assert headers["Authorization"].startswith("Bearer AT-")
+        if method == "GET" and path.endswith("/me/drive/root/delta"):
+            return 200, drive_delta(urlparse(url).query)
         if method == "GET" and path.endswith("/me/drive"):
             return 200, {"owner": {"user": {"displayName": "Test Owner"}}}
         if method == "GET" and path.endswith("/children"):
@@ -156,6 +167,7 @@ def ms():
 def app_for(pg, admin, monkeypatch):
     monkeypatch.delenv("BASE_PATH", raising=False)
     monkeypatch.setenv("APP_TZ", "Australia/Brisbane")
+    monkeypatch.setattr(drivestore, "in_background", lambda work: work())
 
     def make(transport, key=KEY, icon_fetch=None):
         if key is None:
@@ -400,6 +412,22 @@ def test_browse_and_choose_folder(client, ms, admin):
     assert admin.execute("SELECT car_id, folder_id, folder_path FROM garagebooks.car_folder").fetchall() == [
         {"car_id": 1, "folder_id": "INV", "folder_path": "/Cars/Test car/Invoices"}]
     assert "/Cars/Test car/Invoices" in client.get("/storage").data.decode()
+
+
+def test_the_folder_chooser_can_be_swapped_in_place(client, ms):
+    """app.js replaces this element with the same one from the folder's page, so both must hold the whole chooser."""
+    sign_in(client, ms)
+    page = client.get("/onedrive/browse/1?folder=TESTCAR").data.decode()
+    inside = page.split("<div data-folder-browser>")[1]
+    assert 'class="plain folder-list"' in inside and 'name="folder_id"' in inside
+
+
+def test_disconnecting_clears_the_stored_listing(client, ms, admin):
+    sign_in(client, ms)
+    client.get("/onedrive/browse/1")                # the first browse starts the listing
+    assert admin.execute("SELECT count(*) AS n FROM garagebooks.drive_item").fetchone()["n"] > 0
+    client.post("/onedrive/disconnect", headers=ORIGIN)
+    assert admin.execute("SELECT count(*) AS n FROM garagebooks.drive_item").fetchone()["n"] == 0
 
 
 def test_browse_needs_sign_in_and_a_real_car(client, ms):
@@ -832,13 +860,37 @@ def refreshes(ms):
     return [c for c in ms.calls if c[1].endswith("/token") and b"grant_type=refresh_token" in c[2]]
 
 
-def test_a_folder_is_one_graph_call(client, ms):
+def test_clicking_through_folders_asks_graph_nothing_once_browsing_has_started(client, ms):
     sign_in(client, ms)
     choose_folder(client, "TESTCAR")
-    pick(client)                                  # warm up: the token refresh isn't a Graph call
+    assert pick(client).status_code == 200
+    before = len(graph_gets(ms))
+    for folder in ("CARS", "root", "TESTCAR", "INV"):
+        assert pick(client, f"?folder={folder}").status_code == 200
+    assert client.get("/onedrive/browse/1?folder=CARS").status_code == 200
+    assert len(graph_gets(ms)) == before
+
+
+def test_starting_to_browse_again_asks_only_what_changed(client, ms, admin):
+    sign_in(client, ms)
+    choose_folder(client, "TESTCAR")
+    pick(client)
+    admin.execute("UPDATE garagebooks.drive_sync SET synced_at = synced_at - interval '1 minute'")
+    before = len(graph_gets(ms))
+    pick(client)
+    assert [c[1] for c in graph_gets(ms)[before:]] == [f"{onedrive.GRAPH}/me/drive/root/delta?token=since"]
+
+
+def test_signing_in_again_lists_the_drive_again(client, ms):
+    sign_in(client, ms)
+    choose_folder(client, "TESTCAR")
+    pick(client)
+    sign_in(client, ms)
+    choose_folder(client, "TESTCAR")
     before = len(graph_gets(ms))
     assert pick(client, "?folder=CARS").status_code == 200
-    assert len(graph_gets(ms)) - before == 1
+    deltas = [c[1] for c in graph_gets(ms)[before:] if "/delta" in c[1]]
+    assert deltas and "token=since" not in deltas[0]
 
 
 def test_the_access_token_is_reused_until_it_nears_expiry(client, ms):
@@ -854,6 +906,7 @@ def test_an_access_token_about_to_expire_is_not_reused(client, ms):
     ms.expires_in = 30            # inside the safety margin: not worth keeping
     sign_in(client, ms)
     choose_folder(client, "TESTCAR")
+    pick(client)                    # the first one also lists the drive, which asks for tokens of its own
     before = len(refreshes(ms))
     pick(client); pick(client)
     assert len(refreshes(ms)) - before == 2

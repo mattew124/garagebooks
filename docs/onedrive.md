@@ -31,6 +31,17 @@ account (OneDrive Personal). To keep the PDFs on your own server instead, see
     if it doesn't exist yet. Uploads go by the folder's ID, so renaming or moving it later
     doesn't break them.
 
+    So that browsing doesn't wait for Microsoft, the app keeps a listing of your drive in its database: the names
+    of **all** your folders and PDF files, with each PDF's size and web address (never their contents). So your
+    database backups hold those names too. **Disconnect** deletes the listing.
+
+    The first listing starts when you first browse (or within an hour, from the
+    [scheduled job](scheduled-jobs.md)) and runs in the background. It takes a few minutes for tens of thousands of
+    files, and carries on after a restart. Until it is complete, each folder is fetched as you open it. After that,
+    folders open from the database and the app asks Microsoft only what has changed, in the background: when you
+    start browsing, as you click if five minutes have passed, and hourly. So a change made outside the app can be
+    missing from the first folder you see; it is there the next time you open it.
+
 ## Where files go
 
 Each invoice goes into a subfolder of the car's folder, set per category on the **Categories** page.

@@ -30,6 +30,10 @@
           {% for key, label in applies_to.items() %}<option value="{{ key }}" {{ 'selected' if c.applies_to == key }}>{{ label }}</option>{% endfor %}
         </select></label>
     </div>
+    <div class="row">
+      <label class="check"><input type="checkbox" name="has_litres_{{ c.id }}" value="1" {{ 'checked' if c.has_litres }}>
+        <span>Records litres <small>(fuel: the expense form asks for them, and the Fuel dashboard counts them)</small></span></label>
+    </div>
     {% if budgets_on %}
     <div class="row">
       <label><small>Lease budget pool</small>

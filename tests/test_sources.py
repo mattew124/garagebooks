@@ -432,7 +432,7 @@ def queries(dash):
 def test_every_dashboard_query_runs_with_no_teslamate(empty_db, monkeypatch):
     start(empty_db, monkeypatch)
     dash = dashboard.render("UTC", "", teslamate=sources.TeslaMate(sources.ABSENT))
-    assert not any(link["type"] == "dashboards" for link in dash["links"])
+    assert not any(link["type"] == "dashboards" and "tesla" in link.get("tags", []) for link in dash["links"])
     with connect(empty_db) as conn:
         for sql in queries(dash):
             conn.execute(runnable(sql)).fetchall()
@@ -457,7 +457,7 @@ def test_every_dashboard_query_runs_in_the_form_for_this_database(admin):
     assert by_category == {"Charging": charging, "Tyres": 300}                # one Charging slice, not two
     names = [r["name"] for r in admin.execute(runnable(next(
         v["query"] for v in dash["templating"]["list"] if v["name"] == "category")))]
-    assert names.count("Charging") == 1 and "Fuel" in names
+    assert names.count("Charging") == 1 and "Fuel" not in names                # an electric car is not offered fuel
 
 
 def test_a_held_back_dashboard_says_so_and_an_absent_one_does_not():

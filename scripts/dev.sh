@@ -424,6 +424,15 @@ setup() {
     urls
 }
 
+# The connector the running app is using, whatever this command's settings say: "" when it isn't running.
+running_connector() {
+    local app
+    app="$(compose ps -q garagebooks-dev)"
+    [ -n "$app" ] || return 0
+    docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$app" | sed -n 's/^CLAIMS_CONNECTOR_URL=//p'
+}
+STAND_IN_URL=http://dev-claims-connector:8765
+
 test_browser() {
     local require_onedrive=0 only="" rerun_failed=0
     while [ $# -gt 0 ]; do
@@ -437,6 +446,11 @@ test_browser() {
         shift
     done
     ensure_env
+    # They submit claims: the running app must be on the stand-in, however it was last started.
+    [ "$(running_connector)" = "$STAND_IN_URL" ] || {
+        echo "dev: the browser tests submit claims, and the running app isn't on the stand-in connector" >&2
+        echo "dev: (or isn't running). Run STAND_IN=1 scripts/dev.sh up, then try again." >&2
+        exit 2; }
     docker build -q -t garagebooks:browser-tests tests/browser >/dev/null
     # Straight to the containers on the dev network, past the proxy's login.
     docker run --rm --network "${PROJECT}_dev" --user "$(id -u):$(id -g)" \
@@ -523,6 +537,11 @@ onedrive_link() {
         # Same image (it may be `up --image`), new key.
         GARAGEBOOKS_IMAGE="$(docker inspect -f '{{.Config.Image}}' "$app")"
         export GARAGEBOOKS_IMAGE
+        # Recreating the app mustn't move a stack started on the stand-in to the connector dev.env names.
+        if [ "$(running_connector)" = "$STAND_IN_URL" ]; then
+            unset DEV_CLAIMS_CONNECTOR_URL
+            export DEV_CLAIMS_KEY_SOURCE=./.dev/claims/stand-in.key
+        fi
         compose up -d --no-build --wait garagebooks-dev
     fi
     {
@@ -712,7 +731,11 @@ case "${1:-}" in
     refresh) [ "$DEMO" = 0 ] || { echo "dev: the demo has nothing to refresh; use 'demo reset'" >&2; exit 2; }
         ensure_env; copy_data ;;
     reset) claims_check; ensure_env; compose down -v; start "" ;;
-    down) ensure_env; compose down ;;
+    down) ensure_env
+        # `compose down` leaves anonymous volumes behind (any image with a VOLUME gets one, such as
+        # dev-dashboards-owner's postgres), and `down -v` would delete the test database too.
+        compose rm --stop --force --volumes
+        compose down ;;
     destroy)
         ensure_env
         compose down -v --remove-orphans

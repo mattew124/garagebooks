@@ -82,6 +82,20 @@ def extract_text(pdf):
     return text
 
 
+def _ocr(pdf, dpi, psm):
+    """One more OCR reading of a scan's first page, at another resolution and page layout. '' when it can't."""
+    if not (shutil.which("pdftoppm") and shutil.which("tesseract")):
+        return ""
+    scratch = "/dev/shm" if os.access("/dev/shm", os.W_OK) else None  # nosec B108 - private TemporaryDirectory in the only writable place
+    with tempfile.TemporaryDirectory(prefix="tmexp-", dir=scratch) as tmp:
+        path = Path(tmp) / "in.pdf"
+        path.write_bytes(pdf)
+        stem = Path(tmp) / "page"
+        _run(["pdftoppm", "-r", str(dpi), "-gray", "-singlefile", "-png", str(path), str(stem)], OCR_TIMEOUT)
+        png = stem.with_suffix(".png")
+        return _run(["tesseract", str(png), "-", "--psm", str(psm)], OCR_TIMEOUT) if png.exists() else ""
+
+
 def _run(cmd, timeout):
     try:
         done = subprocess.run(cmd, capture_output=True, timeout=timeout, check=False)  # nosec B603 - fixed tool names, our own temp path, no shell
@@ -615,9 +629,142 @@ def _authority(text):
     return None
 
 
-def propose(folder, name, text, categories, learned=None, multi_amount=None):
+# ---- a fuel receipt ----------------------------------------------------------
+
+FUEL_BRANDS = ("7-Eleven", "Ampol", "BP", "Caltex", "Costco", "Liberty", "Metro Petroleum", "Mobil", "OTR", "Pearl Energy",
+               "Puma", "Reddy Express", "Shell", "Speedway", "United")
+_PUMP = re.compile(r"\bPUMP\b\s*[#:]?\s*\w?\d", re.I)
+_GRADE = re.compile(r"\b(?:unleaded|ulp|diesel|e10|e85|autogas|lpg|[up](?:91|95|98)|premi\w{1,3}\s*9[1-8])\b", re.I)
+# The pump's line, "40.00L @ $2.000/L", as OCR reads it too: a comma for the point, the L as a 1, junk for the @.
+_PUMP_LINE = re.compile(r"(?<![\d.,])(\d{1,3}[.,]\d{2,3})\s?(?:L|l|1(?=\s)|litres?\b)[^\d$\n]{0,8}\$\s?(\d[.,]\s?[\dB]{3})")
+_PUMP_LINE_CENTS = re.compile(r"(?<![\d.,])(\d{1,3}[.,]\d{2,3})\s?(?:L|l|1(?=\s)|litres?\b)[^\d$\n]{0,8}(\d{2,3}[.,]\d)\s?(?:c|¢)\s?/\s?L", re.I)
+_ANY_FIGURE = re.compile(r"(?<![\d.,])(\d{1,4}\.\d{2})(?!\d)")
+_RECEIPT_STAMP = re.compile(r"(?<!\d)(\d{1,2}/\d{1,2}/(?:\d{4}|\d{2}))\s+(\d{1,2})[:\-](\d{2})(?!\d)"
+                            r"|(?<!\d)(\d{1,2}):(\d{2})(?::\d{2})?\s+(\d{1,2}/\d{1,2}/(?:\d{4}|\d{2}))(?!\d)")
+# Other ways to read a scan, tried in turn until the pump's line adds up: (dots per inch, tesseract page layout).
+_REREADS = ((350, 6), (200, 4), (400, 6))
+
+
+def fuel_figures(text):
+    """-> (litres, price per litre in dollars) from a pump's line, or None. Only figures that multiply out to
+    an amount printed somewhere in `text` (within 2 cents) are believed: a misread digit gives no answer."""
+    printed = {Decimal(f) for f in _ANY_FIGURE.findall(text.replace(",", "."))}
+    for pattern, scale in ((_PUMP_LINE, 1), (_PUMP_LINE_CENTS, 100)):
+        for m in pattern.finditer(text):
+            litres = Decimal(m.group(1).replace(",", "."))
+            price = Decimal(m.group(2).replace(",", ".").replace(" ", "").replace("B", "8")) / scale
+            cost = litres * price
+            if cost >= 1 and any(abs(cost - figure) <= Decimal("0.02") for figure in printed):
+                return litres.quantize(Decimal("0.01")), price.quantize(Decimal("0.001"))
+    return None
+
+
+def _fuel_brand(text):
+    head = "\n".join([line for line in text.splitlines() if line.strip()][:6])
+    return next((b for b in FUEL_BRANDS if re.search(r"(?<![\w-])" + re.escape(b) + r"(?![\w-])", head, re.I)), None)
+
+
+def _is_fuel_receipt(text):
+    """A service station's receipt: a pump number with a grade or a brand, or a grade from a known brand.
+    A grade or "5.00L" alone isn't one: a service invoice names those too."""
+    brand, grade, pump = _fuel_brand(text), _GRADE.search(text), _PUMP.search(text)
+    return bool((pump and (grade or brand)) or (grade and brand))
+
+
+# A station's street, suburb, state and postcode, as a till's heading or its card slip prints them.
+_STATES = "QLD|OLD|NSW|VIC|SA|WA|TAS|NT|ACT"              # OCR reads QLD as OLD
+_STREET = re.compile(r"(?<![\w/.-])(\d{1,5}[A-Za-z]?(?:[-/]\d{1,5})?[ \t]+(?:[A-Z][A-Za-z'\-]{1,20}[ \t]+){1,4}?"
+                     r"(?:Road|Rd|Street|St|Avenue|Ave|Highway|Hwy|Drive|Dr|Parade|Pde|Terrace|Tce|Boulevard|Blvd|Way|Lane|Court|Ct"
+                     r"|Place|Pl|Crescent|Cres|Esplanade|Circuit|Motorway)\b)", re.I)
+_SUBURB = r"([A-Za-z][A-Za-z']+(?:[ \t][A-Za-z][A-Za-z']+){0,3}?)"
+_SUBURB_STATE = re.compile(rf"^\W*{_SUBURB},?[ \t]+({_STATES})(?:[ \t]+(\d{{4}}))?\W*$", re.M | re.I)
+_SAME_LINE = re.compile(rf"^[ \t]*,[ \t]*{_SUBURB},?[ \t]+({_STATES})\b(?:[ \t]+(\d{{4}}))?", re.I)
+# "10000 Exampleton  PH: 07 0000 0000": a store number, the suburb, then the phone.
+_BEFORE_PHONE = re.compile(rf"^\W*(?:\d{{3,6}}[ \t|]+)?{_SUBURB}[ \t]+(?:PH|Phone|Tel)\b", re.M | re.I)
+_HEADING_LINES = 10
+_NEW_READING = "\x1e"                                     # between one reading of a scan and the next
+_ADDRESS_SIGN = re.compile(r"\bP[Hhi]:")
+
+
+def station_queries(text):
+    """The fuel station's address as lookups to try, best first ("12 Example Road, Suburb, QLD 4000"), from
+    one or more readings of its receipt. Only for a fuel receipt, only a street from its heading, and only with
+    a suburb: a street's name alone could be anywhere. [] otherwise."""
+    if not _is_fuel_receipt(text):
+        return []
+    streets, places = {}, {}                  # value -> [how often read, how it was read: lower is surer]
+
+    def note(found, value, rank):
+        seen = found.setdefault(value.lower(), [0, rank, value])
+        seen[0] += 1
+        seen[1] = min(seen[1], rank)
+
+    # Each reading has its own heading: its first few lines.
+    for line in (line for reading in text.split(_NEW_READING)
+                 for line in [x for x in reading.splitlines() if x.strip()][:_HEADING_LINES]):
+        m = _STREET.search(line)
+        if m:
+            same = _SAME_LINE.match(line[m.end():])
+            street = " ".join(m.group(1).split())
+            note(streets, street, 0)
+            if same:
+                note(places, _place(*same.groups()), 0)
+    for m in _SUBURB_STATE.finditer(text):
+        note(places, _place(*m.groups()), 1)
+    states = [_place("", s, None).strip(", ") for _, s, _ in (m.groups() for m in _SUBURB_STATE.finditer(text))]
+    for m in _BEFORE_PHONE.finditer(text):
+        note(places, ", ".join([_title(m.group(1)), *states[:1]]), 2)
+    best = lambda found: [v[2] for v in sorted(found.values(), key=lambda v: (-v[0], v[1]))]  # noqa: E731 - used twice, right here
+    pairs = sorted(((i + j, i, f"{street}, {place}") for i, street in enumerate(best(streets))
+                    for j, place in enumerate(best(places))))
+    return [query for _, _, query in pairs]
+
+
+def _title(suburb):
+    return " ".join(w.capitalize() for w in suburb.split())
+
+
+def _place(suburb, state, postcode):
+    state = "QLD" if state.upper() == "OLD" else state.upper()
+    return f"{_title(suburb)}, {state}" + (f" {postcode}" if postcode else "")
+
+
+def reread_fuel(pdf, text):
+    """More OCR text for a fuel receipt whose pump line or station address couldn't be made out of `text`:
+    other readings of the scan, until the litres and price add up and there is an address. '' for any other
+    document, and when there is nothing to add. Only fuel_figures and station_queries read it: the amount, date
+    and the rest stay as the first reading had them."""
+    def done(read):
+        # An address is only worth reading again for when the receipt shows signs of having one.
+        sought = _ADDRESS_SIGN.search(read) or _STREET.search(read) or _SUBURB_STATE.search(read)
+        return fuel_figures(read) and (station_queries(read) or not sought)
+
+    if not _is_fuel_receipt(text) or done(text):
+        return ""
+    extra = ""
+    for dpi, psm in _REREADS:
+        extra += _NEW_READING + _ocr(pdf, dpi, psm)
+        if done(text + extra):
+            break
+    return extra
+
+
+def _receipt_stamp(text):
+    """-> (date, "HH:MM") of the first date printed beside a time, as a till prints them; (None, None)."""
+    for m in _RECEIPT_STAMP.finditer(text):
+        day, hour, minute = (m.group(1), m.group(2), m.group(3)) if m.group(1) else (m.group(6), m.group(4), m.group(5))
+        when = _parse_date(day)
+        # "05/03/26" also parses as the year 26 with %Y, so a year this century is asked for.
+        if when and when.year >= 2000 and int(hour) < 24 and int(minute) < 60:
+            return when, f"{int(hour):02d}:{minute}"
+    return None, None
+
+
+def propose(folder, name, text, categories, learned=None, multi_amount=None, fuel_category=None, fuel_text=""):
     """-> {date, category, vendor, amount, odometer_km, missing}. `missing` names the
-    required fields (date, category, amount) that couldn't be worked out. `learned` is
+    required fields (date, category, amount) that couldn't be worked out. A fuel receipt also gives time,
+    litres and unit_price, and is put in `fuel_category` (the category that records litres); `fuel_text` is
+    reread_fuel's extra readings of it. `learned` is
     {"labels": {field: {label}}, "vendors": {vendor lower-case: category}}: what the
     owner's earlier corrections taught (see db.learned)."""
     labels = (learned or {}).get("labels", {})
@@ -628,11 +775,15 @@ def propose(folder, name, text, categories, learned=None, multi_amount=None):
 
     # The PDF is trusted over its file name (which is often arbitrary); the name is the fallback.
     # Date: a label the owner taught, then the built-in text rules, then the file name.
+    fuel_receipt = _is_fuel_receipt(text)
+    stamp, at = _receipt_stamp(text) if fuel_receipt else (None, None)
+    figures = fuel_figures(text + "\n" + fuel_text) if fuel_receipt else None
+
     kind, value = learned_value("date")
     if kind != "none":
         when = value                       # a learned label that finds several dates leaves it blank
     else:
-        when = _date_from_text(text) or _date_from_filename(name)
+        when = stamp or _date_from_text(text) or _date_from_filename(name)
 
     kind, amount = learned_value("amount")
     if kind == "none":
@@ -647,13 +798,15 @@ def propose(folder, name, text, categories, learned=None, multi_amount=None):
 
     # Vendor: the PDF's trading name or company; the file name's "Category - Vendor" only as a fallback.
     named = _category_in(name, categories)
-    vendor = _vendor_from_text(text)
+    # A service station is known by its brand, not the company that runs it.
+    vendor = (_fuel_brand(text) if fuel_receipt else None) or _vendor_from_text(text)
     # Category: the vendor the owner has taught, then the folder they filed it in, then what the PDF
     # keeps naming, and only then the file name.
     category = vendors.get(vendor.lower()) if vendor else None
     if category not in categories:
         category = None
-    category = (category or _category_in(folder, categories) or _category_from_text(text, categories) or named)
+    category = (category or (fuel_category if fuel_receipt and fuel_category in categories else None)
+                or _category_in(folder, categories) or _category_from_text(text, categories) or named)
     # The file name's vendor is a last resort, and only while the file name isn't contradicted by the PDF.
     if vendor is None and named and category == named:
         vendor = _filename_vendor(name, named)
@@ -664,7 +817,9 @@ def propose(folder, name, text, categories, learned=None, multi_amount=None):
     start, end = _period(text, category, multi_amount or "max")
     gst = _gst_stated(text, amount, multi_amount or "max") if registration else None
     card_ref, biller, bpay_ref = _payment_references(text, multi_amount or "max") if registration else (None, None, None)
-    out = {"date": when, "category": category, "vendor": vendor, "amount": amount, "odometer_km": odometer,
+    out = {"time": at if when == stamp else None,
+           "litres": figures[0] if figures else None, "unit_price": figures[1] if figures else None,
+           "date": when, "category": category, "vendor": vendor, "amount": amount, "odometer_km": odometer,
            "car_details": _car_details(text),
            "gst_amount": gst, "card_payment_ref": card_ref, "bpay_biller_code": biller, "bpay_ref": bpay_ref,
            "period_start": start, "period_end": end, "notes": _notes(text, category, multi_amount or "max"),

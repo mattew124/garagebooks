@@ -28,7 +28,7 @@ from psycopg import errors as pg_errors
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from . import acar, ato, claims as claim_lib, dashboard, db, docinfo, icons, invoices, jobs, jobtext, lease, leaseform, logs, notices, notify, onedrive, outlook, reminders, sources, storage, tax, updates, validation
+from . import acar, ato, claims as claim_lib, dashboard, db, docinfo, drivestore, fuel, geocode, icons, invoices, jobs, jobtext, lease, leaseform, logs, notices, notify, onedrive, outlook, reminders, sources, storage, tax, updates, validation
 
 log = logging.getLogger("garagebooks.app")
 
@@ -243,8 +243,13 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                     pace = db.any_estimated_km(conn)
             except Exception:           # noqa: BLE001 - no database yet: the panel is left out until a lease has an estimate
                 pace = False
+            try:
+                with connect() as conn:
+                    fuel_used = db.any_fuel(conn)
+            except Exception:           # noqa: BLE001 - no database yet: the Fuel dashboard waits until a car uses fuel
+                fuel_used = False
             wrote = dashboard.export(dashboard_dir, tz, os.environ.get("BASE_PATH", "").rstrip("/"), start=start,
-                                     teslamate=known["teslamate"], sold=sold, pace=pace, after_tax=after_tax)
+                                     teslamate=known["teslamate"], sold=sold, pace=pace, after_tax=after_tax, fuel=fuel_used)
             log.info("Grafana dashboard %s in %s", "written" if wrote else "already up to date", dashboard_dir)
         except OSError as exc:
             log.warning("Could not write the Grafana dashboard to %s: %s", dashboard_dir, exc)
@@ -267,6 +272,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         log.warning("ONEDRIVE_TOKEN_KEY was renamed GARAGEBOOKS_ENCRYPTION_KEY; OneDrive stays off until it is set.")
     # The mailbox uses OneDrive's app registration and encryption key, with a sign-in of its own.
     mailbox = outlook.Mailbox(drive) if drive else None
+    # The OneDrive folder listing kept in the database, which browsing reads (access_token is defined below).
+    drive_folders = drivestore.DriveStore(connect, drive, lambda: access_token()) if drive else None  # noqa: PLW0108
     # INVOICES_DIR turns on keeping invoices in a folder on the server: a host folder (a NAS share,
     # say) mounted into the container. The app serves those PDFs itself, at /invoice/<id>.
     local = None
@@ -302,6 +309,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
     update_check = updates.UpdateCheck(version, fetch=release_fetch,
                                        enabled=os.environ.get("UPDATE_CHECK", "1").strip() != "0")
     app.extensions["update_check"] = update_check
+    stations = geocode.Lookup(version, enabled=os.environ.get("ADDRESS_LOOKUP", "1").strip() != "0")
     # CLAIMS_CONNECTOR_URL turns on claiming an expense from the salary packaging provider, through a
     # separate service that knows how to talk to it (docs/claims-connector.md). Unset, nothing shows.
     connector = claim_lib.from_env()
@@ -327,6 +335,17 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
     scheduler.add("ato_rates", timedelta(days=7), lambda conn: tax.refresh(conn, ato_fetch or ato.get, datetime.now(timezone.utc)),
                   "Reads the income tax brackets and the home charging rate for an electric car from the ATO's pages. If a page "
                   "can't be read or has changed, the rates already kept stay as they are.")
+    def sync_drive_listing(conn):
+        if drive_folders is None or not drive_folders.connected(conn):
+            return "no OneDrive connected"
+        try:
+            return drive_folders.sync()
+        except (onedrive.OneDriveError, onedrive.NotConnected) as exc:
+            raise jobs.JobError(exc.user_message) from None
+
+    scheduler.add("onedrive_folders", timedelta(hours=1), sync_drive_listing,
+                  "Keeps the app's listing of your OneDrive folders and PDFs up to date, so browsing them doesn't wait "
+                  "for Microsoft. The first listing of a large drive takes a few minutes.")
     send_notice = notify_send or notify.send
 
     def notifications(conn):
@@ -638,7 +657,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
     def store_for(kind):
         """The storage of that kind, or None when this installation doesn't have it."""
         if kind == "onedrive" and drive is not None:
-            return storage.OneDriveStore(drive, access_token)
+            return storage.OneDriveStore(drive, access_token, drive_folders)
         if kind == "mail" and mailbox is not None:
             return storage.MailStore(mailbox, lambda: access_token(mail=True))
         return local if kind == "local" else None
@@ -784,7 +803,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 "item_wheels": wheels_from(form.getlist, "service_item", items), **{k: form.get(k, "") for k in (
             "car_id", "category_id", "date", "time", "amount", "odometer_km",
             "vendor", "notes", "invoice_url", "invoice_path", "packaged", "period_start", "period_end", "gst_amount",
-        "card_payment_ref", "bpay_biller_code", "bpay_ref")}}
+        "card_payment_ref", "bpay_biller_code", "bpay_ref", "litres", "unit_price", "partial", "missed", "location")}}
 
     # ---- routes ---------------------------------------------------------------
 
@@ -1003,6 +1022,10 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             "gst_amount": "" if row["gst_amount"] is None else f"{row['gst_amount']:.2f}",
             "card_payment_ref": row["card_payment_ref"] or "", "bpay_biller_code": row["bpay_biller_code"] or "",
             "bpay_ref": row["bpay_ref"] or "",
+            "litres": "" if row["litres"] is None else f"{row['litres']:.2f}",
+            "unit_price": "" if row["unit_price"] is None else f"{row['unit_price']:.3f}",
+            "location": "" if row["latitude"] is None else f"{row['latitude']:.6f}, {row['longitude']:.6f}",
+            "partial": "" if row["full_tank"] else "1", "missed": "1" if row["missed_fill"] else "",
         }
         with connect() as conn:
             offer = bool(db.stored_open_reminders(conn, row["car_id"]))
@@ -1100,7 +1123,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         per_wheel = {i["id"]: i["per_wheel"] for i in service_rows}
         wheel_changes = {}
         for cid in (i for i in posted_ids("category_id") if i in cats):
-            typed = {"gst_free": form.get(f"gst_partial_{cid}") == "1", "has_period": form.get(f"has_period_{cid}") == "1"}
+            typed = {"gst_free": form.get(f"gst_partial_{cid}") == "1", "has_period": form.get(f"has_period_{cid}") == "1",
+                     "has_litres": form.get(f"has_litres_{cid}") == "1"}
             if f"upload_folder_{cid}" in form:
                 typed["upload_folder"] = form[f"upload_folder_{cid}"]
             if f"budget_pool_{cid}" in form:
@@ -2235,9 +2259,11 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         "expense": (("car_id", "Car"), ("category_id", "Category"), ("occurred_at", "Date and time"),
                     ("amount", "Amount"), ("odometer_km", "Odometer"), ("wheels", "Wheels"), ("vendor", "Vendor"), ("notes", "Notes"),
                     ("invoice_url", "Invoice link"), ("invoice_path", "Invoice file"), ("packaged", "Paid from"),
-                    ("period_start", "Period start"), ("period_end", "Period end"), ("gst_amount", "GST")),
+                    ("period_start", "Period start"), ("period_end", "Period end"), ("gst_amount", "GST"),
+                    ("litres", "Litres"), ("unit_price", "Price per litre"), ("latitude", "Latitude"), ("longitude", "Longitude"), ("full_tank", "Filled the tank"), ("missed_fill", "Missed a fuel-up")),
         "category": (("name", "Name"), ("kind", "Kind"), ("sort_order", "Sort order"),
-                     ("upload_folder", "Invoice subfolder"), ("gst_free", "GST only partly applies"), ("has_period", "Has a period")),
+                     ("upload_folder", "Invoice subfolder"), ("gst_free", "GST only partly applies"), ("has_period", "Has a period"),
+                     ("has_litres", "Records litres")),
         "expense_claim": (("provider", "Provider"), ("reference", "Reference"), ("status", "Status"),
                           ("amount", "Amount"), ("gst", "GST"), ("approved_amount", "Approved amount"),
                           ("paid_date", "Paid on")),
@@ -2247,7 +2273,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         def show(field, value):
             if field == "packaged":
                 return {None: "Automatic", True: "The package", False: "Personally"}.get(value, str(value))
-            if field == "gst_free":
+            if field in ("gst_free", "full_tank", "missed_fill", "has_litres"):
                 return "Yes" if value else "No"
             if value is None or value == "":
                 return "—"
@@ -2266,17 +2292,20 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                     return str(value)
             return str(value)
 
+        quiet = {"full_tank": True, "missed_fill": False, "has_litres": False}      # not worth a line when added
         out = []
         for e in entries:
             before, after = e["before_row"] or {}, e["after_row"] or {}
             row = after or before
             fields = history_fields[e["table_name"]]
             if e["operation"] == "update":
-                changed = [(label, show(f, before.get(f)), show(f, after.get(f)))
-                           for f, label in fields if before.get(f) != after.get(f)]
+                # A row logged before a column existed has no value for it: that is the column's default.
+                changed = [(label, show(f, before.get(f, quiet.get(f))), show(f, after.get(f, quiet.get(f))))
+                           for f, label in fields if before.get(f, quiet.get(f)) != after.get(f, quiet.get(f))]
             else:
                 changed = [(label, None, show(f, row.get(f))) for f, label in fields
-                           if row.get(f) not in (None, "") and not (f == "gst_free" and row.get(f) is False)]
+                           if row.get(f) not in (None, "") and not (f == "gst_free" and row.get(f) is False)
+                           and not (f in quiet and row.get(f) == quiet[f])]
             if e["table_name"] == "expense":
                 title = "Expense: " + " · ".join(
                     x for x in (category_names.get(row.get("category_id")), car_names.get(row.get("car_id")),
@@ -2406,6 +2435,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             return render_storage(errors, 400)
         with connect() as conn:
             # A new registration can't use the old one's sign-in.
+            drivestore.wipe(conn)
             db.save_onedrive_account(conn, client_secret=drive.encrypt(secret), refresh_token=None,
                                      account=None, auth_state=None, auth_expires_at=None,
                                      signin_lost_at=None, signin_checked_at=None, mail_refresh_token=None,
@@ -2485,7 +2515,10 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         with connect() as conn:
             db.save_onedrive_account(conn, **{f"{p}refresh_token": drive.encrypt(tokens["refresh_token"]),
                                               f"{p}account": name, f"{p}signin_lost_at": None,
-                                              f"{p}signin_checked_at": None})
+                                              f"{p}signin_checked_at": None,
+                                              **({} if mail else {"signed_in_at": datetime.now(timezone.utc)})})
+            if not mail:
+                drivestore.wipe(conn)
         log.info("%s connected", what)
         resp = redirect(url_for("storage_page", msg="mail_connected" if mail else "connected"), 303)
         resp.delete_cookie(STATE_COOKIE, path=request.script_root or "/")
@@ -2496,6 +2529,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         need_drive()
         with connect() as conn:
             db.save_onedrive_account(conn, refresh_token=None, account=None, signin_lost_at=None, signin_checked_at=None)
+            drivestore.wipe(conn)
         log.info("OneDrive disconnected")
         return redirect(url_for("storage_page", msg="disconnected"), 303)
 
@@ -2634,8 +2668,10 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
     def render_browse(store, car, folder_id, error=None, status=200):
         kind = store.kind
         try:
-            here = store.folder(folder_id)
-            children = store.subfolders(folder_id)
+            if kind == "mail":
+                here, children = store.folder(folder_id), store.subfolders(folder_id)
+            else:       # no ?folder: browsing has just started, so see what has changed
+                here, children, _ = store.browse(folder_id, fresh=folder_id is None)
         except onedrive.NotConnected:
             return redirect(url_for("storage_page"), 303)
         except onedrive.SignInExpired as exc:
@@ -2917,6 +2953,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             except (ValueError, storage.StorageError) as exc:
                 said = exc.user_message if isinstance(exc, storage.StorageError) else str(exc)   # or the name's ValueError
                 return render_browse(store, car, parent_id, error=said, status=400)
+            if kind == "onedrive":
+                drive_folders.add_folder(created)
             return redirect(url_for(f"{kind}_browse", car_id=car_id, folder=created["id"]), 303)
 
         if kind != "mail":      # the mailbox is only read (Mail.Read can't make a folder)
@@ -3278,7 +3316,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 return jsonify(error=info["choose_first"], url=url_for(page)), 409
             folder_id = None if wanted == "root" else (wanted or folder["folder_id"])
             try:
-                here, folders, files = store.contents(folder_id)
+                here, folders, files = store.browse(folder_id, fresh=not wanted)
             except onedrive.SignInExpired as exc:
                 return jsonify(error=exc.user_message, url=url_for(page)), 409
             except storage.StorageError as exc:
@@ -3841,8 +3879,23 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             categories = db.categories(conn)
             learned = db.learned(conn, invoices.LEARN_AFTER)
             multi_amount = db.get_settings(conn)["multi_amount"]
-        guess = invoices.propose("", filename, invoices.extract_text(pdf), [c["name"] for c in categories], learned,
-                                 multi_amount)
+        text = invoices.extract_text(pdf)
+        again = invoices.reread_fuel(pdf, text)
+        guess = invoices.propose("", filename, text, [c["name"] for c in categories], learned, multi_amount,
+                                 fuel_category=next((c["name"] for c in categories if c["has_litres"]), None),
+                                 fuel_text=again)
+        # A fuel receipt says where it was bought: its station's address, looked up for the heat map.
+        location, location_note = None, None
+        if guess["time"] or guess["litres"] is not None:
+            place = stations.find(invoices.station_queries(text + again))
+            if place:
+                location = place["location"]
+                location_note = (f"Looked up from the receipt's address, {place['query']}"
+                                 f"{'' if place['exact'] else ' (the street, not the exact spot)'}. "
+                                 "Map data © OpenStreetMap contributors.")
+            else:
+                location_note = ("The receipt's address wasn't looked up or found. At the pump, press Use my location; "
+                                 "otherwise paste the coordinates.")
         have, missing = docinfo.found(guess)
         log.debug("prefill file=%s bytes=%d sha256=%s found=%s missing=%s ms=%d", docinfo.quote(filename), len(pdf),
                   docinfo.sha12(pdf), have, missing, timer.ms)
@@ -3856,7 +3909,10 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             date=guess["date"].isoformat() if guess["date"] else None,
             category_id=by_name.get(guess["category"]), vendor=guess["vendor"],
             amount=f"{guess['amount']:.2f}" if guess["amount"] is not None else None,
-            odometer_km=guess["odometer_km"], notes=guess["notes"] or None,
+            odometer_km=guess["odometer_km"], notes=guess["notes"] or None, time=guess["time"],
+            location=location, location_note=location_note,
+            litres=None if guess["litres"] is None else f"{guess['litres']:.2f}",
+            unit_price=None if guess["unit_price"] is None else f"{guess['unit_price']:.3f}",
             gst_amount=f"{guess['gst_amount']:.2f}" if guess["gst_amount"] is not None else None,
             card_payment_ref=guess["card_payment_ref"], bpay_biller_code=guess["bpay_biller_code"],
             bpay_ref=guess["bpay_ref"],
@@ -3876,6 +3932,36 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             return jsonify(error=str(exc)), 400
         with connect() as conn:
             return jsonify(matches=dup_view(db.find_duplicates(conn, car_id, when, amount)))
+
+    @app.get("/api/fuel")
+    def api_fuel():
+        """What a fill-up would show once saved, for the form to display while it is being filled in: the distance
+        since the last fuel-up, then L/100 km of the tank. The same view the list reads, run on the fill-up and
+        undone (see db.fuel_preview), so the two can't disagree. Nothing is saved."""
+        with connect() as conn:
+            car_ids = {c["id"] for c in db.cars(conn)}
+            cat_ids = {c["id"] for c in db.categories(conn)}
+        args = request.args.to_dict()
+        args["amount"] = args.get("amount") or "0"
+        try:
+            validation.parse_amount(args["amount"])
+        except ValueError:
+            args["amount"] = "0"       # still being typed: the distance can be shown without it
+        values, errors = validation.parse_expense_form(args, tz, car_ids, cat_ids)
+        if errors:      # a fixed message: the form says what is wrong with each field when it is saved
+            return jsonify(error="Check the car, category, date, time, odometer, litres and price per litre."), 400
+        expense_id = request.args.get("expense_id", type=int)
+        with connect() as conn:
+            row = db.fuel_preview(conn, values, expense_id)
+        if row is None:
+            return jsonify(error="No such expense."), 404
+        row = {**row, "litres": values.get("litres"), "odometer_km": values.get("odometer_km")}
+        figure = row["l_per_100km"] if values.get("litres") is not None else None
+        return jsonify(
+            distance_km=None if row["distance_km"] is None else float(row["distance_km"]),
+            l_per_100km=None if figure is None else float(figure),
+            lines=([f"{values['litres']:,.2f} L, worked out from the amount and the price per litre. After a "
+                    "discount, enter the litres instead."] if values["litres_worked_out"] else []) + fuel.describe(row))
 
     @app.get("/api/odometer")
     def api_odometer():

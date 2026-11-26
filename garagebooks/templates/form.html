@@ -181,6 +181,29 @@
   </label>
   {% endif %}
 
+  {# Fuel: litres and price before the odometer, what they say (and where it was) after it. app.js shows both for
+     a category that records litres, and asks /api/fuel for the distance since the last fuel-up and L/100 km. #}
+  {% set litres_on = (categories|selectattr('id', 'equalto', values.get('category_id', 0)|int(0))|selectattr('has_litres')|list) or values.litres or values.unit_price or values.location or errors.get('litres') or errors.get('unit_price') or errors.get('location') %}
+  <div class="stack" id="litres-fields" data-fuel-url="{{ url_for('api_fuel') }}" {{ '' if litres_on else 'hidden' }}>
+    <div class="row">
+      <label>Litres
+        <span class="affix">
+          <input name="litres" inputmode="decimal" autocomplete="off" value="{{ values.litres }}">
+          <span>L</span></span>{{ err('litres') }}
+      </label>
+      <label><span>$/L <small>(optional)</small></span>
+        <span class="affix"><span>$</span>
+          <input name="unit_price" inputmode="decimal" autocomplete="off" value="{{ values.unit_price }}">
+          <span>/L</span></span>{{ err('unit_price') }}
+      </label>
+    </div>
+    <small>The price is the pump's, before any discount. Leave the litres blank to work them out from the amount and the price.</small>
+    <label class="inline"><input type="checkbox" name="partial" value="1" {{ 'checked' if values.partial }}>
+      <span>Partial fill <small>(the tank wasn't filled up)</small></span></label>
+    <label class="inline"><input type="checkbox" name="missed" value="1" {{ 'checked' if values.missed }}>
+      <span>I missed recording a fuel-up since the last one <small>(the distance is still shown, but not L/100 km)</small></span></label>
+  </div>
+
   <label>Odometer
     <span class="affix">
       <input name="odometer_km" inputmode="decimal" autocomplete="off" value="{{ values.odometer_km }}">
@@ -188,6 +211,16 @@
     <small>{% if teslamate_cars %}<button type="button" id="fill-odometer" class="linklike"{{ '' if values.get('car_id', 0)|int(0) in teslamate_cars else ' hidden' }}>Fill from TeslaMate</button>
       {% endif %}<span id="odometer-hint"></span></small>
   </label>
+
+  <div class="stack" id="fuel-after" {{ '' if litres_on else 'hidden' }}>
+    <p id="fuel-summary" class="fuel-summary" role="status"></p>
+    <label>Fuel station location <small>(optional)</small>
+      <input name="location" autocomplete="off" placeholder="latitude, longitude" value="{{ values.location }}">{{ err('location') }}
+      <small><button type="button" id="use-location" class="linklike" hidden>Use my location</button>
+        <span id="location-hint" role="status"></span>
+        A receipt's address is looked up for you. Otherwise use your location at the pump, or paste coordinates from a map app. It's drawn on the Fuel dashboard's heat map.</small>
+    </label>
+  </div>
 
   <label>Vendor / shop <input name="vendor" maxlength="500" value="{{ values.vendor }}">{{ err('vendor') }}</label>
 
