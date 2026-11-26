@@ -6,8 +6,11 @@
   root.classList.add("js");   // the header's menu button and Settings dropdown only exist with scripting
   var saved = null;
   try { saved = localStorage.getItem("expenses-view"); } catch (e) { /* private mode */ }
-  root.dataset.view = saved === "rows" || saved === "tiles" ? saved
-    : (matchMedia("(max-width: 40rem)").matches ? "tiles" : "rows");
+  var phone = matchMedia("(max-width: 40rem)").matches;
+  root.dataset.view = saved === "rows" || saved === "tiles" ? saved : (phone ? "tiles" : "rows");
+  // A page of forms (the imports) has no Rows/Tiles choice, and on a phone is always cards, whatever was chosen
+  // for the expense list. The saved choice is left as it is.
+  if (phone && root.hasAttribute("data-cards-on-phones")) root.dataset.view = "tiles";
 
   // Column widths for the rows layout, in pixels by column: {date: 120, cat: 160, ...}, or nothing for
   // the built-in ones. They go into custom properties that style.css reads (set through the CSSOM,

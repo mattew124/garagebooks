@@ -528,6 +528,165 @@ def test_form(page):
     assert page.locator("select[name=category_id] option").count() >= 7      # the standard categories
 
 
+ACAR_CSV = (
+    '\ufeffMetadata\n"Date Format","Time Format"\n"d/M/yyyy","HH:mm"\n\n\nVehicles\n"Name","Make","Model","Year"\n'
+    '"Example","Example","Hatch","2020"\n\n\nFill-Up Records\n'
+    '"Vehicle","Date","Time","Odometer Reading","Distance Unit","Volume","Volume Unit","Price per Unit","Total Cost",'
+    '"Partial Fill-Up?"\n"Example","1/3/2026","08:00","19,400","km","40.000","L","$2.000","$80.00","Yes"\n\n\nEvent Records\n'
+    '"Vehicle","Date","Time","Odometer Reading","Distance Unit","Type","Sub Types","Total Cost","Payment","Place Name","Notes"\n'
+    '"Example","19/2/2026","14:10","19,281","km","Service","Engine Oil, Inspection","$429.30","","Example Garage",""\n'
+    '"Example","1/6/2026","23:59","20,500","km","Sold","","$2,500.00","","",""\n')
+
+
+def test_wheel_ticks(page):
+    """Which wheels: offered only under a ticked per-wheel item, or for Tyres. Nothing is saved."""
+    page.goto(UI + "new")
+    tyres = page.locator("form [data-wheels-field]")
+    page.select_option("select[name=category_id]", label="Tyres")
+    expect(tyres).to_be_visible()
+    page.select_option("select[name=category_id]", label="Service")
+    expect(tyres).to_be_hidden()
+    item = page.locator("#service-fields .service-item", has_text="Brakes").first
+    ticks = item.locator(".wheels")
+    expect(ticks).to_be_hidden()
+    item.get_by_label("Brakes", exact=True).check()
+    expect(ticks).to_be_visible()
+    ticks.get_by_title("Rear left").click()
+    expect(ticks.get_by_label("Rear left")).to_be_checked()
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+    shot(page, "wheel-ticks")
+
+
+def test_acar_import_layout(page):
+    """A car with many service items, on a phone that chose Rows for the expense list and on a desktop:
+    the ticks wrap, the form stays inside the screen, and on a phone each cost is a card whose fields
+    are as wide as it is. Nothing is saved."""
+    items = ", ".join(f"Example Part {n}" for n in range(1, 19))
+    csv = ACAR_CSV.replace('"Engine Oil, Inspection"', f'"{items}"')
+
+    def preview(tab):
+        tab.goto(UI + "import/acar")
+        tab.select_option("select[name=car_id]", value="new")
+        tab.set_input_files("input[name=file]", {"name": "aCar-records.csv", "mimeType": "text/csv", "buffer": csv.encode()})
+        tab.click("button[type=submit]")
+        expect(tab.locator("tr#row-0 [data-service-fields]")).to_be_visible()
+
+    def width(tab, selector):
+        return tab.locator(selector).first.bounding_box()["width"]
+
+    page.goto(UI)
+    saved = page.evaluate("localStorage.getItem('expenses-view')")
+    size = page.viewport_size
+    try:
+        page.evaluate("localStorage.setItem('expenses-view', 'rows')")
+        page.set_viewport_size({"width": 360, "height": 780})
+        preview(page)
+        shot(page, "acar-import-phone")
+        # The fill-up's litres, price and partial tick came across, and fit the card.
+        expect(tab_fuel := page.locator("tr#row-1 [data-fuel-fields]")).to_be_visible()
+        assert (page.input_value("input[name=litres_1]"), page.input_value("input[name=unit_price_1]")) == ("40.00", "2.000")
+        expect(page.locator("input[name=partial_1]")).to_be_checked()
+        assert tab_fuel.bounding_box()["width"] <= 360
+        # Another cost shows them only while its category records litres; a figure keeps them in view.
+        other = page.locator("tr#row-0 [data-fuel-fields]")
+        expect(other).to_be_hidden()
+        page.select_option("select[name=category_id_0]", label="Fuel")
+        expect(other).to_be_visible()
+        page.select_option("select[name=category_id_0]", label="Service")
+        expect(other).to_be_hidden()
+        page.select_option("select[name=category_id_1]", label="Tyres")
+        expect(tab_fuel).to_be_visible()
+        table = width(page, "table.import-table")
+        assert table <= 360, f"on a phone the table is {table}px wide"
+        for field in ("select[name=category_id_0]", "input[name=vendor_0]", "input[name=amount_0]", "tr#row-0 .file"):
+            assert width(page, field) <= 360, field
+        for field in ("select[name=category_id_0]", "input[name=vendor_0]", "tr#row-0 .file"):
+            assert width(page, field) >= 260, f"{field} is squeezed to {width(page, field)}px"
+        assert page.evaluate("localStorage.getItem('expenses-view')") == "rows"      # the list's choice is kept
+
+        page.set_viewport_size({"width": 1280, "height": 900})
+        preview(page)
+        shot(page, "acar-import-desktop")
+        table, wrap = width(page, "table.import-table"), width(page, ".import .table-wrap")
+        assert table <= wrap + 1, f"on a desktop the table is {table}px in {wrap}px"
+        assert width(page, "tr#row-0 .file") >= 120, "the What column is squeezed"
+    finally:
+        page.set_viewport_size(size)
+        page.evaluate("(v) => v === null ? localStorage.removeItem('expenses-view') : localStorage.setItem('expenses-view', v)", saved)
+
+
+def test_acar_import_preview(page):
+    """Upload an aCar CSV: the preview shows the costs and the sale, and nothing is saved."""
+    page.goto(UI + "import/acar")
+    page.select_option("select[name=car_id]", index=2)      # after "Choose a car…" and "Create a new car from this file"
+    # The file box works as the Add page's does: its hint appears, and a file dropped on it is the one chosen.
+    expect(page.locator("#acar-drop-hint")).to_have_text("You can also drop the CSV file onto this box.")
+    page.evaluate("""(csv) => {
+        const box = document.getElementById("acar-drop");
+        const data = new DataTransfer();
+        data.items.add(new File([csv], "aCar-records.csv", {type: "text/csv"}));
+        box.dispatchEvent(new DragEvent("drop", {dataTransfer: data, bubbles: true, cancelable: true}));
+    }""", ACAR_CSV)
+    assert page.evaluate("document.querySelector('input[name=file]').files[0].name") == "aCar-records.csv"
+    shot(page, "acar-upload")
+    page.click("button[type=submit]")
+    expect(page.locator("table.import-table tbody tr")).to_have_count(3)
+    assert "Sale of the car" in page.inner_text("table.import-table")
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+    shot(page, "acar-import")
+    # The service items sit under the category, not beside it, and what doesn't suit the car stays hidden.
+    cell = page.locator("tr#row-0 td[data-label=Category]")
+    under, above = cell.locator("[data-service-fields]").bounding_box(), cell.locator("select[name^=category_id_]").bounding_box()
+    assert under["y"] >= above["y"] + above["height"] and above["height"] < 60, (above, under)
+    assert page.evaluate("""[...document.querySelectorAll('.service-items label[hidden]')]
+        .every((label) => label.offsetParent === null)""")
+
+    # A category made from a row's own list: saved, chosen on that row and offered on the others, nothing lost.
+    # The two requests are answered here: the app can't delete a category, so this test must not make one
+    # (tests/test_acar_import.py covers the real ones).
+    def made(name, ident):
+        return {"id": ident, "name": name, "applies": "all", "period": False, "service": False, "gstfree": False, "purchase": False}
+    page.route("**/api/categories", lambda route: route.fulfill(status=201, json=made(MARKER + " category", 32001)))
+    page.route("**/api/import-lists", lambda route: route.fulfill(json={
+        "categories": [made(MARKER + " elsewhere", 32002)], "service_items": []}))
+    first = page.locator("table.import-table tbody tr").first
+    first.locator("input[name^=vendor_]").fill("Typed before adding")
+    first.locator("select[name^=category_id_]").select_option(value="__new__")
+    expect(page.locator("#category-dialog")).to_be_visible()
+    page.fill("#category-dialog input[name=name]", MARKER + " category")
+    page.click("#category-dialog button[type=submit]")
+    expect(page.locator("#category-dialog")).to_be_hidden()
+    expect(first.locator("select[name^=category_id_] option:checked")).to_have_text(MARKER + " category")
+    assert first.locator("input[name^=vendor_]").input_value() == "Typed before adding"
+    # One made elsewhere turns up when the page comes back into view.
+    page.evaluate("window.dispatchEvent(new Event('focus'))")
+    expect(first.locator("select[name^=category_id_] option", has_text=MARKER + " elsewhere")).to_have_count(1)
+
+    # A wrong row: the page comes back at the list of errors, whose link goes to the row. Nothing is saved.
+    first.locator("input[name^=include_]").check()
+    first.locator("input[name^=amount_]").fill("abc")
+    page.get_by_role("button", name=re.compile("^Import")).click()
+    expect(page.locator("#error-summary")).to_be_focused()
+    shot(page, "acar-errors")
+    page.locator("#error-summary a").first.click()
+    expect(page.locator("tr#row-0")).to_be_in_viewport()
+
+    page.unroute("**/api/categories")
+    page.unroute("**/api/import-lists")
+
+    page.goto(UI + "import/acar")                     # and again, making the car from the file
+    page.select_option("select[name=car_id]", value="new")
+    page.set_input_files("input[name=file]", {"name": "aCar-records.csv", "mimeType": "text/csv", "buffer": ACAR_CSV.encode()})
+    page.click("button[type=submit]")
+    expect(page.locator("#new-car input[name=car_name]")).to_have_value("Example")
+    expect(page.locator("#new-car input[name=car_make]")).to_have_value("Example")
+    shot(page, "acar-import-new-car")
+    page.goto(UI)
+    assert page.locator("tbody tr", has_text="Example Garage").count() == 0
+    page.goto(UI + "cars")
+    assert page.locator(".car", has_text="Hatch").count() == 0      # previewing made no car
+
+
 def test_odometer_autofills(page):
     page.goto(UI + "new")
     expect(page.locator("#odometer-hint")).to_have_text("Filled from TeslaMate.")
@@ -2288,6 +2447,9 @@ def main():
         step("delete can be cancelled", test_delete_can_be_cancelled, page)
         step("amount field works out sums", test_amount_calculator, page)
         step("payment calculator works out the true cost", test_payment_calculator, page)
+        step("aCar import previews without saving", test_acar_import_preview, page)
+        step("aCar import fits a phone and a desktop", test_acar_import_layout, page)
+        step("wheel ticks show only where they apply", test_wheel_ticks, page)
         step("list: tiles or rows, sorting, and back to the same view", test_list_toggle_sort_and_return, page)
         step("rows on a phone show whole dates, categories and amounts", test_rows_on_a_phone_show_whole_values, page)
         step("no sideways scroll on a phone", test_phone_layout_has_no_sideways_scroll, page)

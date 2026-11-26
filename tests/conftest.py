@@ -180,6 +180,8 @@ def admin(pg):
             "SELECT garagebooks.build_ownership(true)",
             "DELETE FROM garagebooks.category WHERE sort_order = 100",
             "DELETE FROM garagebooks.service_item WHERE sort_order = 100",       # items a test added
+            "UPDATE garagebooks.service_item SET per_wheel = (lower(name) = 'brakes')",   # which ask for wheels, as seeded
+            "UPDATE garagebooks.category SET per_wheel = (name = 'Tyres')",
             # The history is append-only, even for us: lift the guard just to start each test empty.
             "ALTER TABLE garagebooks.change_log DISABLE TRIGGER USER",
             "TRUNCATE garagebooks.change_log RESTART IDENTITY",

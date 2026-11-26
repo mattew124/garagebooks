@@ -1,11 +1,14 @@
 {% extends "base.html" %}
 {% from "_provider.html" import mark, brand with context %}
+{% from "_error_summary.html" import summary %}
 {% block title %}Import invoices{% endblock %}
+{% block html_attrs %} data-cards-on-phones{% endblock %}
 {% block content %}
 <h1>{% if kind == 'onedrive' %}{{ mark() }} {% elif kind == 'mail' %}{{ brand('outlook') }} {% endif %}Import invoices for {{ 'a new car' if car.id == 0 else (car.name or ('Car ' ~ car.id)) }}</h1>
 {% if car.id == 0 %}<p>This folder has no car yet. The car is made from the purchase invoice you tick (its make, model, VIN, year and body
   type), or by hand if there isn't one, when you press Import, and the folder becomes its invoice folder.</p>{% endif %}
 {% if notice %}<p class="notice bad">{{ notice }}</p>{% endif %}
+{{ summary(error_list) }}
 {% if rows or scanning %}
 {% if kind == 'mail' %}
 <p>These emails are in {{ info.where }} but not yet in your expenses: each attached PDF is a row, and an
@@ -80,16 +83,7 @@
   </div>
 </dialog>
 {% endif %}
-<dialog id="service-dialog" aria-labelledby="service-dialog-title" class="picker" data-service-url="{{ url_for('api_service_items') }}">
-  <h2 id="service-dialog-title">Add a service item</h2>
-  <form id="service-dialog-form" class="stack">
-    <label>Name <input name="name" maxlength="60" required autocomplete="off" placeholder="e.g. Spark plugs"></label>
-    <p id="service-dialog-status" role="status"></p>
-    <div class="row"><button type="submit" class="button">Add</button>
-      <button type="button" id="service-dialog-cancel" class="secondary">Cancel</button></div>
-  </form>
-  <p><small>The item is added to the list on every row below. Nothing else on this page changes.</small></p>
-</dialog>
+{% include "_import_dialogs.html" %}
 {% if skipped %}
 <form method="post" action="{{ url_for(kind ~ '_import_unskip', car_id=car.id) }}"><p><small>{{ skipped }} skipped file{{ '' if skipped == 1 else 's' }} not shown.
   <button type="submit" class="linklike">Offer {{ 'it' if skipped == 1 else 'them' }} again</button></small></p></form>

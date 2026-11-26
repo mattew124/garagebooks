@@ -28,7 +28,7 @@
   {% set url = values.get(doc ~ '_url') %}{% set path = values.get(doc ~ '_path') %}
   <div class="field" data-lease-document="{{ doc }}">
     <label for="f-{{ doc }}_file">{{ label }}</label>
-    <div class="drop">
+    <div class="drop" data-drop-ext=".pdf">
       <input type="file" id="f-{{ doc }}_file" name="{{ doc }}_file" accept="application/pdf,.pdf"
         {% if errors.get(doc ~ '_file') %}aria-invalid="true" aria-describedby="e-{{ doc }}_file"{% endif %}>
       {% if storage_kind %}
@@ -37,6 +37,7 @@
           {% if storage_kind == 'onedrive' %}{{ mark() }} Choose from {{ storage.name }}{% else %}Choose from the invoice folder{% endif %}
         </button></span>
       {% endif %}
+      <small class="drop-hint" hidden>You can also drop the PDF onto this box.</small>
     </div>
     {% if errors.get(doc ~ '_file') %}<span class="error" id="e-{{ doc }}_file">{{ errors[doc ~ '_file'] }}</span>{% endif %}
     <small data-doc-hint>{{ hint }}</small>

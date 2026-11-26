@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% from "_error_summary.html" import summary %}
+{% block title %}Import from aCar{% endblock %}
+{% block html_attrs %} data-cards-on-phones{% endblock %}
+{% block content %}
+<h1>Import from aCar{% if vehicle %}: {{ vehicle }}{% endif %}</h1>
+{% if error %}<p class="notice bad" role="alert">{{ error }}</p>{% endif %}
+{{ summary(error_list) }}
+{% if new_car is not none and new_car %}
+<section class="card stack" id="new-car">
+  <h2>New car</h2>
+  <p><small>aCar's details for this vehicle. The car is made when you press Import, not before.</small></p>
+  <div class="row">
+    <label>Name <input form="import-form" name="car_name" maxlength="100" value="{{ new_car.name }}">
+      {% if car_errors.name %}<span class="error">{{ car_errors.name }}</span>{% endif %}</label>
+    <label>Type
+      <select name="car_kind" form="import-form">
+        {% for code, label in kinds.items() %}<option value="{{ code }}" {{ 'selected' if new_car.kind == code }}>{{ label }}</option>{% endfor %}
+      </select>
+      {% if car_errors.kind %}<span class="error">{{ car_errors.kind }}</span>{% endif %}</label>
+  </div>
+  <div class="row">
+    <label>Make <input form="import-form" name="car_make" maxlength="60" value="{{ new_car.make }}">
+      {% if car_errors.make %}<span class="error">{{ car_errors.make }}</span>{% endif %}</label>
+    <label>Model <input form="import-form" name="car_model" maxlength="60" value="{{ new_car.model }}">
+      {% if car_errors.model %}<span class="error">{{ car_errors.model }}</span>{% endif %}</label>
+  </div>
+  <div class="row">
+    <label>Model year <input form="import-form" name="car_model_year" inputmode="numeric" value="{{ new_car.model_year }}">
+      {% if car_errors.model_year %}<span class="error">{{ car_errors.model_year }}</span>{% endif %}</label>
+    <label>Year built <input form="import-form" name="car_build_year" inputmode="numeric" value="{{ new_car.build_year }}">
+      {% if car_errors.build_year %}<span class="error">{{ car_errors.build_year }}</span>{% endif %}</label>
+    <label>Body type <input form="import-form" name="car_body_type" value="{{ new_car.body_type }}">
+      {% if car_errors.body_type %}<span class="error">{{ car_errors.body_type }}</span>{% endif %}</label>
+  </div>
+  <label>VIN <input form="import-form" name="car_vin" maxlength="20" autocomplete="off" value="{{ new_car.vin }}">
+    {% if car_errors.vin %}<span class="error">{{ car_errors.vin }}</span>{% endif %}</label>
+</section>
+{% endif %}
+{% if rows %}
+<p>Date, vendor, amount and odometer come from aCar, and <strong>every cost has a category</strong>: the one of yours
+  it matches, or the catch-all for what matches none. A service has its service items ticked. Rows that look like an
+  expense you already have are flagged, or offered as a merge. Check them over; to make a category without leaving
+  this page, choose <em>New category…</em> in a row's list. Nothing is saved until you press Import.
+  {% if left_out %}Left out: {{ left_out }}.{% endif %}</p>
+{% if with_catchall %}<p class="notice" id="catchall-notice">You have no catch-all category, so costs that match none go in
+  <strong>Expenses</strong>, which is made when you press Import.</p>{% endif %}
+{% if new_items %}<p class="notice" id="new-items-notice"><strong>New service items</strong> ({{ new_items|length }}), made when you
+  press Import, for the rows you import: {{ new_items|join(', ') }}.</p>{% endif %}
+<form method="post" action="{{ url_for('acar_import_confirm') }}" class="import" id="import-form" data-car-kind="{{ car_kind }}">
+  <input type="hidden" name="count" value="{{ rows|length }}">
+  <input type="hidden" name="car_id" value="{{ car_id }}">
+  {% for name in new_items %}<input type="hidden" name="proposed_item" value="{{ name }}">{% endfor %}
+  {% if with_catchall %}<input type="hidden" name="proposed_catchall" value="1">{% endif %}
+  <div class="table-wrap">
+  <table class="import-table">
+    <thead><tr><th>Import</th><th>What</th><th>Date</th><th>Category</th><th>Vendor</th>
+      <th class="num">Amount</th><th class="num">Odometer (km)</th></tr></thead>
+    <tbody>
+    {% for r in rows %}{% set n = r.n %}{% include "_acar_row.html" %}{% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <div class="row">
+    <button type="submit" class="button">Import ticked</button>
+    <a href="{{ url_for('acar_import_page', car_id=car_id) }}">Cancel</a>
+  </div>
+</form>
+{% include "_import_dialogs.html" %}
+{% else %}
+<p class="empty">There are no costs in that file to import. <a href="{{ url_for('acar_import_page', car_id=car_id) }}">Back</a></p>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,24 @@
+{# Adding a category or a service item without leaving an import page, so nothing typed on it is lost. Both
+   import pages include this; app.js opens them from a row ("New category…" in its list, "Add an item…") and
+   reads the lists again when the page comes back into view, for ones made in another tab. #}
+<div id="import-lists" data-lists-url="{{ url_for('api_import_lists') }}" hidden></div>
+<dialog id="category-dialog" aria-labelledby="category-dialog-title" class="picker" data-category-url="{{ url_for('api_categories') }}">
+  <h2 id="category-dialog-title">Add a category</h2>
+  <form id="category-dialog-form" class="stack">
+    <label>Name <input name="name" maxlength="60" required autocomplete="off" placeholder="e.g. Accessories"></label>
+    <p id="category-dialog-status" role="status"></p>
+    <div class="row"><button type="submit" class="button">Add</button>
+      <button type="button" id="category-dialog-cancel" class="secondary">Cancel</button></div>
+  </form>
+  <p><small>It is saved now, added to every row's list and chosen on this row. Nothing else on this page changes.</small></p>
+</dialog>
+<dialog id="service-dialog" aria-labelledby="service-dialog-title" class="picker" data-service-url="{{ url_for('api_service_items') }}">
+  <h2 id="service-dialog-title">Add a service item</h2>
+  <form id="service-dialog-form" class="stack">
+    <label>Name <input name="name" maxlength="60" required autocomplete="off" placeholder="e.g. Spark plugs"></label>
+    <p id="service-dialog-status" role="status"></p>
+    <div class="row"><button type="submit" class="button">Add</button>
+      <button type="button" id="service-dialog-cancel" class="secondary">Cancel</button></div>
+  </form>
+  <p><small>The item is added to the list on every row below. Nothing else on this page changes.</small></p>
+</dialog>

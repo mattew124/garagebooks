@@ -2,8 +2,17 @@
    the car (car_kind; none: no car chosen yet) is offered; what an expense already has is shown even when it doesn't
    apply, so an expense saved before keeps it. app.js offers them again when the form's car changes. #}
 {% macro category_options(categories, selected, car_kind) %}
-{%- for c in categories %}{% set offered = applies(c.applies_to, car_kind or none) or c.id|string == selected|string %}<option value="{{ c.id }}" data-period="{{ 1 if c.has_period else 0 }}" data-service="{{ 1 if c.name == 'Service' else 0 }}" data-gstfree="{{ 1 if c.gst_free else 0 }}" data-payrefs="{{ 1 if c.budget_pool == 'registration' else 0 }}" data-purchase="{{ 1 if c.kind == 'purchase' else 0 }}" data-applies="{{ c.applies_to }}" data-litres="{{ 1 if c.has_litres else 0 }}" {{ 'selected' if c.id|string == selected|string }}{{ '' if offered else ' hidden disabled' }}>{{ c.name }}</option>{% endfor %}
+{%- for c in categories %}{% set offered = applies(c.applies_to, car_kind or none) or c.id|string == selected|string %}<option value="{{ c.id }}" data-period="{{ 1 if c.has_period else 0 }}" data-service="{{ 1 if c.name == 'Service' else 0 }}" data-wheels="{{ 1 if c.per_wheel else 0 }}" data-gstfree="{{ 1 if c.gst_free else 0 }}" data-payrefs="{{ 1 if c.budget_pool == 'registration' else 0 }}" data-purchase="{{ 1 if c.kind == 'purchase' else 0 }}" data-applies="{{ c.applies_to }}" data-litres="{{ 1 if c.has_litres else 0 }}" {{ 'selected' if c.id|string == selected|string }}{{ '' if offered else ' hidden disabled' }}>{{ c.name }}</option>{% endfor %}
 {%- endmacro %}
-{% macro service_item_box(i, name, checked, car_kind, tag='span') -%}
-<label class="inline" data-applies="{{ i.applies_to }}"{{ '' if applies(i.applies_to, car_kind or none) or checked else ' hidden' }}><input type="checkbox" name="{{ name }}" value="{{ i.id }}" {{ 'checked' if checked }}> <{{ tag }}>{{ i.name }}</{{ tag }}></label>
+{# Four small ticks for which wheels, in the order they sit on a car seen from above: front pair, rear pair. #}
+{% macro wheel_ticks(name, chosen) -%}
+{% for code, label in wheel_names.items() %}<label class="wheel" title="{{ label }}"><input type="checkbox" name="{{ name }}" value="{{ code }}" {{ 'checked' if code in chosen }} aria-label="{{ label }}"><span aria-hidden="true">{{ code }}</span></label>{% endfor %}
+{%- endmacro %}
+{# A per-wheel category's own ticks (Tyres), shown while it is the one chosen. #}
+{% macro category_wheels(name, chosen, hidden) -%}
+<fieldset class="wheel-field" data-wheels-field {{ 'hidden' if hidden }}><legend><small>Which wheels <span class="muted">(optional)</span></small></legend><span class="wheels">{{ wheel_ticks(name, chosen) }}</span></fieldset>
+{%- endmacro %}
+{# A per-wheel item's ticks follow its own box, and CSS shows them only while that is ticked. #}
+{% macro service_item_box(i, name, checked, car_kind, tag='span', item_wheels=none) -%}
+<span class="service-item"><label class="inline" data-applies="{{ i.applies_to }}"{{ '' if applies(i.applies_to, car_kind or none) or checked else ' hidden' }}><input type="checkbox" name="{{ name }}" value="{{ i.id }}" {{ 'checked' if checked }}> <{{ tag }}>{{ i.name }}</{{ tag }}></label>{% if i.per_wheel %}<span class="wheels" role="group" aria-label="Which wheels: {{ i.name }}">{{ wheel_ticks(name ~ '_wheels_' ~ i.id, (item_wheels or {}).get(i.id|string, [])) }}</span>{% endif %}</span>
 {%- endmacro %}

@@ -1,0 +1,31 @@
+﻿Metadata
+"Android Version","aCar Version","aCar Build Date","aCar Database Version","Export Date/Time","Export Version","Minimum Supported aCar Version","Date Format","Time Format"
+"17","5.6.13","10/15/2026","18","11/24/2026 - 13:30","11","5.0.0","d/M/yyyy","HH:mm"
+
+
+Vehicles
+"Name","Type","Year","Make","Model","SubModel","Engine","Transmission","Drive Type","Body Type","Bed Type","Active","License Plate","VIN","Insurance Policy","Color","Fuel Tank Capacity","Volume Unit","Distance Unit","Country","Region","City","Notes"
+"Example","CAR","2020","Example","Hatch","Base","1.4 TURBO GAS","Automatic","","Hatchback","","Yes","ABC123","1ABCD23EF45678901","","","0.0","LITER","KILOMETER","Australia","","",""
+
+
+Fill-Up Records
+"Vehicle","Date","Time","Odometer Reading","Distance Unit","Volume","Volume Unit","Price per Unit","Total Cost","Payment","Partial Fill-Up?","Previously Missed Fill-Ups?","Fuel Efficiency","Fuel Efficiency Unit","Fuel Category","Fuel Type","Has Fuel Additive?","Fuel Additive Name","Fuel Brand","Fueling Station Address","Place Street","Place City","Place State","Place Country","Place Postal Code","Place Latitude","Place Longitude","Device Latitude","Device Longitude","Driving Mode","City Driving Percentage","Highway Driving Percentage","Average Speed","Tags","Notes"
+"Example","15/4/2026","14:07","19,525","km","55.500","L","$1.274","$70.71","","No","No","","L/100","","","No","","Example Fuel Stop","","","","","","","","","","","","","","","",""
+"Example","3/5/2026","08:30","19,980","km","0.000","L","$0.000","$0.00","","No","No","","L/100","","","No","","","","","","","","","","","","","","","","","",""
+
+
+Event Records
+"Vehicle","Date","Time","Odometer Reading","Distance Unit","Type","Sub Types","Total Cost","Payment","Place Name","Place Address","Place Street","Place City","Place State","Place City","Place Country","Place Postal Code","Place Latitude","Place Longitude","Device Latitude","Device Longitude","Tags","Notes"
+"Example","24/4/2026","17:52","19,749","km","Expense","Insurance","-$311.67","","Example Insurer","","","","","","","","","","","","",""
+"Example","21/1/2026","12:00","10","km","Purchased","","$25,000.00","","Example Motors","","","","","","","","","","","","",""
+"Example","1/6/2026","23:59","20,500","km","Sold","","$2,500.00","","","","","","","","","","","","","","",""
+"Example","30/3/2026","12:35","19,490","km","Service","New Tires, Tire Rotation, Tire Pressure, Wheel Alignment","$1,377.00","Example Visa","Example Tyres Pty Ltd","","","","","","","","","","","","","Rear tyres swapped"
+"Example","19/2/2026","14:10","19,281","km","Service","Engine Oil, Inspection, Oil Filter","$429.30","","Example Garage","","","","","","","","","","","","",""
+"Example","5/2/2026","09:00","0","km","Expense","Toll","$4.50","","","","","","","","","","","","","","",""
+"Example","6/2/2026","09:00","19,300","km","Expense","Registration, Stamp Duty","$1,250.00","","Example Roads","","","","","","","","","","","","",""
+"Example","7/2/2026","09:00","19,301","km","Note","","$0.00","","","","","","","","","","","","","","","Remember to book the tyre check"
+
+
+Trip Records
+"Vehicle","Start Date","Start Time","Start Odometer Reading","Start Location","End Date","End Time","End Odometer Reading","End Location","Start Latitude","Start Longitude","End Latitude","End Longitude","Distance Unit","Distance","Duration","Type","Purpose","Client","Tax Deduction Rate","Tax Deduction Amount","Reimbursement Rate","Reimbursement Amount","Paid","Tags","Notes"
+"Example","26/2/2026","14:18","19,317","Home","5/3/2026","11:00","19,415","","","","","","km","98","6 days","Business","Meeting","","$0.660","$64.68","$0.000","$0.00","No","",""

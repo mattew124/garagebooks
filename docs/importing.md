@@ -13,6 +13,9 @@ importing (a brochure, say) and they stop being offered; **Offer them again** at
 brings them back. When you press Import with some files left unticked, the page asks whether to
 skip those too; choose Cancel to leave them for next time.
 
+On a phone the table of this page, and of the [aCar import](#importing-from-acar), is shown as one card for each cost,
+whichever of **Rows** or **Tiles** you chose for the expense list.
+
 ![The import table, with its guesses to check, correct and untick](images/import-preview.png)
 
 ## How it guesses
@@ -135,6 +138,15 @@ expenses that had it; renaming keeps it on them). Missing one while importing? *
 dialog; the new item is added to every row's list and ticked on the row you were in, and nothing else on the
 page changes.
 
+**Which wheels.** For an item done wheel by wheel (brakes), four small ticks (**FL FR RL RR**: front left and right,
+rear left and right) appear under it once it is ticked. An expense in **Tyres** has the same four under its category.
+They are optional, and the expense list reads them back as "Brakes (rear)" or "front left, rear right". Which items ask
+is the **Per wheel** tick on the Categories page; Brakes starts with it, and so does a new item whose name says brakes,
+a wheel bearing, stud or repair, or a shock or strut (not brake fluid, alignment or rotation). From aCar, *Brakes, Rear*
+or *Front* ticks that pair, and *Tire A* to *D* together tick all four; aCar doesn't say which wheel a single letter is.
+
+<!-- screenshot: wheel-ticks - The Add form with Brakes ticked and the four wheel ticks under it -->
+
 <!-- screenshot: categories-page - The Categories page: every category and service item in one form with one Save button, and the small x that deletes a service item -->
 
 <!-- screenshot: import-service-items - An import row in the Service category, with its service items and the Add an item dialog -->
@@ -144,8 +156,15 @@ page changes.
 Possible duplicates are flagged. Saving a new expense (the Add form) that has the same car and exactly
 the same amount as one within 14 days either side asks first: it lists the match with a link to open it, and
 **Save anyway** saves the new one regardless. The question comes before anything is uploaded or saved, and the
-server asks again if the page's own check was skipped. The import preview does the same per file, leaving a
-likely duplicate unticked with a link to the expense it resembles.
+server asks again if the page's own check was skipped.
+
+The import preview does the same per file, with one difference. When the matching expense **has no invoice yet**
+(one you entered by hand, or [imported from aCar](#importing-from-acar), say), the row offers **Attach this invoice to**
+that expense and does so by default, instead of making a second expense. Attaching puts the file on the expense,
+fills its odometer and vendor only if they are blank, and changes nothing else (category, amount and date stay,
+and an invoice already on an expense is never replaced). The **Rename** option still renames the file from the
+expense's own values. Choose **Add as a new expense** to keep both. When the match already has an invoice, the
+row is only flagged and left unticked.
 
 <!-- screenshot: duplicate-warning - The question asked before saving a possible duplicate -->
 
@@ -172,3 +191,85 @@ PDF text. **Import page → See and remove what it has learned** lists everythin
 delete it. This stores only short labels and vendor names, in the `garagebooks` schema.
 
 <!-- screenshot: learned-page - The page listing what the importer has learned -->
+
+# Importing from aCar
+
+Costs you kept in the Android app **aCar** can be brought in from its CSV export: on the **Cars** page,
+press **Import costs from aCar**, choose the car they belong to (or **Create a new car from this file**) and the **Records** CSV that aCar wrote
+(a file named like `aCar-records-….csv`; the statistics and trip exports aren't it). You can choose the file with the button or drop it onto the box, as on the Add page.
+
+<!-- screenshot: acar-import - The aCar import page: the file, the car and the preview table -->
+
+The next page lists every cost to check, correct and untick, the same way the invoice import does, and
+**nothing is saved until you press Import**. What comes across:
+
+- **Services, expenses and purchases** (aCar's *Event Records*), with the vendor from *Place Name*. A refund
+  stays negative. A *Purchased* record becomes the car's **Initial purchase**.
+- **Fill-ups**, as **Fuel**, with their litres and price per litre (see below). Untick **Include fill-ups** on the first
+  page to leave them out.
+
+- **Records with no cost** (a note, a free fill-up) come across at $0.00, so the odometer reading and the note aren't lost.
+- **The sale** (aCar's *Sold*) is recorded on the car: date, price and final odometer. It is unticked if the car
+  already has a sale, because importing it replaces that one.
+
+Only **trips** are left out (the preview counts them). Odometer readings in miles are converted to kilometres,
+and an odometer of 0 (aCar's "none entered") is left blank.
+
+**Litres and price per litre.** A fill-up brings its litres, **$/L**, **Partial fill** and aCar's note of a missed
+fuel-up, shown on its row to check and correct. They are saved as if typed on the Add page, so the expense list and the
+[Fuel dashboard](dashboard.md) work out L/100 km for your history. A volume in US or UK gallons is converted to litres,
+and its price to a price per litre. For any other unit (a gallon that doesn't say which, say) the row asks you to enter
+the litres. aCar's own figures also stay in the notes.
+
+Litres go on whichever category **Records litres** (*Fuel* to begin with, even if you've renamed it). A car that takes
+no fuel gets the cost without litres: the figures are still in the notes.
+
+**Merging into expenses you already have.** When a cost has the same car and amount as an expense within 14 days, the row
+offers **Add the odometer reading to** that expense (**Add the odometer reading and litres to** for a fill-up), and
+does so by default where the expense has no odometer (typically one imported from an invoice PDF) or, for a fill-up, no
+litres (one entered before litres were recorded). A merge fills in the odometer, the vendor, and the litres and price
+per litre, each only if blank, and a service's items if none are ticked. It changes nothing else: the category, amount,
+date, invoice link and any figure already there stay as they are. Litres go only on a category that records them, and
+**Partial fill** and the missed fuel-up come only with the litres. Choose **Add as a new expense** to keep both instead.
+
+Round amounts repeat, so a saved expense is merged into by one row at most, the closest in time. A fill-up is taken to
+be a different one, and left ticked, if the saved expense's litres differ, or, where it has none, its odometer is more
+than 5 km away.
+
+**Every cost gets a category,** so all of them can be imported without sorting any out by hand:
+
+- Insurance, Registration and Initial purchase go to the categories of those names, and a tyre purchase (aCar's
+  *New Tires* or *Tire A* to *D*) to **Tyres**.
+- Services, and a key's battery, go to **Service**.
+- Anything else goes to a category named like aCar's sub-type (Toll, say) if you have one, and otherwise to your
+  **catch-all**: the category called *Expenses*, *Other*, *Miscellaneous*, *General* or *Accessories*. With none of
+  those, the import makes **Expenses** when you press Import.
+
+**Service items.** Each of a service's sub-types is ticked as a [service item](setup.md). aCar's American spellings
+match (*Tire Rotation* is Tyre rotation, *Windshield Wipers* is Windscreen wipers). A sub-type with no item yet is
+shown as **(new)** and listed above the table; it is made when you press Import, only if a row that has it is
+imported, and the message afterwards names the new items.
+
+**Adding a category while you check.** Choose **New category…** in any row's list: it is saved, chosen on that row and
+offered on all the others, and nothing typed on the page is lost. Categories and service items made in another tab
+also appear when you come back to the page. The invoice import works the same way.
+
+**If something is wrong** when you press Import, nothing is saved, and the page comes back with a list of the problems
+at the top. Each is a link to its row; the row is outlined, and has links to the next error and back to the list.
+
+Anything aCar had in a record's sub-types, its payment method and its own notes go into the expense's notes.
+
+**Creating the car.** aCar's export describes the vehicle, so the import can make the car for you: choose
+**Create a new car from this file** and the preview opens with a **New car** card holding the name, type, make, model,
+model year, body type and VIN from the file, ready to check and correct. The type is guessed from aCar's engine text
+(*GAS* and *DIESEL* are petrol or diesel, *HYBRID* a hybrid, *PLUG-IN* a plug-in hybrid, *ELECTRIC* battery electric;
+blank is petrol or diesel), and it decides which categories are offered, so Fuel isn't offered for an electric car.
+The car is made when you press Import, along with its costs and its sale: if any row or car detail is wrong, nothing is
+made. The licence plate isn't read.
+
+If the file holds more than one vehicle, the app asks which one first. Dates are read by the pattern aCar writes in
+the file (`d/M/yyyy` or `M/d/yyyy`, say), and times are taken as your local time ([`APP_TZ`](setup.md)).
+
+Where an expense matches but has nothing to add, the row is flagged as a [possible duplicate](#possible-duplicates)
+and left unticked, so importing the same file twice doesn't double up. One import takes up to 1,000 costs: leave the
+fill-ups out or import one vehicle at a time for more.

@@ -7,6 +7,35 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+- **aCar fill-ups import their litres and price per litre.** Each fill-up's litres, **$/L**, partial fill and missed
+  fuel-up come across, so the list and the **Fuel** dashboard show L/100 km for your history. The preview shows them
+  to check. US and UK gallons are converted to litres. Merging into a fuel expense you already have fills in the litres
+  and price where blank. Where amounts repeat (two $50 fill-ups), the litres and odometer tell them apart, and two
+  rows can't merge into one expense. Nothing to do on upgrade.
+- **The import previews fit a phone.** On a phone both import pages are always cards, even if you chose **Rows**
+  for the expense list, with each field labelled above and as wide as the card. In rows, a service's item ticks now
+  wrap instead of stretching the table far past the screen. Nothing changes for installers.
+- **Which wheels.** A tyre expense, and a per-wheel service item such as brakes, can record front left, front right,
+  rear left and rear right. The ticks appear only where they apply, the expense list shows them, and **Per wheel** on
+  the Categories page sets which items ask. Upgrade: pull the new image (the schema gains `wheels` and `per_wheel`
+  columns; on the restricted database role re-run `scripts/provision-db.sh` first).
+- **Importing an invoice attaches it to an expense you already have.** When an invoice in the import preview matches an
+  expense with no invoice yet (same car and amount within 14 days, typically one made from an aCar import), the row now
+  offers **Attach this invoice to** it, selected by default, rather than creating a second expense. The invoice goes on
+  that expense, a blank odometer and vendor are filled, and nothing else on it changes. A match that already has an
+  invoice is flagged and left unticked, as before.
+- **aCar import: every cost gets a category, and services get their items.** Costs that match no category go to your
+  catch-all (*Expenses*, *Other* and the like; **Expenses** is made if you have none). Services tick a service item for
+  each thing done, making missing ones and naming them afterwards. Both import pages can add a category from a row,
+  pick up ones made in another tab, and list errors at the top with a link to each row. Every file box takes a dropped
+  file, the lease documents included.
+- **Import from aCar.** **Cars → Import costs from aCar** reads the CSV that the aCar app exports (its Records file):
+  services, expenses, purchases and, if you like, fill-ups, into a car you have or into a new one made from the
+  vehicle's details in the file (name, type, make, model, year, body type and VIN, all editable first). A preview lists every cost to check, categorise and untick,
+  flags likely duplicates, and saves nothing until you confirm. Notes and records with no cost come across at $0.00 and
+  the sale is recorded on the car; only trips are left out. A cost that matches an existing expense (an invoice you imported
+  from a PDF, say) can be merged into it: its odometer reading is added and nothing else on it changes. Nothing for
+  installers to do: pull the new image.
 - **A fuel receipt's address fills in the location.** The station's street and suburb are read off the receipt and
   looked up on OpenStreetMap, for the fuel heat map; **Use my location** is the fallback. Only that address is sent,
   only for fuel receipts. Set `ADDRESS_LOOKUP=0` to switch it off.

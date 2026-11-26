@@ -1,0 +1,43 @@
+{% import "_category_choice.html" as choice with context %}
+{% from "_service_items_field.html" import field as service_field with context %}
+{% from "_error_summary.html" import row_links %}
+<tr id="row-{{ n }}"{% if errors.get(n) %} class="has-error"{% endif %}>
+      <td data-label="Import"><input type="checkbox" name="include_{{ n }}" {{ 'checked' if r.include }}></td>
+      <td data-label="What"><div class="file">
+        <strong>{{ 'Sale of the car' if r.kind == 'sale' else r.label }}</strong>
+        {% if r.notes %}<br><small>{{ r.notes }}</small>{% endif %}
+        {% if r.note %}<br><small>{{ r.note }}</small>{% endif %}
+        {% if r.candidates %}<br><label class="inline"><small>If it matches an expense you have:</small>
+          <select name="action_{{ n }}">
+            <option value="new">Add as a new expense</option>
+            {% for c in r.candidates %}<option value="{{ c.id }}" {{ 'selected' if r.action == c.id|string }}>Add the odometer reading{{ ' and litres' if r.litres }} to {{ c.text }}</option>{% endfor %}
+          </select></label>{% endif %}
+        {% for d in r.duplicates %}{% if not r.candidates %}<br><small class="dup">Possible duplicate: <a href="{{ d.edit_url }}" target="_blank" rel="noopener noreferrer">{{ d.date }} · {{ d.category }}{% if d.vendor %} · {{ d.vendor }}{% endif %} · {{ d.amount_text }}</a></small>{% endif %}{% endfor %}
+        {% if errors.get(n) %}<br><span class="error">{{ errors[n] }}</span><br>{{ row_links(n, errors) }}{% endif %}
+        <input type="hidden" name="kind_{{ n }}" value="{{ r.kind }}">
+        <input type="hidden" name="time_{{ n }}" value="{{ r.time }}">
+        <input type="hidden" name="notes_{{ n }}" value="{{ r.notes }}">
+        <input type="hidden" name="label_{{ n }}" value="{{ r.label }}">
+      </div></td>
+      <td data-label="Date"><input type="date" name="date_{{ n }}" value="{{ r.date }}"></td>
+      <td data-label="Category" class="extras">{% if r.kind == 'sale' %}<small>Recorded on the car</small>{% else %}<div class="row-extras">
+        <select name="category_id_{{ n }}">
+          <option value="">Choose…</option>
+          {{ choice.category_options(categories, r.category_id, car_kind) }}
+        </select>
+        {% set is_service = categories|selectattr('id', 'equalto', r.category_id|int(0))|selectattr('name', 'equalto', 'Service')|list %}
+        {{ service_field(n, items, r.services, car_kind, not is_service, r.item_wheels) }}
+        {% set asks_wheels = categories|selectattr('id', 'equalto', r.category_id|int(0))|selectattr('per_wheel')|list %}
+        {{ choice.category_wheels('wheels_' ~ n, r.wheels, not asks_wheels) }}
+        {# Shown for a category that records litres, and kept while it holds a figure, as on the Add page. #}
+        {% set takes_litres = categories|selectattr('id', 'equalto', r.category_id|int(0))|selectattr('has_litres')|list %}
+        <div class="fuel-fields" data-fuel-fields {{ '' if takes_litres or r.litres or r.unit_price else 'hidden' }}>
+          <label><small>Litres</small> <input name="litres_{{ n }}" inputmode="decimal" autocomplete="off" value="{{ r.litres }}"></label>
+          <label><small>$/L <span class="muted">(optional)</span></small> <input name="unit_price_{{ n }}" inputmode="decimal" autocomplete="off" value="{{ r.unit_price }}"></label>
+          <label class="inline"><input type="checkbox" name="partial_{{ n }}" value="1" {{ 'checked' if r.partial }}> <small>Partial fill</small></label>
+          <label class="inline"><input type="checkbox" name="missed_{{ n }}" value="1" {{ 'checked' if r.missed }}> <small>A fuel-up before this wasn't recorded</small></label>
+        </div></div>{% endif %}</td>
+      <td data-label="Vendor"><input name="vendor_{{ n }}" maxlength="500" value="{{ r.vendor }}"></td>
+      <td class="num" data-label="Amount"><input name="amount_{{ n }}" inputmode="decimal" value="{{ r.amount }}"></td>
+      <td class="num" data-label="Odometer"><input name="odometer_km_{{ n }}" inputmode="decimal" value="{{ r.odometer_km }}"></td>
+    </tr>

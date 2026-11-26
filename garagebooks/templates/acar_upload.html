@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Import from aCar{% endblock %}
+{% block main_attrs %} class="narrow"{% endblock %}
+{% block content %}
+<h1>Import from aCar</h1>
+{% if error %}<p class="notice bad" role="alert">{{ error }}</p>{% endif %}
+{% if vehicles %}
+<form method="post" action="{{ url_for('acar_import_preview') }}" class="card stack">
+  <p>This file has more than one vehicle. <strong>Which vehicle</strong> are these costs for?</p>
+  <input type="hidden" name="car_id" value="{{ car_id }}">
+  <input type="hidden" name="fill_ups" value="{{ '1' if fill_ups }}">
+  <textarea name="csv_text" hidden>{{ csv_text }}</textarea>
+  {% for v in vehicles %}
+  <label class="inline"><input type="radio" name="vehicle" value="{{ v.name }}" {{ 'checked' if loop.first }}>
+    {{ v.name }}{% if v.year or v.make or v.model %} <small>({{ [v.year, v.make, v.model]|select|join(' ') }})</small>{% endif %}</label>
+  {% endfor %}
+  <div class="row"><button type="submit" class="button">Show the costs</button> <a href="{{ url_for('acar_import_page') }}">Start again</a></div>
+</form>
+{% else %}
+<p>Bring in the costs you kept in <strong>aCar</strong>: services, expenses, purchases and fill-ups. In aCar, export your
+  records to CSV (the file is named like <code>aCar-records-…csv</code>). The next page shows every cost
+  to check, correct and untick, and <strong>nothing is saved until you press Import</strong>.</p>
+<form method="post" action="{{ url_for('acar_import_preview') }}" enctype="multipart/form-data" class="card stack">
+  <label>Import into
+    <select name="car_id" required>
+      <option value="">Choose a car…</option>
+      <option value="new" {{ 'selected' if car_id == 'new' }}>Create a new car from this file</option>
+      {% for c in cars %}<option value="{{ c.id }}" {{ 'selected' if c.id|string == car_id|string }}>{{ c.name }}</option>{% endfor %}
+    </select></label>
+  <div class="field">
+    <label for="acar-file">aCar CSV file</label>
+    <div class="drop" id="acar-drop" data-drop-ext=".csv">
+      <input type="file" id="acar-file" name="file" accept=".csv,text/csv" required>
+      <small class="drop-hint" id="acar-drop-hint" hidden>You can also drop the CSV file onto this box.</small>
+    </div>
+  </div>
+  <label class="inline"><input type="checkbox" name="fill_ups" value="1" checked>
+    Include fill-ups (as <em>Fuel</em>)</label>
+  <div class="row"><button type="submit" class="button">Read the file</button> <a href="{{ url_for('cars_page') }}">Cancel</a></div>
+</form>
+{% endif %}
+{% endblock %}

@@ -332,6 +332,15 @@ def parse_service_item_name(raw):
     return name
 
 
+WHEELS = {"FL": "Front left", "FR": "Front right", "RL": "Rear left", "RR": "Rear right"}
+
+
+def parse_wheels(raw):
+    """The wheels ticked, in the order above, once each; None for none. Anything else is ignored (a stale page)."""
+    ticked = set(raw or [])
+    return [w for w in WHEELS if w in ticked] or None
+
+
 def parse_service_ids(raw_ids, valid_ids):
     """Item ids ticked on a form: those that are real items, once each. Anything else is ignored (a stale page)."""
     got = []

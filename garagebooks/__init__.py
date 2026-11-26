@@ -28,7 +28,7 @@ from psycopg import errors as pg_errors
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from . import ato, claims as claim_lib, dashboard, db, docinfo, drivestore, fuel, geocode, icons, invoices, jobs, jobtext, lease, leaseform, logs, notices, notify, onedrive, outlook, reminders, sources, storage, tax, updates, validation
+from . import acar, ato, claims as claim_lib, dashboard, db, docinfo, drivestore, fuel, geocode, icons, invoices, jobs, jobtext, lease, leaseform, logs, notices, notify, onedrive, outlook, reminders, sources, storage, tax, updates, validation
 
 log = logging.getLogger("garagebooks.app")
 
@@ -418,6 +418,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         return value.astimezone(ZoneInfo(tz)).strftime("%d %b %Y %H:%M")
 
     app.jinja_env.globals["applies"] = db.applies
+    app.jinja_env.globals["wheel_names"] = validation.WHEELS
+    app.jinja_env.globals["wheels_text"] = db.wheels_text
     app.jinja_env.filters["every"] = jobtext.every_in_words
     app.jinja_env.filters["job_state"] = jobtext.state
 
@@ -606,6 +608,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             items = db.service_items(conn)
         car_ids, cat_ids = set(cars), set(cats)
         values, errors = validation.parse_expense_form(form, tz, car_ids, cat_ids, ref_category_ids(cats.values()))
+        values["wheels"] = category_wheels(cats, values.get("category_id"), form.getlist("wheels"))
         if not errors:
             car_now = values["car_id"]
             errors.update(powertrain_errors(cars[car_now].get("kind"), values["category_id"], form.getlist("service_item"),
@@ -772,16 +775,32 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             return g.service_items
         return {"service_items": service_items}
 
-    def save_services(conn, expense_id, category_id, raw_ids):
+    def wheels_from(getlist, prefix, item_values):
+        """{service item value: wheels} from a form's ticks, named `<prefix>_wheels_<value>`."""
+        got = {str(v): validation.parse_wheels(getlist(f"{prefix}_wheels_{v}")) for v in item_values}
+        return {v: w for v, w in got.items() if w}
+
+    def category_wheels(categories_by_id, category_id, raw):
+        """The wheels ticked for the expense itself, only where its category asks which."""
+        return validation.parse_wheels(raw) if (categories_by_id.get(category_id) or {}).get("per_wheel") else None
+
+    def save_services(conn, expense_id, category_id, raw_ids, wheels=None):
         """Keep the service items ticked for an expense: only for the Service category, and only real items."""
         ids = []
         if category_id == db.service_category_id(conn):
-            ids = validation.parse_service_ids(raw_ids, {i["id"] for i in db.service_items(conn)})
-        db.set_expense_services(conn, expense_id, ids)
+            items = db.service_items(conn)
+            ids = validation.parse_service_ids(raw_ids, {i["id"] for i in items})
+        else:
+            items = []
+        per_wheel = {i["id"] for i in items if i["per_wheel"]}
+        db.set_expense_services(conn, expense_id, ids,
+                                {i: (wheels or {}).get(str(i)) for i in ids if i in per_wheel})
 
     def form_values(form):
         """Echo the raw submission back into the form after a validation error."""
-        return {"service_item": form.getlist("service_item"), **{k: form.get(k, "") for k in (
+        items = form.getlist("service_item")
+        return {"service_item": items, "wheels": form.getlist("wheels"),
+                "item_wheels": wheels_from(form.getlist, "service_item", items), **{k: form.get(k, "") for k in (
             "car_id", "category_id", "date", "time", "amount", "odometer_km",
             "vendor", "notes", "invoice_url", "invoice_path", "packaged", "period_start", "period_end", "gst_amount",
         "card_payment_ref", "bpay_biller_code", "bpay_ref", "litres", "unit_price", "partial", "missed", "location")}}
@@ -913,7 +932,26 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
 
     def import_message():
         n, renamed, failed = (request.args.get(k, 0, type=int) for k in ("n", "renamed", "rename_failed"))
-        text = f"Imported {n} invoice{'' if n == 1 else 's'}." if n else MESSAGES["imported"]
+        if request.args.get("from") == "acar":
+            merged, sale = request.args.get("merged", 0, type=int), request.args.get("sale", 0, type=int)
+            text = (f"Created the car {request.args.get('new_car', '')[:100]}. " if request.args.get("new_car") else "") \
+                + f"Imported {n} cost{'' if n == 1 else 's'} from aCar."
+            if merged:
+                text += f" Added what was missing to {merged} existing expense{'' if merged == 1 else 's'}."
+            skipped = request.args.get("skipped", 0, type=int)
+            if skipped:
+                text += f" Left {skipped} that {'was' if skipped == 1 else 'were'} already saved."
+            text += " Recorded the sale." if sale else ""
+            if request.args.get("new_category"):
+                text += f" Created the category {request.args['new_category'][:60]}."
+            made = [name[:60] for name in request.args.getlist("new_item")]
+            if made:
+                text += f" Created {len(made)} new service item{'' if len(made) == 1 else 's'}: {', '.join(made)}."
+            return text
+        attached = request.args.get("attached", 0, type=int)
+        text = f"Imported {n} invoice{'' if n == 1 else 's'}." if n else ("" if attached else MESSAGES["imported"])
+        if attached:
+            text = (text + " " if text else "") + f"Attached {attached} to expenses you already had."
         if renamed:
             text += f" Renamed {renamed}{'' if request.args.get('store') == 'local' else ' in OneDrive'}."
         if failed:
@@ -950,7 +988,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             return render_template("form.html", **form_context(form_values(request.form), errors)), 400
         with connect() as conn:
             expense_id = db.insert_expense(conn, values)
-            save_services(conn, expense_id, values["category_id"], request.form.getlist("service_item"))
+            save_services(conn, expense_id, values["category_id"], request.form.getlist("service_item"),
+                          wheels_from(request.form.getlist, "service_item", request.form.getlist("service_item")))
         refresh_dashboard()
         log.info("expense %s saved (car %s, category %s)", expense_id, values["car_id"], values["category_id"])
         with connect() as conn:
@@ -992,6 +1031,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             offer = bool(db.stored_open_reminders(conn, row["car_id"]))
             claim = claim_summary(conn, row)
             values["service_item"] = [str(i) for i in db.expense_service_ids(conn, expense_id)]
+            values["item_wheels"] = {str(i): w for i, w in db.expense_service_wheels(conn, expense_id).items()}
+            values["wheels"] = row["wheels"] or []
         return render_template("form.html", **form_context(values, expense_id=expense_id), reminder_offer=offer,
                                claim=claim)
 
@@ -1007,7 +1048,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         with connect() as conn:
             if not db.update_expense(conn, expense_id, values):
                 abort(404)
-            save_services(conn, expense_id, values["category_id"], request.form.getlist("service_item"))
+            save_services(conn, expense_id, values["category_id"], request.form.getlist("service_item"),
+                          wheels_from(request.form.getlist, "service_item", request.form.getlist("service_item")))
         refresh_dashboard()
         log.info("expense %s updated", expense_id)
         return redirect(url_for("index", **list_view(), msg=saved_msg("updated")), 303)
@@ -1035,7 +1077,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         with connect() as conn:
             cats = [{**c, **overlay.get(f"c{c['id']}", {})} for c in db.categories(conn)]
             service = [{**i, "name": overlay.get(f"s{i['id']}", i["name"]),
-                        "applies_to": overlay.get(f"a{i['id']}", i["applies_to"])} for i in db.service_items(conn)]
+                        "applies_to": overlay.get(f"a{i['id']}", i["applies_to"]),
+                        "per_wheel": overlay.get(f"w{i['id']}", i["per_wheel"])} for i in db.service_items(conn)]
             budgets_on = db.lease_budgets_on(conn)
         return render_template("categories.html", categories=cats, items=service, error=error, item_error=item_error,
                                row_errors=row_errors or {}, pools=lease.POOLS, budgets_on=budgets_on, applies_to=db.APPLIES_TO,
@@ -1077,6 +1120,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         service = {i["id"]: i["name"] for i in service_rows}
         item_applies = {i["id"]: i["applies_to"] for i in service_rows}
         errors, overlay, category_changes, renames = {}, {}, {}, {}
+        per_wheel = {i["id"]: i["per_wheel"] for i in service_rows}
+        wheel_changes = {}
         for cid in (i for i in posted_ids("category_id") if i in cats):
             typed = {"gst_free": form.get(f"gst_partial_{cid}") == "1", "has_period": form.get(f"has_period_{cid}") == "1",
                      "has_litres": form.get(f"has_litres_{cid}") == "1"}
@@ -1106,6 +1151,11 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         names, applies_changes = {}, {}
         for iid in item_ids:
             overlay[f"s{iid}"] = form.get(f"item_name_{iid}", "")
+            if f"item_per_wheel_asked_{iid}" in form:
+                ticked = form.get(f"item_per_wheel_{iid}") == "1"
+                overlay[f"w{iid}"] = ticked
+                if ticked != per_wheel[iid]:
+                    wheel_changes[iid] = ticked
             if f"item_applies_to_{iid}" in form:
                 value = form[f"item_applies_to_{iid}"]
                 overlay[f"a{iid}"] = value
@@ -1132,8 +1182,9 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 db.update_category(conn, cid, **changed)
             db.rename_service_items(conn, renames)
             db.set_service_items_applies(conn, applies_changes)
+            db.set_service_items_per_wheel(conn, wheel_changes)
         log.info("categories saved: %d categories, %d service items changed", len(category_changes),
-                 len(set(renames) | set(applies_changes)))
+                 len(set(renames) | set(applies_changes) | set(wheel_changes)))
         return redirect(url_for("categories", msg="categories_saved"), 303)
 
     # ---- cars ----------------------------------------------------------------
@@ -2197,16 +2248,16 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         with connect() as conn:
             item = db.add_service_item(conn, name)
             if item is not None:
-                return jsonify(id=item["id"], name=item["name"]), 201
+                return jsonify(id=item["id"], name=item["name"], per_wheel=item["per_wheel"]), 201
             item = db.service_item_named(conn, name)
-        return jsonify(id=item["id"], name=item["name"], existing=True)
+        return jsonify(id=item["id"], name=item["name"], per_wheel=item["per_wheel"], existing=True)
 
     # ---- change history ---------------------------------------------------------
 
     # Field -> label, in the order they are shown. id and the created/updated stamps are never shown.
     history_fields = {
         "expense": (("car_id", "Car"), ("category_id", "Category"), ("occurred_at", "Date and time"),
-                    ("amount", "Amount"), ("odometer_km", "Odometer"), ("vendor", "Vendor"), ("notes", "Notes"),
+                    ("amount", "Amount"), ("odometer_km", "Odometer"), ("wheels", "Wheels"), ("vendor", "Vendor"), ("notes", "Notes"),
                     ("invoice_url", "Invoice link"), ("invoice_path", "Invoice file"), ("packaged", "Paid from"),
                     ("period_start", "Period start"), ("period_end", "Period end"), ("gst_amount", "GST"),
                     ("litres", "Litres"), ("unit_price", "Price per litre"), ("latitude", "Latitude"), ("longitude", "Longitude"), ("full_tank", "Filled the tank"), ("missed_fill", "Missed a fuel-up")),
@@ -2636,9 +2687,10 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
     def import_row(n, **fields):
         return {"n": n, "include": False, "skip": False, "date": "", "category_id": "", "vendor": "",
                 "amount": "", "odometer_km": "", "url": "", "name": "", "folder": "",
-                "note": "", "id": "", "attach": "", "car_fill": False, "car_fields": [], "services": [], "notes": "", "gst_amount": "", "card_payment_ref": "",
+                "note": "", "id": "", "attach": "", "car_fill": False, "car_fields": [], "services": [], "wheels": [], "item_wheels": {}, "notes": "", "gst_amount": "", "card_payment_ref": "",
                 "bpay_biller_code": "", "bpay_ref": "", "car_vin": "", "car_build_year": "", "car_model_year": "",
-                "car_body_type": "", "car_make": "", "car_model": "", "period_start": "", "period_end": "", "guess": {}, "new_name": "", "rename": False, "odo_note": "", "duplicates": [], "lease": None, **fields}
+                "car_body_type": "", "car_make": "", "car_model": "", "period_start": "", "period_end": "", "guess": {}, "new_name": "", "rename": False, "odo_note": "", "duplicates": [], "lease": None,
+                "candidates": [], "action": "new", **fields}
 
     def import_page(store, car, **ctx):
         """The import page's template with what every version of it needs. A row's `url` is the file's
@@ -2653,7 +2705,9 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             categories = db.categories(conn)
             if skipped is None:
                 skipped = len(db.skipped_import_urls(conn, car["id"]))
-        return import_page(store, car, rows=rows, remaining=remaining, errors=errors or {}, categories=categories,
+        by_n = {r["n"]: r for r in rows}
+        error_list = [{"href": f"#row-{n}", "text": f"{by_n[n]['name']}: {message}"} for n, message in sorted((errors or {}).items())]
+        return import_page(store, car, rows=rows, remaining=remaining, errors=errors or {}, error_list=error_list, categories=categories,
                            notice=notice, skipped=skipped, **extra), status
 
     def new_car_folder(kind):
@@ -2812,6 +2866,15 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             if same:
                 row["duplicates"] = dup_view(same)
                 row["include"] = False          # the owner decides, not the default
+                # An expense with no invoice yet (one imported from aCar, say) takes this file instead of a second
+                # expense being made: the closest such one is chosen, unless the file is missing something.
+                bare = [] if store.kind == "mail" else [m for m in same if not (m["invoice_url"] or m["invoice_path"])]
+                row["candidates"] = [{"id": m["id"], "text": f"{d['date']} · {d['category']}"
+                                      + (f" · {d['vendor']}" if d["vendor"] else "") + f" · {d['amount_text']}"
+                                      + (f" · {m['odometer_km']:.0f} km" if m["odometer_km"] is not None else " · no odometer")}
+                                     for m, d in zip(same, row["duplicates"], strict=True) if m in bare]
+                if bare and not guess["missing"]:
+                    row["action"], row["include"] = str(bare[0]["id"]), True
         if guess["date"] and guess["category"] and store.kind != "mail":    # an email's PDF is copied, not renamed
             target = validation.invoice_filename(
                 datetime.combine(guess["date"], dtime(12)), guess["category"], guess["vendor"],
@@ -3055,15 +3118,19 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
             with connect() as conn:
                 db_items = db.service_items(conn)
             count = min(request.form.get("count", type=int) or 0, 200)
-            rows, chosen, errors, skip_urls, lease_picks = [], [], {}, [], []
+            rows, chosen, attaches, errors, skip_urls, lease_picks = [], [], [], {}, [], []
+            with connect() as conn:
+                own = {r["id"] for r in conn.execute("SELECT id FROM garagebooks.expense WHERE car_id = %s", (car_id,))}
             for n in range(count):
                 def f(key, n=n):
                     return request.form.get(f"{key}_{n}", "")
 
-                row = import_row(n, include=bool(f("include")), skip=bool(f("skip")), rename=bool(f("rename")), date=f("date"), category_id=f("category_id"),
+                row = import_row(n, include=bool(f("include")), skip=bool(f("skip")), rename=bool(f("rename")), action=f("action") or "new", date=f("date"), category_id=f("category_id"),
                                  vendor=f("vendor"), amount=f("amount"), odometer_km=f("odometer_km"),
                                  notes=f("notes"), period_start=f("period_start"), period_end=f("period_end"),
                                  services=request.form.getlist(f"service_item_{n}"), gst_amount=f("gst_amount"),
+                                 wheels=request.form.getlist(f"wheels_{n}"),
+                                 item_wheels=wheels_from(request.form.getlist, f"service_item_{n}", request.form.getlist(f"service_item_{n}")),
                                  card_payment_ref=f("card_payment_ref"), bpay_biller_code=f("bpay_biller_code"),
                                  bpay_ref=f("bpay_ref"), car_fill=bool(f("car_fill")), attach=f("attach"),
                                  car_fields=[k for k in CAR_KEYS if f"car_{k}_{n}" in request.form],
@@ -3081,6 +3148,17 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                     continue
                 if not row["include"]:
                     continue
+                if row["action"] != "new":      # this file goes on an expense that is already saved
+                    target = int(row["action"]) if row["action"].isdigit() else None
+                    try:
+                        if target not in own:
+                            raise ValueError("Choose which expense to attach the invoice to.")
+                        if not row["url"]:
+                            raise ValueError("Missing link to the PDF.")
+                        attaches.append((row, target, validation.parse_odometer(row["odometer_km"])))
+                    except ValueError as exc:
+                        errors[n] = str(exc)
+                    continue
                 # A hidden period (the category has none) isn't saved, or checked.
                 dated = any(str(c["id"]) == row["category_id"] and c["has_period"] for c in cat_rows)
                 values, row_errors = validation.parse_expense_form({
@@ -3091,6 +3169,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                     "gst_amount": row["gst_amount"], "card_payment_ref": row["card_payment_ref"],
                     "bpay_biller_code": row["bpay_biller_code"], "bpay_ref": row["bpay_ref"],
                     ref_field: row["url"]}, tz, car_ids, cat_ids, ref_category_ids(cat_rows))
+                values["wheels"] = category_wheels(cats_by_id, values.get("category_id"), row["wheels"])
                 if not row["url"]:
                     row_errors[ref_field] = "Missing link to the PDF."
                 if not row_errors:
@@ -3143,13 +3222,43 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                         kept += db.set_lease_document(conn, car_id, int(lease_id), doc, ref_field, ref)
             if kept:
                 log.info("import kept %d file(s) as lease documents of car %s", kept, car_id)
-            if not chosen:
+            if not chosen and not attaches:
                 if kept and len(lease_picks) == kept and not skip_urls:
                     return redirect(url_for("car_lease", car_id=car_id, msg="lease_document_kept"), 303)
                 if skip_urls or kept:
                     return redirect(url_for(f"{kind}_import", car_id=car_id), 303)
                 return render_import(store, car, rows, status=400, notice="Tick at least one invoice to import.")
-            imported, renamed, rename_failed, copied, copy_failed = [], 0, 0, 0, 0
+            imported, renamed, rename_failed, attached, copied, copy_failed = [], 0, 0, 0, 0, 0
+            with connect() as conn:
+                known = db.known_invoices(conn, [v[ref_field] for _, v in chosen] + [r["url"] for r, _, _ in attaches])
+
+            def rename_file(row, when, category, vendor, amount):
+                """Rename the file to the template, by the values the expense has. -> the new reference, or the old one."""
+                nonlocal renamed, rename_failed
+                target = validation.invoice_filename(
+                    when.astimezone(ZoneInfo(tz)), category, vendor, settings_row["invoice_date_format"],
+                    settings_row["invoice_name_format"], car=car["name"], amount=amount)
+                if not (row["rename"] and row["id"] and target != row["name"]):
+                    return row["url"]
+                try:
+                    new_ref = store.rename(row["id"], target)
+                    renamed += 1
+                    return new_ref
+                except storage.StorageError as exc:
+                    rename_failed += 1           # import it anyway, still pointing at the old name
+                    log.warning("import rename item=%s to=%s failed: %s", row["id"], docinfo.quote(target), exc)
+                    return row["url"]
+
+            for row, target_id, km in attaches:
+                if row["url"] in known:          # the file is attached somewhere already (a double submit)
+                    continue
+                with connect() as conn:
+                    existing = db.get_expense(conn, target_id)
+                if existing is None or existing["invoice_url"] or existing["invoice_path"]:
+                    continue                      # an invoice is never replaced
+                ref = rename_file(row, existing["occurred_at"], existing["category"], existing["vendor"], existing["amount"])
+                with connect() as conn:
+                    attached += db.attach_invoice(conn, car_id, target_id, ref_field, ref, km, row["vendor"].strip())
             for row, values in chosen:
                 if values[ref_field] in known:   # a double submit imports once
                     continue
@@ -3174,14 +3283,14 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                     expense_id = db.insert_expense(conn, values)
                     if kind == "mail":
                         db.record_mail_import(conn, car_id, row["url"], expense_id)
-                    save_services(conn, expense_id, values["category_id"], row["services"])
+                    save_services(conn, expense_id, values["category_id"], row["services"], row["item_wheels"])
                     if row["car_fill"] and row.get("car_details"):      # blanks only: never replaces what the car has
                         db.fill_car_details(conn, car_id, row["car_details"])
                     for extra in attachments.get(row["n"], []):         # the other PDFs of this expense
                         db.add_document(conn, expense_id, extra["name"], ref_field, extra["url"])
                 imported.append((row, values))
-            log.debug("import confirm car=%d rows=%d imported=%d skipped_known=%d renamed=%d rename_failed=%d", car_id,
-                      len(chosen), len(imported), len(chosen) - len(imported), renamed, rename_failed)
+            log.debug("import confirm car=%d rows=%d imported=%d attached=%d skipped_known=%d renamed=%d rename_failed=%d", car_id,
+                      len(chosen) + len(attaches), len(imported), attached, len(chosen) - len(imported), renamed, rename_failed)
             refresh_dashboard()
             learn_from(store, imported)
             more = {"store": kind} if kind == "local" else {}
@@ -3189,7 +3298,7 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
                 more.update(copied=copied, copy_failed=copy_failed)
             if kept:
                 more.update(leases=kept)
-            return redirect(url_for("index", msg="imported", n=len(imported), renamed=renamed,
+            return redirect(url_for("index", msg="imported", n=len(imported), attached=attached, renamed=renamed,
                                     rename_failed=rename_failed, **more), 303)
 
         def api_browse(car_id):
@@ -3238,6 +3347,434 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
 
     for kind in SOURCES:
         storage_routes(kind)
+
+    # ---- import from aCar (a CSV export): upload, preview, confirm. Nothing is saved before confirm. ----
+
+    ACAR_MAX_ROWS = 1000
+    ACAR_MAX_BYTES = 5 * 1024 * 1024
+
+    def acar_left_out(left_out):
+        """'1 sale, 1 note and 3 trips were left out', or ''."""
+        names = {"Sold": ("sale", "sales"), "Note": ("note", "notes"), "trips": ("trip", "trips"),
+                 "no amount": ("record with no cost", "records with no cost"),
+                 "unreadable": ("record with a date it couldn't read", "records with a date it couldn't read")}
+        parts = [f"{n} {names.get(k, (k.lower(), k.lower()))[0 if n == 1 else 1]}" for k, n in left_out.items()]
+        return "" if not parts else (", ".join(parts[:-1]) + " and " + parts[-1] if len(parts) > 1 else parts[0])
+
+    def acar_page(template="acar_upload.html", status=200, **ctx):
+        with connect() as conn:
+            cars = db.cars(conn)
+        return render_template(template, cars=cars, car_id=ctx.pop("car_id", request.args.get("car_id", "")),
+                               error=ctx.pop("error", None), **ctx), status
+
+    @app.get("/import/acar")
+    def acar_import_page():
+        return acar_page()
+
+    ACAR_CATCHALL = "new:catchall"      # the catch-all category that is made on import when there is none
+    ACAR_CATCHALL_NAME = "Expenses"
+    ACAR_CATCHALL_ID = -1               # stands in for it while rows are checked
+
+    def acar_lists(categories, car_kind, new_items, with_catchall):
+        """The categories and service items the preview offers: what suits the car, plus what the import
+        would make (the catch-all and the new service items), which don't exist until Import is pressed."""
+        offered = [c for c in categories if db.applies(c["applies_to"], car_kind)]
+        if with_catchall:
+            offered.append({"id": ACAR_CATCHALL, "name": f"{ACAR_CATCHALL_NAME} (new category)", "kind": "running",
+                            "applies_to": "all", "has_period": False, "gst_free": False, "per_wheel": False,
+                            "has_litres": False})
+        with connect() as conn:
+            items = list(db.service_items(conn))
+        items += [{"id": f"new:{name}", "name": f"{name} (new)", "applies_to": "all",
+                   "per_wheel": db.looks_per_wheel(name)} for name in new_items]
+        return {"categories": offered, "items": items, "car_kind": car_kind, "new_items": new_items,
+                "with_catchall": with_catchall}
+
+    def acar_matches(conn, car_id, when, amount, also=None):
+        """-> (expenses that look like this cost, how the preview shows them, the merge choices). `also` is an
+        expense already chosen to merge into, kept as a choice even if the row no longer matches it."""
+        found = db.find_duplicates(conn, car_id, when, amount) if when is not None and amount is not None else []
+        shown = dup_view(found)
+        choices = list(found) if amount else []
+        if also is not None and also not in {m["id"] for m in choices}:
+            chosen = db.get_expense(conn, also)
+            if chosen is not None and chosen["car_id"] == car_id:
+                choices.append(chosen)
+        candidates = [{"id": m["id"], "text": f"{d['date']} · {d['category']}"
+                       + (f" · {d['vendor']}" if d["vendor"] else "") + f" · {d['amount_text']}"
+                       + (" · has an invoice" if m["invoice_url"] or m["invoice_path"] else "")
+                       + (f" · {m['odometer_km']:.0f} km" if m["odometer_km"] is not None else " · no odometer")
+                       + ("" if not m["has_litres"] else f" · {m['litres']:.2f} L" if m["litres"] is not None else " · no litres")}
+                      for m, d in zip(choices, dup_view(choices), strict=True)]
+        return found, shown, candidates
+
+    # How far apart two figures can be and still be one fill-up: a receipt's and what was typed into aCar.
+    SAME_LITRES = Decimal("0.05")
+    SAME_FILL_KM = 5
+
+    def acar_other_fill(rec, m):
+        """Whether saved expense `m` is a different fill-up from `rec`, though the amounts match: round
+        amounts repeat. The litres settle it where both have them, else the odometer."""
+        if rec.litres is None:
+            return False
+        if m["litres"] is not None:
+            return abs(m["litres"] - rec.litres) > SAME_LITRES
+        return (m["odometer_km"] is not None and rec.odometer_km is not None
+                and abs(float(m["odometer_km"]) - float(rec.odometer_km)) > SAME_FILL_KM)
+
+    def acar_gains(rec, m):
+        """Whether merging `rec` into `m` would add a figure it lacks (see db.merge_into_expense)."""
+        return bool((rec.odometer_km is not None and m["odometer_km"] is None)
+                    or (rec.litres is not None and m["has_litres"] and m["litres"] is None))
+
+    def acar_default_merges(pending):
+        """Which rows merge, and into what: `pending` is (row, record, when, matches). Each saved expense goes
+        to one row only, the closest in time first. A row is left unticked when an expense it matches could be
+        it; one whose matches are all other fill-ups, or are taken by other rows, is a new cost."""
+        pairs = sorted((abs((m["occurred_at"] - when).total_seconds()), row["n"], m["id"])
+                       for row, rec, when, found in pending if rec.amount
+                       for m in found if acar_gains(rec, m) and not acar_other_fill(rec, m))
+        chosen, taken = {}, set()
+        for _, n, expense_id in pairs:
+            if n not in chosen and expense_id not in taken:
+                chosen[n] = expense_id
+                taken.add(expense_id)
+        for row, rec, _, found in pending:
+            if row["n"] in chosen:
+                row["action"], row["include"] = str(chosen[row["n"]]), True
+            else:
+                row["include"] = all(m["id"] in taken or acar_other_fill(rec, m) for m in found)
+
+    def acar_preview_rows(export, car, categories):
+        """One row per record, oldest first, every one with a category (what fits none goes to the catch-all)
+        and, for a service, its service items ticked. A cost that matches an expense already saved (same
+        amount, within the duplicate window) is offered as a merge where that would add an odometer reading,
+        and is otherwise left unticked. -> (rows, the new service items' names, whether a catch-all is to be made)."""
+        offered = [c for c in categories if db.applies(c["applies_to"], car["kind"])]
+        names = {c["name"]: c["id"] for c in offered}
+        own = acar.catch_all([c["name"] for c in offered if c["kind"] == "running"])
+        catch_value = str(names[own]) if own else ACAR_CATCHALL
+        fuel_category = next((c["name"] for c in offered if c["has_litres"]), None)
+        out, new_items, pending = [], {}, []
+        with connect() as conn:
+            items = {i["name"]: i for i in db.service_items(conn)}
+            for n, rec in enumerate(sorted(export.records, key=lambda r: (r.date, r.time))):
+                when = datetime.combine(rec.date, rec.time, tzinfo=ZoneInfo(tz))
+                row = {"n": n, "kind": "sale" if rec.kind == "sale" else "expense", "include": True, "action": "new",
+                       "date": rec.date.isoformat(), "time": rec.time.strftime("%H:%M"), "category_id": "", "vendor": rec.vendor,
+                       "amount": f"{rec.amount:.2f}", "odometer_km": "" if rec.odometer_km is None else f"{rec.odometer_km:.1f}",
+                       "notes": rec.notes, "label": rec.label, "duplicates": [], "candidates": [], "services": [], "note": "",
+                       "wheels": [], "item_wheels": {}, "litres": "", "unit_price": "", "partial": False, "missed": False}
+                if rec.kind == "sale":
+                    row["include"] = car["sold_at"] is None
+                    row["note"] = "" if row["include"] else "This car already has a sale recorded; importing this replaces it."
+                    out.append(row)
+                    continue
+                match = acar.match_category(rec, list(names))
+                if match is None and rec.kind == "fillup":
+                    match = fuel_category       # under whatever name the person gave it
+                row["category_id"] = str(names[match]) if match else catch_value
+                # Litres only where the category records them: a car that takes no fuel keeps them in the notes.
+                if match and next(c for c in offered if c["name"] == match)["has_litres"]:
+                    row["litres"] = "" if rec.litres is None else f"{rec.litres:.2f}"
+                    row["unit_price"] = "" if rec.unit_price is None else f"{rec.unit_price:.3f}"
+                    row["partial"], row["missed"] = not rec.full_tank, rec.missed_fill
+                    if rec.volume_unit_unknown:
+                        row["note"] = (f"aCar has this volume in {rec.volume_unit_unknown!r}, which could be more than one "
+                                       "size: enter the litres yourself.")
+                if match and next(c for c in offered if c["name"] == match)["per_wheel"]:
+                    row["wheels"] = acar.wheels_in(rec.subtypes) or []
+                if match == db.SERVICE_CATEGORY:
+                    for subtype in rec.service_subtypes:
+                        known = acar.match_service_item(subtype, list(items))
+                        if known is None:
+                            name = acar.new_item_name(subtype)
+                            value = "new:" + new_items.setdefault(name.lower(), name)
+                        elif db.applies(items[known]["applies_to"], car["kind"]):
+                            value = str(items[known]["id"])
+                        else:
+                            continue        # the notes still say it was done
+                        if value not in row["services"]:
+                            row["services"].append(value)
+                        sides = acar.wheels_in([subtype])
+                        asks = items[known]["per_wheel"] if known else db.looks_per_wheel(value[4:])
+                        if sides and asks:      # front and rear named separately add up
+                            both = set(row["item_wheels"].get(value, [])) | set(sides)
+                            row["item_wheels"][value] = validation.parse_wheels(both)
+                found, row["duplicates"], row["candidates"] = acar_matches(conn, car["id"], when, rec.amount)
+                pending.append((row, rec, when, found))
+                out.append(row)
+        acar_default_merges(pending)
+        return out, list(new_items.values()), any(r["category_id"] == ACAR_CATCHALL for r in out)
+
+    def acar_error_list(rows, errors, car_errors):
+        """What is wrong, in page order, each with where to go: for the summary at the top of the preview."""
+        listed = [{"href": "#new-car", "text": f"New car: {message}"} for message in (car_errors or {}).values()]
+        by_n = {r["n"]: r for r in rows}
+        for n in sorted(errors):
+            r = by_n[n]
+            listed.append({"href": f"#row-{n}", "text": f"{r['label'] or 'Row ' + str(n + 1)} · {r['date'] or 'no date'} · "
+                                                         f"{r['amount'] or 'no amount'}: {errors[n]}"})
+        return listed
+
+    @app.post("/import/acar")
+    def acar_import_preview():
+        with connect() as conn:
+            cars = db.cars(conn)
+            categories = db.categories(conn)
+        car_ids = {c["id"] for c in cars}
+        making = request.form.get("car_id") == "new"
+        car_id = 0 if making else request.form.get("car_id", type=int)
+        keep = {"car_id": request.form.get("car_id", "")}
+        if not making and car_id not in car_ids:
+            return acar_page(error="Choose a car, or create a new one from the file.", status=400, **keep)
+        upload = request.files.get("file")
+        data = upload.read(ACAR_MAX_BYTES + 1) if upload and upload.filename else request.form.get("csv_text", "").encode()
+        if not data:
+            return acar_page(error="Choose the CSV file aCar exported.", status=400, **keep)
+        if len(data) > ACAR_MAX_BYTES:
+            return acar_page(error="That file is too large to be an aCar export.", status=400, **keep)
+        fill_ups = bool(request.form.get("fill_ups"))
+        vehicle = request.form.get("vehicle") or None
+        try:
+            export = acar.parse(data, vehicle=vehicle, fill_ups=fill_ups)
+        except acar.NotAnExport as exc:
+            return acar_page(error=str(exc), status=400, **keep)
+        if vehicle is None and len(export.vehicles) > 1:
+            return acar_page(vehicles=export.vehicles, csv_text=data.decode("utf-8", "replace").lstrip("\ufeff"),
+                             fill_ups=fill_ups, **keep)
+        if len(export.records) > ACAR_MAX_ROWS:
+            return acar_page(error=f"That has {len(export.records)} costs, more than one import takes "
+                                   f"({ACAR_MAX_ROWS}). Leave the fill-ups out, or import one vehicle at a time.",
+                             status=400, **keep)
+        first = next((v for v in export.vehicles if v["name"] == vehicle), None) or (export.vehicles[0] if export.vehicles else None)
+        new_car = None
+        if making:
+            first = first or {}
+            new_car = {"name": first.get("name", ""), "kind": first.get("kind", "ICE"), "make": first.get("make", ""),
+                       "model": first.get("model", ""), "vin": first.get("vin", ""), "model_year": first.get("year", ""),
+                       "build_year": "", "body_type": first.get("body_type", "")}
+            car = {"id": 0, "kind": new_car["kind"], "sold_at": None}
+        else:
+            car = next(c for c in cars if c["id"] == car_id)
+        rows, new_items, with_catchall = acar_preview_rows(export, car, categories)
+        log.debug("acar preview car=%d records=%d left_out=%s new_items=%d", car_id, len(rows), dict(export.left_out), len(new_items))
+        return acar_page("acar_preview.html", rows=rows, **acar_lists(categories, car["kind"], new_items, with_catchall),
+                         errors={}, error_list=[], left_out=acar_left_out(export.left_out),
+                         vehicle=vehicle or (export.vehicles[0]["name"] if export.vehicles else ""), new_car=new_car,
+                         car_errors={}, kinds=db.CAR_KINDS, **keep)
+
+    @app.post("/import/acar/confirm")
+    def acar_import_confirm():
+        with connect() as conn:
+            cars = {c["id"]: c for c in db.cars(conn)}
+            all_categories = db.categories(conn)
+        car_ids = set(cars)
+        making = request.form.get("car_id") == "new"
+        new_car, car_values, car_errors = None, None, {}
+        if making:      # the car is made only once every row is right: the checks use id 0 for it
+            car_id, car_ids = 0, car_ids | {0}
+            new_car = {k: request.form.get(f"car_{k}", "") for k in ("name", "kind", "make", "model", "vin", "build_year", "model_year", "body_type")}
+            car_values, car_errors = validation.parse_car_form({k: new_car[k] for k in new_car}, db.CAR_KINDS)
+            cars[0] = {"id": 0, "kind": car_values["kind"] if "kind" not in car_errors else None, "sold_at": None}
+        else:
+            car_id = request.form.get("car_id", type=int)
+            if car_id not in car_ids:
+                abort(400)
+        car_kind = cars[car_id]["kind"]
+        cats_by_id = {c["id"]: c for c in all_categories}
+        cats_by_id[ACAR_CATCHALL_ID] = {"id": ACAR_CATCHALL_ID, "name": ACAR_CATCHALL_NAME, "applies_to": "all"}
+        cat_ids = set(cats_by_id)
+        proposed = request.form.getlist("proposed_item")[:ACAR_MAX_ROWS]
+        with_catchall = bool(request.form.get("proposed_catchall"))
+        count = min(request.form.get("count", type=int) or 0, ACAR_MAX_ROWS)
+        rows, new, merges, sales, errors = [], [], [], [], {}
+        with connect() as conn:
+            own = {r["id"] for r in conn.execute("SELECT id FROM garagebooks.expense WHERE car_id = %s", (car_id,))}
+            items = list(db.service_items(conn))
+            service_category = db.service_category_id(conn)
+        now = datetime.now(ZoneInfo(tz))
+        for n in range(count):
+            def f(key, n=n):
+                return request.form.get(f"{key}_{n}", "")
+
+            row = {"n": n, "kind": f("kind") if f("kind") == "sale" else "expense", "include": bool(f("include")), "date": f("date"),
+                   "time": f("time"), "category_id": f("category_id"), "vendor": f("vendor"), "amount": f("amount"),
+                   "odometer_km": f("odometer_km"), "notes": f("notes"), "label": f("label"), "action": f("action") or "new",
+                   "services": request.form.getlist(f"service_item_{n}"), "duplicates": [], "candidates": [], "note": "",
+                   "wheels": request.form.getlist(f"wheels_{n}"), "litres": f("litres"), "unit_price": f("unit_price"),
+                   "partial": bool(f("partial")), "missed": bool(f("missed"))}
+            row["item_wheels"] = wheels_from(request.form.getlist, f"service_item_{n}", row["services"])
+            rows.append(row)
+            if not row["include"]:
+                continue
+            if row["kind"] == "sale":
+                values, row_errors = validation.parse_sale({"date": row["date"], "price": row["amount"], "km": row["odometer_km"]}, tz, now)
+                if row_errors:
+                    errors[n] = " ".join(row_errors.values())
+                elif sales:
+                    errors[n] = "Only one sale can be imported."
+                else:
+                    sales.append(values)
+            elif row["action"] != "new":
+                try:
+                    target = int(row["action"])
+                except ValueError:
+                    errors[n] = "Choose which expense to merge into."
+                    continue
+                try:
+                    adds = {"odometer_km": validation.parse_odometer(row["odometer_km"]),
+                            "litres": validation.parse_litres(row["litres"]),
+                            "unit_price": validation.parse_unit_price(row["unit_price"])}
+                    if target not in own:
+                        raise ValueError("That expense is not this car's.")
+                    if any(target == other[0] for other in merges):
+                        raise ValueError("Another row already merges into that expense. Choose a different one, "
+                                         "or add this as a new expense.")
+                    if all(value is None for value in adds.values()):
+                        raise ValueError("There is no odometer reading or litres to add.")
+                except ValueError as exc:
+                    errors[n] = str(exc)
+                else:
+                    adds.update(full_tank=not row["partial"], missed_fill=row["missed"])
+                    merges.append((target, adds, row["vendor"].strip()[:validation.MAX_TEXT_LEN], row))
+            else:
+                posted = {k: row[k] for k in ("category_id", "date", "time", "amount", "odometer_km", "vendor", "notes",
+                                              "litres", "unit_price")}
+                posted.update({k: "1" for k in ("partial", "missed") if row[k]})
+                if posted["category_id"] == ACAR_CATCHALL:
+                    posted["category_id"] = str(ACAR_CATCHALL_ID)
+                values, row_errors = validation.parse_expense_form({"car_id": car_id, **posted}, tz, car_ids, cat_ids)
+                if not row_errors:
+                    row_errors.update(powertrain_errors(car_kind, values["category_id"], row["services"], cats_by_id, items))
+                if not row_errors and values["category_id"] == service_category:
+                    try:
+                        for value in row["services"]:
+                            if value.startswith("new:"):
+                                validation.parse_service_item_name(value[4:])
+                    except ValueError as exc:
+                        row_errors["service_item"] = str(exc)
+                if row_errors:
+                    errors[n] = " ".join(row_errors.values())
+                else:
+                    values["wheels"] = category_wheels(cats_by_id, values["category_id"], row["wheels"])
+                    new.append((values, row))
+        def again(notice=None):
+            """The preview as it was sent, with its choices, to put right."""
+            with connect() as conn:
+                for row in rows:
+                    if row["kind"] == "sale":
+                        continue
+                    try:
+                        when = validation.parse_local_datetime(row["date"], row["time"], tz)
+                        amount = validation.parse_amount(row["amount"])
+                    except ValueError:
+                        when = amount = None
+                    also = int(row["action"]) if row["action"].isdigit() else None
+                    _, row["duplicates"], row["candidates"] = acar_matches(conn, car_id, when, amount, also)
+            return acar_page("acar_preview.html", rows=rows, **acar_lists(all_categories, car_kind, proposed, with_catchall),
+                             errors=errors, car_errors=car_errors, error_list=acar_error_list(rows, errors, car_errors),
+                             left_out="", vehicle="", status=400, error=notice, new_car=new_car, kinds=db.CAR_KINDS,
+                             car_id="new" if making else str(car_id))
+
+        if errors or car_errors:
+            return again()
+        if not (new or merges or sales):
+            return again("Tick at least one cost to import.")
+        saved = merged = skipped = 0
+        created_items, created_category = [], None
+        with connect() as conn:
+            def items_of(row):
+                """(ids, {id: wheels}) of a row's ticked service items, making the new ones now they are needed."""
+                ids, wheels = [], {}
+                for value in row["services"]:
+                    ident = value
+                    if value.startswith("new:"):
+                        name = validation.parse_service_item_name(value[4:])
+                        made = db.add_service_item(conn, name)
+                        if made is not None:
+                            created_items.append(made["name"])
+                        ident = str((made or db.service_item_named(conn, name))["id"])
+                    ids.append(ident)
+                    if value in row["item_wheels"]:
+                        wheels[ident] = row["item_wheels"][value]
+                return ids, wheels
+
+            if making:
+                car_id = db.add_car(conn, car_values)
+            catch_id = None
+            for values, row in new:
+                values["car_id"] = car_id
+                if values["category_id"] == ACAR_CATCHALL_ID:
+                    if catch_id is None:
+                        made = db.add_category(conn, ACAR_CATCHALL_NAME)
+                        created_category = ACAR_CATCHALL_NAME if made is not None else None
+                        catch_id = made if made is not None else db.category_id_named(conn, ACAR_CATCHALL_NAME)
+                    values["category_id"] = catch_id
+                if db.expense_exists(conn, values):      # a double submit imports once
+                    skipped += 1
+                    continue
+                expense_id = db.insert_expense(conn, values)
+                if values["category_id"] == db.service_category_id(conn):
+                    save_services(conn, expense_id, values["category_id"], *items_of(row))
+                saved += 1
+            for target, adds, vendor, row in merges:
+                changed = db.merge_into_expense(conn, car_id, target, vendor=vendor, **adds)
+                wheels = validation.parse_wheels(row["wheels"])
+                if wheels and db.fill_wheels(conn, car_id, target, wheels):
+                    changed = 1
+                existing = db.get_expense(conn, target)
+                if (row["services"] and existing is not None and existing["category"] == db.SERVICE_CATEGORY
+                        and not db.expense_service_ids(conn, target)):      # blank only, like the rest of a merge
+                    save_services(conn, target, existing["category_id"], *items_of(row))
+                    changed = 1
+                merged += changed
+            for sale in sales:
+                db.set_sale(conn, car_id, sale["sold_at"], sale["sale_price"], sale["sale_km"])
+        log.info("acar import car=%d%s saved=%d merged=%d sale=%d new_items=%d new_category=%s", car_id,
+                 " (made)" if making else "", saved, merged, len(sales), len(created_items), bool(created_category))
+        refresh_dashboard()
+        extra = {"new_car": car_values["name"]} if making else {}
+        if created_items:
+            extra["new_item"] = created_items
+        if created_category:
+            extra["new_category"] = created_category
+        return redirect(url_for("index", msg="imported", n=saved, merged=merged, sale=len(sales), skipped=skipped,
+                                **extra, **{"from": "acar"}), 303)
+
+    @app.get("/api/import-lists")
+    def api_import_lists():
+        """The categories and service items as they are now, so an open import page picks up what was added
+        elsewhere without losing what has been typed on it."""
+        with connect() as conn:
+            return jsonify(categories=[category_json(c) for c in db.categories(conn)],
+                           service_items=[{"id": i["id"], "name": i["name"], "applies": i["applies_to"], "per_wheel": i["per_wheel"]}
+                                          for i in db.service_items(conn)])
+
+    @app.post("/api/categories")
+    def api_categories():
+        """Add a category from an import page's dialog. One that exists (ignoring case) is returned as it is."""
+        body = request.get_json(silent=True)
+        raw = body.get("name") if isinstance(body, dict) else None
+        try:
+            name = validation.parse_category_name(raw if isinstance(raw, str) else "")
+        except ValueError:      # a fixed message: nothing from an exception goes into the response
+            return jsonify(error=f"Enter a category name of up to {validation.MAX_CATEGORY_LEN} characters."), 400
+        with connect() as conn:
+            made = db.add_category(conn, name)
+            wanted = made if made is not None else db.category_id_named(conn, name)
+            row = next(c for c in db.categories(conn) if c["id"] == wanted)
+        if made is None:
+            return jsonify(**category_json(row), existing=True)
+        log.info("category added")
+        refresh_dashboard()
+        return jsonify(**category_json(row)), 201
+
+    def category_json(c):
+        """A category with what an import row's choice needs to know about it (see _category_choice.html)."""
+        return {"id": c["id"], "name": c["name"], "applies": c["applies_to"], "period": bool(c["has_period"]),
+                "service": c["name"] == db.SERVICE_CATEGORY, "wheels": bool(c["per_wheel"]), "litres": bool(c["has_litres"]),
+                "gstfree": bool(c["gst_free"]), "purchase": c["kind"] == "purchase"}
 
     def name_example(values):
         """What an uploaded file would be called under the saved (or just-typed, if valid) settings."""

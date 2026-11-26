@@ -412,7 +412,7 @@ def set_ev_charging_rate(conn, year, cents_per_km, source_url=None, checked_at=N
 
 def categories(conn):
     return conn.execute(
-        "SELECT id, name, kind, upload_folder, budget_pool, gst_free, has_period, applies_to, has_litres FROM garagebooks.category "
+        "SELECT id, name, kind, upload_folder, budget_pool, gst_free, has_period, applies_to, has_litres, per_wheel FROM garagebooks.category "
         "ORDER BY sort_order, name"
     ).fetchall()
 
@@ -440,7 +440,8 @@ SERVICE_CATEGORY = "Service"
 
 
 def service_items(conn):
-    return conn.execute("SELECT id, name, applies_to FROM garagebooks.service_item ORDER BY sort_order, lower(name)").fetchall()
+    return conn.execute("SELECT id, name, applies_to, per_wheel FROM garagebooks.service_item "
+                        "ORDER BY sort_order, lower(name)").fetchall()
 
 
 def service_item(conn, item_id):
@@ -448,13 +449,37 @@ def service_item(conn, item_id):
 
 
 def service_item_named(conn, name):
-    return conn.execute("SELECT id, name FROM garagebooks.service_item WHERE lower(name) = lower(%s)", (name,)).fetchone()
+    return conn.execute("SELECT id, name, per_wheel FROM garagebooks.service_item WHERE lower(name) = lower(%s)",
+                        (name,)).fetchone()
+
+
+def looks_per_wheel(name):
+    """Whether a new item with this name is one that is done wheel by wheel."""
+    text = name.lower()
+    if re.search(r"fluid|alignment|rotation|balanc|pressure|hand ?brake|park(ing)? brake", text):
+        return False
+    return bool(re.search(r"\bbrakes?\b|\bwheel (bearing|repair|stud)s?\b|\bshock|\bstrut", text))
 
 
 def add_service_item(conn, name):
     """The new item, or None if the name exists (ignoring case)."""
-    return conn.execute("INSERT INTO garagebooks.service_item (name) VALUES (%s) ON CONFLICT DO NOTHING "
-                        "RETURNING id, name", (name,)).fetchone()
+    return conn.execute("INSERT INTO garagebooks.service_item (name, per_wheel) VALUES (%s, %s) ON CONFLICT DO NOTHING "
+                        "RETURNING id, name, per_wheel", (name, looks_per_wheel(name))).fetchone()
+
+
+def set_service_items_per_wheel(conn, per_wheel):
+    """{item id: whether it asks which wheels}, each saved."""
+    for item_id, value in per_wheel.items():
+        conn.execute("UPDATE garagebooks.service_item SET per_wheel = %s WHERE id = %s", (value, item_id))
+
+
+def wheels_text(wheels):
+    """['RL', 'RR'] -> 'rear'; four -> 'all four'; anything else wheel by wheel. '' for none."""
+    got = set(wheels or [])
+    for text, group in (("all four", "FL FR RL RR"), ("front", "FL FR"), ("rear", "RL RR"), ("left", "FL RL"), ("right", "FR RR")):
+        if got == set(group.split()):
+            return text
+    return ", ".join(label.lower() for code, label in validation.WHEELS.items() if code in got)
 
 
 def rename_service_items(conn, names):
@@ -478,23 +503,24 @@ def delete_service_item(conn, item_id):
     return conn.execute("DELETE FROM garagebooks.service_item WHERE id = %s", (item_id,)).rowcount == 1
 
 
-def set_expense_services(conn, expense_id, item_ids):
-    """Replace an expense's service items with `item_ids`."""
+def set_expense_services(conn, expense_id, item_ids, wheels=None):
+    """Replace an expense's service items with `item_ids`; `wheels` is {item id: wheels} for per-wheel ones."""
     conn.execute("DELETE FROM garagebooks.expense_service_item WHERE expense_id = %s", (expense_id,))
     for item_id in sorted(set(item_ids)):
-        conn.execute("INSERT INTO garagebooks.expense_service_item (expense_id, item_id) VALUES (%s, %s) "
-                     "ON CONFLICT DO NOTHING", (expense_id, item_id))
+        conn.execute("INSERT INTO garagebooks.expense_service_item (expense_id, item_id, wheels) VALUES (%s, %s, %s) "
+                     "ON CONFLICT DO NOTHING", (expense_id, item_id, (wheels or {}).get(item_id)))
 
 
 def expense_services(conn, expense_ids=None):
     """-> {expense_id: [item names in list order]}, for some expenses or all."""
     got = {}
     for r in conn.execute(
-            "SELECT l.expense_id, i.name FROM garagebooks.expense_service_item l "
+            "SELECT l.expense_id, i.name, l.wheels FROM garagebooks.expense_service_item l "
             "JOIN garagebooks.service_item i ON i.id = l.item_id "
             "WHERE (%(ids)s::bigint[] IS NULL OR l.expense_id = ANY(%(ids)s)) ORDER BY i.sort_order, lower(i.name)",
             {"ids": None if expense_ids is None else list(expense_ids)}):
-        got.setdefault(r["expense_id"], []).append(r["name"])
+        where = wheels_text(r["wheels"])
+        got.setdefault(r["expense_id"], []).append(f"{r['name']} ({where})" if where else r["name"])
     return got
 
 
@@ -506,6 +532,18 @@ def service_category_id(conn):
 def expense_service_ids(conn, expense_id):
     return [r["item_id"] for r in conn.execute(
         "SELECT item_id FROM garagebooks.expense_service_item WHERE expense_id = %s", (expense_id,))]
+
+
+def category_id_named(conn, name):
+    row = conn.execute("SELECT id FROM garagebooks.category WHERE lower(name) = lower(%s)", (name,)).fetchone()
+    return row["id"] if row else None
+
+
+def expense_service_wheels(conn, expense_id):
+    """-> {item id: wheels} for the items of an expense that say which."""
+    return {r["item_id"]: r["wheels"] for r in conn.execute(
+        "SELECT item_id, wheels FROM garagebooks.expense_service_item WHERE expense_id = %s AND wheels IS NOT NULL",
+        (expense_id,))}
 
 
 def add_category(conn, name):
@@ -526,7 +564,7 @@ _SELECT = """
     SELECT e.id, e.car_id, c.name AS car_name, e.category_id, cat.name AS category,
            cat.kind, e.occurred_at, e.amount, e.odometer_km, e.vendor, e.notes,
            e.invoice_url, e.invoice_path, e.packaged, e.period_start, e.period_end,
-           e.gst_amount, e.card_payment_ref, e.bpay_biller_code, e.bpay_ref, cat.has_period, cat.has_litres,
+           e.gst_amount, e.card_payment_ref, e.bpay_biller_code, e.bpay_ref, e.wheels, cat.has_period, cat.has_litres,
            e.litres, e.full_tank, e.missed_fill, e.unit_price, e.latitude, e.longitude, ff.distance_km AS fuel_distance_km, ff.tank_km AS fuel_tank_km,
            ff.tank_litres AS fuel_tank_litres, ff.l_per_100km AS fuel_l_per_100km, ff.price_per_litre,
            c.make AS car_make, c.model AS car_model, cat.budget_pool,
@@ -624,10 +662,10 @@ def get_expense(conn, expense_id):
 _FIELDS = ("car_id", "category_id", "occurred_at", "amount", "odometer_km",
            "vendor", "notes", "invoice_url", "invoice_path", "packaged", "period_start", "period_end",
            "gst_amount", "card_payment_ref", "bpay_biller_code", "bpay_ref", "litres", "full_tank", "missed_fill",
-           "unit_price", "latitude", "longitude")
+           "unit_price", "latitude", "longitude", "wheels")
 
 _DEFAULTS = {"unit_price": None, "latitude": None, "longitude": None, "litres": None, "full_tank": True, "missed_fill": False, "invoice_path": None, "packaged": None, "period_start": None, "period_end": None, "gst_amount": None,
-             "card_payment_ref": None, "bpay_biller_code": None, "bpay_ref": None}
+             "card_payment_ref": None, "bpay_biller_code": None, "bpay_ref": None, "wheels": None}
 
 
 def insert_expense(conn, v):
@@ -712,6 +750,58 @@ def find_duplicates(conn, car_id, occurred_at, amount, window_days=DUPLICATE_WIN
         "AND (%(skip)s::bigint IS NULL OR e.id <> %(skip)s) "
         "ORDER BY abs(extract(epoch FROM e.occurred_at - %(when)s)), e.id LIMIT 5",
         {"car": car_id, "amount": amount, "when": occurred_at, "days": window_days, "skip": exclude_id}).fetchall()
+
+
+def expense_exists(conn, v):
+    """Whether this very expense is saved already: same car, category, moment and amount."""
+    return conn.execute("SELECT 1 FROM garagebooks.expense WHERE car_id = %(car_id)s AND category_id = %(category_id)s "
+                        "AND occurred_at = %(occurred_at)s AND amount = %(amount)s LIMIT 1", v).fetchone() is not None
+
+
+def fill_wheels(conn, car_id, expense_id, wheels):
+    """Say which wheels on an expense of a per-wheel category that doesn't yet. -> how many changed (0 or 1)."""
+    return conn.execute(
+        "UPDATE garagebooks.expense e SET wheels = %(wheels)s, updated_at = now() FROM garagebooks.category k "
+        "WHERE e.id = %(id)s AND e.car_id = %(car)s AND k.id = e.category_id AND k.per_wheel AND e.wheels IS NULL",
+        {"wheels": wheels, "id": expense_id, "car": car_id}).rowcount
+
+
+def merge_into_expense(conn, car_id, expense_id, odometer_km, vendor="", litres=None, unit_price=None,
+                       full_tank=True, missed_fill=False):
+    """Add what an import knows to an expense that is already saved, without changing anything it has: the
+    odometer reading, the vendor, the litres and the price per litre, each only where it is blank. The fuel
+    figures go only on a category that records litres, and "partial" and "missed" only come with the litres
+    (they say nothing without them). Its category, amount, date and invoice stay as they are. Returns how many
+    expenses changed (0 or 1)."""
+    return conn.execute(
+        "UPDATE garagebooks.expense e SET odometer_km = COALESCE(e.odometer_km, %(km)s::numeric), "
+        "vendor = COALESCE(NULLIF(btrim(e.vendor), ''), NULLIF(%(vendor)s, '')), "
+        "litres = COALESCE(e.litres, CASE WHEN k.has_litres THEN %(litres)s::numeric END), "
+        "unit_price = COALESCE(e.unit_price, CASE WHEN k.has_litres THEN %(price)s::numeric END), "
+        "full_tank = CASE WHEN k.has_litres AND e.litres IS NULL AND %(litres)s::numeric IS NOT NULL "
+        "THEN %(full)s ELSE e.full_tank END, "
+        "missed_fill = CASE WHEN k.has_litres AND e.litres IS NULL AND %(litres)s::numeric IS NOT NULL "
+        "THEN %(missed)s ELSE e.missed_fill END, updated_at = now() "
+        "FROM garagebooks.category k WHERE k.id = e.category_id AND e.id = %(id)s AND e.car_id = %(car)s "
+        "AND ((e.odometer_km IS NULL AND %(km)s::numeric IS NOT NULL) "
+        "OR (COALESCE(btrim(e.vendor), '') = '' AND %(vendor)s <> '') "
+        "OR (k.has_litres AND ((e.litres IS NULL AND %(litres)s::numeric IS NOT NULL) "
+        "OR (e.unit_price IS NULL AND %(price)s::numeric IS NOT NULL))))",
+        {"km": odometer_km, "vendor": vendor, "litres": litres, "price": unit_price, "full": full_tank,
+         "missed": missed_fill, "id": expense_id, "car": car_id}).rowcount
+
+
+def attach_invoice(conn, car_id, expense_id, ref_field, ref, odometer_km=None, vendor=""):
+    """Put an invoice file on an expense that is already saved and has none. It never replaces an invoice,
+    and changes nothing else except a blank odometer and a blank vendor, which it fills. `ref_field` is
+    'invoice_url' or 'invoice_path'. Returns how many expenses changed (0 or 1)."""
+    if ref_field not in ("invoice_url", "invoice_path"):
+        raise ValueError(ref_field)
+    return conn.execute(
+        f"UPDATE garagebooks.expense SET {ref_field} = %(ref)s, odometer_km = COALESCE(odometer_km, %(km)s), "
+        "vendor = COALESCE(NULLIF(btrim(vendor), ''), NULLIF(%(vendor)s, '')), updated_at = now() "
+        "WHERE id = %(id)s AND car_id = %(car)s AND invoice_url IS NULL AND invoice_path IS NULL",
+        {"ref": ref, "km": odometer_km, "vendor": vendor, "id": expense_id, "car": car_id}).rowcount
 
 
 def known_invoices(conn, refs):

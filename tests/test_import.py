@@ -387,21 +387,82 @@ def test_the_options_choice_applies_to_the_add_page_prefill(client, admin, monke
 
 # ---- a file that looks like an expense already recorded ----------------------------------
 
-def test_the_preview_flags_a_file_that_looks_like_an_existing_expense(client, admin):
-    existing = admin.execute(
-        "INSERT INTO garagebooks.expense (car_id, category_id, occurred_at, amount, vendor) VALUES (1, %s, '2026-10-23 02:00+00', 1234.50, 'Other') RETURNING id",
-        (cat(admin, "Tyres"),)).fetchone()["id"]
+def seed_expense(admin, invoice=None, odometer=None, vendor="Other", car=1):
+    return admin.execute(
+        "INSERT INTO garagebooks.expense (car_id, category_id, occurred_at, amount, vendor, odometer_km, invoice_url) "
+        "VALUES (%s, %s, '2026-10-23 02:00+00', 1234.50, %s, %s, %s) RETURNING id",
+        (car, cat(admin, "Tyres"), vendor, odometer, invoice)).fetchone()["id"]
+
+
+def tyres_row(page):
+    return page.split('name="include_0"')[1].split("</tr>")[0]
+
+
+def test_the_preview_flags_a_file_that_looks_like_an_expense_that_already_has_an_invoice(client, admin):
+    existing = seed_expense(admin, invoice="https://1drv.ms/b/already")
     page = client.get("/onedrive/import/1?sync=1").data.decode()
-    tyres_row = page.split('name="include_0"')[1].split("</tr>")[0]
-    assert "Possible duplicate" in tyres_row and f"/{existing}/edit" in tyres_row
-    assert " checked>" not in tyres_row                      # left unticked: the owner decides
+    row = tyres_row(page)
+    assert "Possible duplicate" in row and f"/{existing}/edit" in row
+    assert " checked>" not in row and "Attach this invoice to" not in row     # left unticked: the owner decides
     assert page.count("Possible duplicate") == 1             # only the matching file
 
 
-def test_the_per_file_read_flags_it_too(client, admin):
-    admin.execute("INSERT INTO garagebooks.expense (car_id, category_id, occurred_at, amount) VALUES (1, %s, '2026-10-24 02:00+00', 1234.50)",
-                  (cat(admin, "Tyres"),))
-    assert "Possible duplicate" in read(client).data.decode()
+def test_a_matching_expense_with_no_invoice_is_offered_the_file_and_it_is_ticked(client, admin):
+    existing = seed_expense(admin)
+    row = tyres_row(client.get("/onedrive/import/1?sync=1").data.decode())
+    assert f'<option value="{existing}" selected>Attach this invoice to' in row and " checked>" in row
+
+
+def test_the_per_file_read_offers_it_too(client, admin):
+    existing = seed_expense(admin)
+    assert f'<option value="{existing}" selected>Attach this invoice to' in read(client).data.decode()
+
+
+def test_confirming_attaches_the_invoice_and_changes_nothing_else(client, admin):
+    existing = seed_expense(admin)
+    resp = client.post("/onedrive/import/1", data=post_rows(admin, action_1=str(existing)), headers=ORIGIN)
+    assert resp.status_code == 303 and "attached=1" in resp.headers["Location"]
+    got = {r["id"]: r for r in rows(admin)}
+    assert len(got) == 2                                                    # the insurer file is new; the tyres file merged
+    row = got[existing]
+    assert row["invoice_url"] == "https://od.example/P1" and row["vendor"] == "Other"     # a vendor already there stays
+    assert str(row["amount"]) == "1234.50" and row["category_id"] == int(cat(admin, "Tyres"))
+    assert str(row["odometer_km"]) == "45120.0"                             # blank odometer filled from the invoice
+
+
+def test_attaching_keeps_an_odometer_already_there(client, admin):
+    existing = seed_expense(admin, odometer=44000)
+    client.post("/onedrive/import/1", data=post_rows(admin, action_1=str(existing)), headers=ORIGIN)
+    assert [r["odometer_km"] for r in rows(admin) if r["id"] == existing] == [44000]
+
+
+def test_attaching_never_replaces_an_invoice_and_a_double_submit_attaches_once(client, admin):
+    existing = seed_expense(admin)
+    for _ in range(2):
+        client.post("/onedrive/import/1", data=post_rows(admin, action_1=str(existing)), headers=ORIGIN)
+    assert [r["invoice_url"] for r in rows(admin) if r["id"] == existing] == ["https://od.example/P1"]
+    other = seed_expense(admin, invoice="https://1drv.ms/b/mine")
+    client.post("/onedrive/import/1", data=post_rows(admin, action_1=str(other)), headers=ORIGIN)
+    assert [r["invoice_url"] for r in rows(admin) if r["id"] == other] == ["https://1drv.ms/b/mine"]
+
+
+def test_choosing_add_as_new_keeps_both(client, admin):
+    existing = seed_expense(admin)
+    client.post("/onedrive/import/1", data=post_rows(admin, action_1="new"), headers=ORIGIN)
+    assert [r["invoice_url"] for r in rows(admin) if r["id"] == existing] == [None]
+    assert len([r for r in rows(admin) if str(r["amount"]) == "1234.50"]) == 2
+
+
+def test_attaching_to_another_cars_expense_is_refused(client, admin):
+    admin.execute("INSERT INTO garagebooks.car (id, name) VALUES (2, 'Other car')")
+    try:
+        other = seed_expense(admin, car=2)
+        resp = client.post("/onedrive/import/1", data=post_rows(admin, action_1=str(other)), headers=ORIGIN)
+        assert resp.status_code == 400
+        assert [r["invoice_url"] for r in rows(admin) if r["id"] == other] == [None]
+    finally:
+        admin.execute("DELETE FROM garagebooks.expense WHERE car_id = 2")
+        admin.execute("DELETE FROM garagebooks.car WHERE id = 2")
 
 
 def test_sign_in_expiring_before_a_scan_is_explained(client, ms, monkeypatch):
