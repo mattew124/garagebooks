@@ -7,6 +7,10 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+- **Development:** `scripts/sweep.sh` reports, and with `--apply` removes, the worktrees, branches and dangling
+  anonymous Docker volumes that merged work leaves behind. It is a dry run unless `--apply` is given. Nothing for
+  installers to do.
+
 - **aCar fill-ups import their litres and price per litre.** Each fill-up's litres, **$/L**, partial fill and missed
   fuel-up come across, so the list and the **Fuel** dashboard show L/100 km for your history. The preview shows them
   to check. US and UK gallons are converted to litres. Merging into a fuel expense you already have fills in the litres
