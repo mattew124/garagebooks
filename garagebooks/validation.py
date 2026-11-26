@@ -572,7 +572,7 @@ def parse_location(raw):
         return None, None
     message = "Enter the location as latitude, longitude, e.g. -30.123456, 150.654321."
     try:
-        lat, lon = (Decimal(part) for part in re.split(r"\s*,\s*|\s+", cleaned))
+        lat, lon = (Decimal(part) for part in cleaned.replace(",", " ").split())
     except (InvalidOperation, ValueError):
         raise ValueError(message) from None
     if not (lat.is_finite() and lon.is_finite() and abs(lat) <= 90 and abs(lon) <= 180):

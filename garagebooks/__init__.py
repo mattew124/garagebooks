@@ -3457,8 +3457,8 @@ def create_app(connect=None, onedrive_transport=None, release_fetch=None, icon_f
         except ValueError:
             args["amount"] = "0"       # still being typed: the distance can be shown without it
         values, errors = validation.parse_expense_form(args, tz, car_ids, cat_ids)
-        if errors:
-            return jsonify(error=" ".join(errors.values())), 400
+        if errors:      # a fixed message: the form says what is wrong with each field when it is saved
+            return jsonify(error="Check the car, category, date, time, odometer, litres and price per litre."), 400
         expense_id = request.args.get("expense_id", type=int)
         with connect() as conn:
             row = db.fuel_preview(conn, values, expense_id)
