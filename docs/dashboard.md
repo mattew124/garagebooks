@@ -52,7 +52,7 @@ litres, see `garagebooks/schema.sql`), so the figures are the ones the app shows
 | Price per litre, Fuel cost and Litres per week, month or year | each fill-up's pump price where you entered it, else amount ÷ litres; and what you spent and filled |
 | Distance between fill-ups | the distance since the previous fuel-up, partial or not |
 | Fill-ups | each one with litres, price, odometer, distance, L/100 km, and whether it was partial or a fuel-up was missed |
-| Where fuel was bought | a heat map, like TeslaMate's charging heat map, of the fill-ups with a [location](index.md#fuel), weighted by litres, with a dot for each. The map tiles come from Grafana's default basemap, which your browser fetches |
+| Where fuel was bought | a heat map, like TeslaMate's charging heat map, of the fill-ups with a [location](index.md#fuel) (read from the receipt, or entered), weighted by litres, with a dot for each. The map tiles come from Grafana's default basemap, which your browser fetches |
 
 <!-- screenshot: dashboard-fuel - The Fuel dashboard in Grafana, with the stats, L/100 km per fill-up and the fill-ups table -->
 

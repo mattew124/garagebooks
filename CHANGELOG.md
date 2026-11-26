@@ -7,6 +7,10 @@ Each entry says what an installer must do to upgrade. Where nothing is said, pul
 
 ## Unreleased
 
+- **A fuel receipt's address fills in the location.** The station's street and suburb are read off the receipt and
+  looked up on OpenStreetMap, for the fuel heat map; **Use my location** is the fallback. Only that address is sent,
+  only for fuel receipts. Set `ADDRESS_LOOKUP=0` to switch it off.
+
 - **A fuel receipt fills in the expense.** Choosing a scan or PDF of a service station receipt on the Add page
   fills in the date, time, fuel category, brand, amount, litres and price per litre (a scan's litres and price
   only when they multiply out). Litres now come before the odometer, with an optional **$/L** that can
